@@ -1,20 +1,60 @@
+import React, { useEffect, useState } from 'react';
 import { StatusBar } from 'expo-status-bar';
-import { StyleSheet, Text, View } from 'react-native';
+import { NavigationContainer, DefaultTheme } from '@react-navigation/native';
+import { SafeAreaProvider } from 'react-native-safe-area-context';
+import { RootStack } from './src/navigation/RootStack';
+import { colors } from './src/theme';
+import { AuthProvider, useAuth } from './src/auth/AuthContext';
+import { LoginScreen } from './src/screens/LoginScreen';
+import { SignUpScreen } from './src/screens/SignUpScreen';
+import { SplashScreen } from './src/screens/SplashScreen';
+
+const navTheme = {
+  ...DefaultTheme,
+  colors: {
+    ...DefaultTheme.colors,
+    background: colors.background,
+    card: colors.white,
+    primary: colors.navy,
+    text: colors.bodyText,
+    border: colors.divider,
+  },
+};
+
+const SPLASH_DURATION_MS = 1500;
+
+const Gate: React.FC = () => {
+  const { session, loading } = useAuth();
+  const [splashElapsed, setSplashElapsed] = useState(false);
+  const [authView, setAuthView] = useState<'signin' | 'signup'>('signin');
+
+  useEffect(() => {
+    const t = setTimeout(() => setSplashElapsed(true), SPLASH_DURATION_MS);
+    return () => clearTimeout(t);
+  }, []);
+
+  if (loading || !splashElapsed) return <SplashScreen />;
+  if (!session) {
+    return authView === 'signin' ? (
+      <LoginScreen onCreateAccount={() => setAuthView('signup')} />
+    ) : (
+      <SignUpScreen onBackToSignIn={() => setAuthView('signin')} />
+    );
+  }
+  return (
+    <NavigationContainer theme={navTheme}>
+      <RootStack />
+    </NavigationContainer>
+  );
+};
 
 export default function App() {
   return (
-    <View style={styles.container}>
-      <Text>Open up App.tsx to start working on your app!</Text>
-      <StatusBar style="auto" />
-    </View>
+    <SafeAreaProvider>
+      <StatusBar style="light" backgroundColor={colors.navy} translucent={false} />
+      <AuthProvider>
+        <Gate />
+      </AuthProvider>
+    </SafeAreaProvider>
   );
 }
-
-const styles = StyleSheet.create({
-  container: {
-    flex: 1,
-    backgroundColor: '#fff',
-    alignItems: 'center',
-    justifyContent: 'center',
-  },
-});
