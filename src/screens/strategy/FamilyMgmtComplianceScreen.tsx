@@ -13,13 +13,13 @@ import React, { useCallback, useState } from 'react';
 import {
   Alert,
   Linking,
+  Platform,
   ScrollView,
   StyleSheet,
+  Switch,
   Text,
-  TouchableOpacity,
   View,
 } from 'react-native';
-import { Ionicons } from '@expo/vector-icons';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
 import { useFocusEffect } from '@react-navigation/native';
 import * as DocumentPicker from 'expo-document-picker';
@@ -105,11 +105,11 @@ const CHECKLIST: ChecklistDef[] = [
 
 const MONTHS = ['Jan','Feb','Mar','Apr','May','Jun','Jul','Aug','Sep','Oct','Nov','Dec'];
 
-const formatLastConfirmed = (iso: string | null): string => {
-  if (!iso) return 'Not yet confirmed';
+const formatConfirmedDate = (iso: string | null): string | null => {
+  if (!iso) return null;
   const d = new Date(iso);
-  if (Number.isNaN(d.getTime())) return 'Not yet confirmed';
-  return `Last confirmed ${MONTHS[d.getMonth()]} ${d.getDate()}, ${d.getFullYear()}`;
+  if (Number.isNaN(d.getTime())) return null;
+  return `Confirmed ${MONTHS[d.getMonth()]} ${d.getDate()}, ${d.getFullYear()}`;
 };
 
 export const FamilyMgmtComplianceScreen: React.FC = () => {
@@ -292,34 +292,37 @@ export const FamilyMgmtComplianceScreen: React.FC = () => {
       <View style={styles.partCard}>
         <Text style={styles.partTitle}>Ongoing Compliance Checklist</Text>
         <Text style={styles.partSubtitle}>
-          Confirm the following items are current and complete. Review this checklist quarterly.
+          Confirm these items are current each quarter
         </Text>
 
         {CHECKLIST.map((item, idx) => {
           const state = checklistByKey.get(item.key);
           const checked = state?.is_checked ?? false;
+          const confirmedDate = checked
+            ? formatConfirmedDate(state?.last_confirmed_at ?? null)
+            : null;
           return (
-            <TouchableOpacity
+            <View
               key={item.key}
-              activeOpacity={0.85}
-              onPress={() => toggleChecklistItem(item)}
               style={[
                 styles.checkRow,
                 idx < CHECKLIST.length - 1 && styles.checkRowDivider,
               ]}
             >
-              <View style={[styles.checkbox, checked && styles.checkboxOn]}>
-                {checked ? (
-                  <Ionicons name="checkmark" size={14} color={colors.white} />
-                ) : null}
-              </View>
               <View style={styles.checkText}>
                 <Text style={styles.checkLabel}>{item.label}</Text>
-                <Text style={styles.checkMeta}>
-                  {formatLastConfirmed(state?.last_confirmed_at ?? null)}
-                </Text>
+                {confirmedDate ? (
+                  <Text style={styles.checkMeta}>{confirmedDate}</Text>
+                ) : null}
               </View>
-            </TouchableOpacity>
+              <Switch
+                value={checked}
+                onValueChange={() => toggleChecklistItem(item)}
+                trackColor={{ false: '#D1D5DB', true: colors.teal }}
+                thumbColor={Platform.OS === 'android' ? colors.white : undefined}
+                ios_backgroundColor="#D1D5DB"
+              />
+            </View>
           );
         })}
       </View>
@@ -417,34 +420,20 @@ const styles = StyleSheet.create({
     paddingVertical: spacing.md,
   },
   checkRowDivider: {
-    borderBottomWidth: StyleSheet.hairlineWidth,
-    borderBottomColor: colors.divider,
-  },
-  checkbox: {
-    width: 22,
-    height: 22,
-    borderRadius: 4,
-    borderWidth: 1.5,
-    borderColor: '#CCCCCC',
-    backgroundColor: colors.white,
-    alignItems: 'center',
-    justifyContent: 'center',
-  },
-  checkboxOn: {
-    backgroundColor: colors.teal,
-    borderColor: colors.teal,
+    borderBottomWidth: 0.5,
+    borderBottomColor: '#CCCCCC',
   },
   checkText: {
     flex: 1,
   },
   checkLabel: {
-    ...typography.bodyMedium,
-    color: colors.bodyText,
+    color: '#1A1A2E',
     fontSize: 13,
     fontWeight: '500',
+    textAlign: 'left',
+    lineHeight: 18,
   },
   checkMeta: {
-    ...typography.caption,
     color: '#888888',
     fontSize: 11,
     marginTop: 3,
