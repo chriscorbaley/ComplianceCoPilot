@@ -1,7 +1,8 @@
 import React from 'react';
 import { Alert, ScrollView, StyleSheet, Text, TouchableOpacity, View } from 'react-native';
 import { Ionicons } from '@expo/vector-icons';
-import { useRoute, RouteProp } from '@react-navigation/native';
+import { useNavigation, useRoute, RouteProp } from '@react-navigation/native';
+import type { NativeStackNavigationProp } from '@react-navigation/native-stack';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
 import { colors, radius, shadow, spacing, typography } from '../theme';
 import { ProgressBar } from '../components/ProgressBar';
@@ -9,11 +10,19 @@ import { StatusPill } from '../components/StatusPill';
 import type { RootStackParamList } from '../navigation/types';
 
 type RouteProps = RouteProp<RootStackParamList, 'StrategyDetail'>;
+type Nav = NativeStackNavigationProp<RootStackParamList>;
+
+const REAL_ESTATE_STRATEGY_IDS = new Set(['s1', 'real_estate']);
+const isRealEstateStrategy = (id: string, name: string): boolean =>
+  REAL_ESTATE_STRATEGY_IDS.has(id) ||
+  /material participation|real estate/i.test(name);
 
 export const StrategyDetailScreen: React.FC = () => {
   const insets = useSafeAreaInsets();
+  const navigation = useNavigation<Nav>();
   const { params } = useRoute<RouteProps>();
   const { strategy } = params;
+  const showProperties = isRealEstateStrategy(strategy.id, strategy.name);
   const pct = Math.round((strategy.progress / strategy.total) * 100);
   const accent = strategy.accentColor ?? colors.midNavy;
   const remaining = Math.max(0, strategy.total - strategy.progress);
@@ -69,6 +78,26 @@ export const StrategyDetailScreen: React.FC = () => {
           deduction at audit time.
         </Text>
       </View>
+
+      {showProperties ? (
+        <TouchableOpacity
+          activeOpacity={0.85}
+          onPress={() => navigation.navigate('Properties')}
+          style={styles.linkCard}
+        >
+          <View style={[styles.icon, styles.linkIcon]}>
+            <Ionicons name="home-outline" size={20} color={colors.midNavy} />
+          </View>
+          <View style={styles.linkText}>
+            <Text style={styles.linkTitle}>Manage Properties</Text>
+            <Text style={styles.linkBody}>
+              Track per-property hours, grouping elections, and material
+              participation status.
+            </Text>
+          </View>
+          <Ionicons name="chevron-forward" size={20} color={colors.mutedText} />
+        </TouchableOpacity>
+      ) : null}
 
       <View style={styles.actions}>
         <TouchableOpacity
@@ -222,5 +251,33 @@ const styles = StyleSheet.create({
     color: colors.navy,
     fontWeight: '700',
     fontSize: 14,
+  },
+  linkCard: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: spacing.md,
+    backgroundColor: colors.white,
+    borderRadius: radius.card,
+    borderWidth: 0.5,
+    borderColor: colors.cardBorder,
+    padding: spacing.lg,
+    ...shadow.card,
+  },
+  linkIcon: {
+    backgroundColor: colors.lightBlue,
+  },
+  linkText: {
+    flex: 1,
+  },
+  linkTitle: {
+    ...typography.h3,
+    color: colors.bodyText,
+    fontSize: 15,
+  },
+  linkBody: {
+    ...typography.body,
+    color: colors.mutedText,
+    fontSize: 12,
+    marginTop: 2,
   },
 });

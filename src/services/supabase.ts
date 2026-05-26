@@ -20,6 +20,9 @@ export type DayLogJson = Array<{
   description: string;
 }>;
 
+export type SubscriptionTier = 'starter' | 'core' | 'pro';
+export type SubscriptionStatus = 'trial' | 'active' | 'cancelled';
+
 export interface UserRow {
   id: string;
   email: string | null;
@@ -27,11 +30,70 @@ export interface UserRow {
   active_strategies: string[] | null;
   is_admin: boolean;
   created_at: string;
+  subscription_tier: SubscriptionTier | null;
+  subscription_status: SubscriptionStatus | null;
+  subscription_start: string | null;
+  onboarding_completed: boolean;
 }
+
+export interface TosAcceptanceRow {
+  id: string;
+  user_id: string;
+  accepted_at: string;
+  tos_version: string;
+}
+
+export interface PrivacyAcceptanceRow {
+  id: string;
+  user_id: string;
+  accepted_at: string;
+  policy_version: string;
+}
+
+export type EntityType = 'LLC' | 'S-Corp' | 'C-Corp' | 'Sole Proprietor' | 'Trust';
+
+export interface BusinessRow {
+  id: string;
+  user_id: string;
+  business_name: string;
+  entity_type: EntityType | null;
+  ein: string | null;
+  address: string | null;
+  logo_url: string | null;
+  is_default: boolean;
+  created_at: string;
+}
+
+export type BusinessInsert = Omit<BusinessRow, 'id' | 'created_at' | 'is_default'> & {
+  id?: string;
+  created_at?: string;
+  is_default?: boolean;
+};
+
+export type PropertyType = 'residential' | 'commercial' | 'STR' | 'land';
+
+export interface PropertyRow {
+  id: string;
+  user_id: string;
+  business_id: string | null;
+  property_name: string;
+  property_type: PropertyType | null;
+  address: string | null;
+  has_grouping_election: boolean;
+  grouping_group_name: string | null;
+  created_at: string;
+}
+
+export type PropertyInsert = Omit<PropertyRow, 'id' | 'created_at'> & {
+  id?: string;
+  created_at?: string;
+};
 
 export interface HoursLogRow {
   id: string;
   user_id: string;
+  business_id: string | null;
+  property_id: string | null;
   description: string | null;
   category: string | null;
   hours: number | null;
@@ -41,6 +103,8 @@ export interface HoursLogRow {
 
 export interface HoursLogInsert {
   user_id: string;
+  business_id?: string | null;
+  property_id?: string | null;
   description?: string | null;
   category?: string | null;
   hours?: number | null;
@@ -50,6 +114,7 @@ export interface HoursLogInsert {
 export interface BusinessTripRow {
   id: string;
   user_id: string;
+  business_id: string | null;
   trip_type: 'domestic' | 'international' | null;
   destination: string | null;
   countries_visited: string[] | null;
@@ -81,6 +146,7 @@ export type BusinessTripInsert = Omit<BusinessTripRow, 'id' | 'created_at'> & {
 export interface MeetingMinutesRow {
   id: string;
   user_id: string;
+  business_id: string | null;
   meeting_type: string | null;
   location: string | null;
   meeting_date: string | null;
@@ -99,6 +165,7 @@ export type MeetingMinutesInsert = Omit<MeetingMinutesRow, 'id' | 'created_at'> 
 export interface DocumentRow {
   id: string;
   user_id: string;
+  business_id: string | null;
   name: string | null;
   strategy_category: string | null;
   file_url: string | null;
@@ -182,6 +249,26 @@ export interface AnnouncementRow {
   expires_at: string | null;
   published_by: string | null;
 }
+
+export interface CancellationRow {
+  id: string;
+  user_id: string;
+  cancelled_at: string;
+  deletion_scheduled_for: string;
+  signature_1_url: string;
+  signature_2_url: string;
+  document_count_at_cancellation: number;
+  stripe_subscription_id: string | null;
+  is_deleted: boolean;
+  deleted_at: string | null;
+}
+
+export type CancellationInsert = Omit<CancellationRow, 'id' | 'cancelled_at' | 'is_deleted' | 'deleted_at'> & {
+  id?: string;
+  cancelled_at?: string;
+  is_deleted?: boolean;
+  deleted_at?: string | null;
+};
 
 // We don't pass a typed Database<> generic to createClient because the
 // PostgREST type machinery (v2.x) silently collapses to `never` when a

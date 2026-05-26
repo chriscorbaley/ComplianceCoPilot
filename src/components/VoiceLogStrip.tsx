@@ -23,6 +23,8 @@ import {
 } from '../services/openai';
 import { publish } from '../services/voiceInbox';
 import { routeFromClassification } from '../services/openai';
+import { useKeepAwakeWhile } from '../hooks/useKeepAwakeWhile';
+import { KeepAwakeIndicator } from './KeepAwakeIndicator';
 
 type Phase = 'idle' | 'recording' | 'processing';
 
@@ -38,6 +40,8 @@ export const VoiceLogStrip: React.FC<VoiceLogStripProps> = ({
   const [phase, setPhase] = useState<Phase>('idle');
   const recRef = useRef<Audio.Recording | null>(null);
   const pulse = useRef(new Animated.Value(0)).current;
+
+  useKeepAwakeWhile(phase === 'recording', 'voice-strip');
 
   useEffect(() => {
     if (phase !== 'recording') {
@@ -153,13 +157,16 @@ export const VoiceLogStrip: React.FC<VoiceLogStripProps> = ({
           )}
         </Animated.View>
         <View style={styles.text}>
-          <Text style={styles.title} numberOfLines={1}>
-            {phase === 'recording'
-              ? 'Listening…'
-              : phase === 'processing'
-                ? 'Routing your note…'
-                : 'Voice Log'}
-          </Text>
+          <View style={styles.titleRow}>
+            <Text style={styles.title} numberOfLines={1}>
+              {phase === 'recording'
+                ? 'Listening…'
+                : phase === 'processing'
+                  ? 'Routing your note…'
+                  : 'Voice Log'}
+            </Text>
+            <KeepAwakeIndicator visible={phase === 'recording'} />
+          </View>
           <Text style={styles.hint} numberOfLines={1}>
             {phase === 'recording'
               ? 'Tap to stop and route'
@@ -205,6 +212,11 @@ const styles = StyleSheet.create({
   },
   text: {
     flex: 1,
+  },
+  titleRow: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: spacing.sm,
   },
   title: {
     ...typography.bodyMedium,

@@ -61,6 +61,24 @@ export const SettingsScreen: React.FC = () => {
           </View>
         </View>
 
+        <View style={styles.section}>
+          <Text style={styles.sectionLabel}>Businesses</Text>
+          <TouchableOpacity
+            activeOpacity={0.85}
+            style={styles.card}
+            onPress={() => navigation.navigate('Businesses')}
+          >
+            <View style={styles.row}>
+              <Ionicons name="business-outline" size={20} color={colors.midNavy} />
+              <View style={styles.rowText}>
+                <Text style={styles.rowLabel}>Manage businesses</Text>
+                <Text style={styles.rowValue}>Add, edit, or set a default</Text>
+              </View>
+              <Ionicons name="chevron-forward" size={18} color={colors.subtleText} />
+            </View>
+          </TouchableOpacity>
+        </View>
+
         <TouchableOpacity
           activeOpacity={0.85}
           onPress={confirmLogout}
@@ -76,6 +94,18 @@ export const SettingsScreen: React.FC = () => {
             </>
           )}
         </TouchableOpacity>
+
+        <View style={styles.dangerSection}>
+          <Text style={styles.dangerLabel}>Subscription</Text>
+          <TouchableOpacity
+            activeOpacity={0.85}
+            onPress={() => navigation.navigate('CancelWarning1')}
+            style={styles.cancelSubBtn}
+          >
+            <Ionicons name="close-circle-outline" size={18} color="#C0392B" />
+            <Text style={styles.cancelSubText}>Cancel Subscription</Text>
+          </TouchableOpacity>
+        </View>
       </ScrollView>
     </View>
   );
@@ -135,6 +165,32 @@ const styles = StyleSheet.create({
   logoutBtnDim: { opacity: 0.7 },
   logoutText: {
     color: colors.white,
+    fontSize: 14,
+    fontWeight: '700',
+  },
+  dangerSection: {
+    gap: spacing.sm,
+    marginTop: spacing.xl,
+  },
+  dangerLabel: {
+    ...typography.micro,
+    color: colors.mutedText,
+    textTransform: 'uppercase',
+    letterSpacing: 0.6,
+  },
+  cancelSubBtn: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    justifyContent: 'center',
+    gap: spacing.sm,
+    backgroundColor: colors.white,
+    borderRadius: 8,
+    paddingVertical: 14,
+    borderWidth: 1,
+    borderColor: '#C0392B',
+  },
+  cancelSubText: {
+    color: '#C0392B',
     fontSize: 14,
     fontWeight: '700',
   },

@@ -2,6 +2,7 @@ import React, { useMemo, useState } from 'react';
 import {
   ActivityIndicator,
   Alert,
+  Image,
   Modal,
   Platform,
   Pressable,
@@ -19,6 +20,8 @@ import * as FileSystem from 'expo-file-system/legacy';
 import * as Print from 'expo-print';
 import { colors, spacing, typography } from '../theme';
 import type { RootStackParamList } from '../navigation/types';
+import { useBusiness } from '../business/BusinessContext';
+import type { BusinessRow } from '../services/supabase';
 
 type Route = RouteProp<RootStackParamList, 'MinutesDocument'>;
 
@@ -96,11 +99,37 @@ const escapeHtml = (s: string): string =>
     .replace(/"/g, '&quot;')
     .replace(/'/g, '&#39;');
 
+// Header block rendered above the meeting details on every printed minutes
+// PDF. Pulls the active business name, entity, address, and logo so that an
+// auditor sees who the document belongs to. Returns empty string when no
+// business is active so the document still renders cleanly.
+const buildBusinessHeaderHtml = (business: BusinessRow | null): string => {
+  if (!business) return '';
+  const lines = [
+    business.entity_type ? escapeHtml(business.entity_type) : '',
+    business.address ? escapeHtml(business.address) : '',
+  ]
+    .filter(Boolean)
+    .join(' · ');
+  const logoImg = business.logo_url
+    ? `<img src="${escapeHtml(business.logo_url)}" class="bizLogo" />`
+    : '';
+  return `
+  <div class="bizHdr">
+    ${logoImg}
+    <div class="bizText">
+      <div class="bizName">${escapeHtml(business.business_name)}</div>
+      ${lines ? `<div class="bizMeta">${lines}</div>` : ''}
+    </div>
+  </div>`;
+};
+
 const buildHtmlForPdf = (
   document: string,
   meetingType: string,
   meetingDate: string,
   location: string,
+  business: BusinessRow | null,
 ): string => {
   const lines = document.split(/\r?\n/);
   const body = lines
@@ -130,6 +159,10 @@ const buildHtmlForPdf = (
 <style>
   @page { margin: 48px; }
   body { font-family: -apple-system, Helvetica, Arial, sans-serif; color: #1A1A2E; font-size: 12pt; line-height: 1.5; }
+  .bizHdr { display: flex; align-items: center; gap: 12px; padding-bottom: 10px; margin-bottom: 12px; border-bottom: 1px solid #E5E7EB; }
+  .bizHdr .bizLogo { width: 48px; height: 48px; object-fit: contain; }
+  .bizHdr .bizName { font-weight: 700; font-size: 13pt; color: #042C53; }
+  .bizHdr .bizMeta { color: #6B7280; font-size: 10pt; margin-top: 2px; }
   .hdr { border-bottom: 2px solid #042C53; padding-bottom: 12px; margin-bottom: 20px; }
   .hdr h1 { color: #042C53; margin: 0 0 6px 0; font-size: 20pt; }
   .hdr .meta { color: #6B7280; font-size: 10.5pt; }
@@ -142,6 +175,7 @@ const buildHtmlForPdf = (
   .foot { margin-top: 32px; color: #6B7280; font-size: 9pt; border-top: 1px solid #E5E7EB; padding-top: 8px; }
 </style></head>
 <body>
+  ${buildBusinessHeaderHtml(business)}
   <div class="hdr">
     <h1>Meeting Minutes</h1>
     <div class="meta">${escapeHtml(meetingType)} · ${escapeHtml(meetingDate)} · ${escapeHtml(location)}</div>
@@ -156,6 +190,7 @@ export const MinutesDocumentScreen: React.FC = () => {
   const navigation = useNavigation();
   const { params } = useRoute<Route>();
   const { document, meetingType, meetingDate, location } = params;
+  const { activeBusiness } = useBusiness();
 
   const [shareOpen, setShareOpen] = useState(false);
   const [sharing, setSharing] = useState(false);
@@ -175,7 +210,16 @@ export const MinutesDocumentScreen: React.FC = () => {
       const dir = FileSystem.cacheDirectory;
       if (!dir) throw new Error('No cache directory available');
       const uri = `${dir}${filenameBase}.txt`;
-      const header = `MEETING MINUTES\n${meetingType}\n${meetingDate} · ${location}\n\n`;
+      const bizLines = activeBusiness
+        ? [
+            activeBusiness.business_name,
+            [activeBusiness.entity_type, activeBusiness.address].filter(Boolean).join(' · '),
+            '',
+          ]
+            .filter((l) => l !== undefined)
+            .join('\n')
+        : '';
+      const header = `${bizLines}MEETING MINUTES\n${meetingType}\n${meetingDate} · ${location}\n\n`;
       await FileSystem.writeAsStringAsync(uri, header + document, {
         encoding: FileSystem.EncodingType.UTF8,
       });
@@ -200,7 +244,7 @@ export const MinutesDocumentScreen: React.FC = () => {
         Alert.alert('Sharing not available', 'This device cannot share files.');
         return;
       }
-      const html = buildHtmlForPdf(document, meetingType, meetingDate, location);
+      const html = buildHtmlForPdf(document, meetingType, meetingDate, location, activeBusiness);
       const { uri } = await Print.printToFileAsync({ html });
       // Rename the PDF so the share sheet shows a friendly name.
       const dir = FileSystem.cacheDirectory;
@@ -272,6 +316,27 @@ export const MinutesDocumentScreen: React.FC = () => {
         ]}
         showsVerticalScrollIndicator
       >
+        {activeBusiness ? (
+          <View style={styles.bizHeaderBlock}>
+            {activeBusiness.logo_url ? (
+              <Image
+                source={{ uri: activeBusiness.logo_url }}
+                style={styles.bizHeaderLogo}
+                resizeMode="contain"
+              />
+            ) : null}
+            <View style={styles.bizHeaderText}>
+              <Text style={styles.bizHeaderName}>{activeBusiness.business_name}</Text>
+              {activeBusiness.entity_type || activeBusiness.address ? (
+                <Text style={styles.bizHeaderMeta}>
+                  {[activeBusiness.entity_type, activeBusiness.address]
+                    .filter(Boolean)
+                    .join(' · ')}
+                </Text>
+              ) : null}
+            </View>
+          </View>
+        ) : null}
         <View style={styles.headerBlock}>
           <Text style={styles.docTitle}>Meeting Minutes</Text>
           <Text style={styles.docMeta}>
@@ -367,6 +432,32 @@ const styles = StyleSheet.create({
   content: {
     paddingHorizontal: spacing.xl,
     paddingTop: spacing.lg,
+  },
+  bizHeaderBlock: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: spacing.md,
+    paddingBottom: spacing.sm,
+    marginBottom: spacing.md,
+    borderBottomWidth: StyleSheet.hairlineWidth,
+    borderBottomColor: colors.divider,
+  },
+  bizHeaderLogo: {
+    width: 44,
+    height: 44,
+    borderRadius: 4,
+  },
+  bizHeaderText: {
+    flex: 1,
+  },
+  bizHeaderName: {
+    ...typography.h3,
+    color: colors.navy,
+  },
+  bizHeaderMeta: {
+    ...typography.caption,
+    color: colors.mutedText,
+    marginTop: 2,
   },
   headerBlock: {
     borderBottomWidth: 2,

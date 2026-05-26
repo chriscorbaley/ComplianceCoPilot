@@ -1,8 +1,9 @@
 import React, { useCallback, useEffect, useState } from 'react';
-import { ScrollView, StyleSheet, View } from 'react-native';
+import { Pressable, ScrollView, StyleSheet, Text, View } from 'react-native';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
 import { useFocusEffect, useNavigation, CommonActions } from '@react-navigation/native';
 import type { NativeStackNavigationProp } from '@react-navigation/native-stack';
+import { Ionicons } from '@expo/vector-icons';
 import { colors, spacing } from '../theme';
 import { Header } from '../components/Header';
 import { AlertBanner } from '../components/AlertBanner';
@@ -13,17 +14,31 @@ import { DocumentItem, DocumentRow } from '../components/DocumentItem';
 import { SectionHeader } from '../components/SectionHeader';
 import { VoiceLogStrip } from '../components/VoiceLogStrip';
 import { Card } from '../components/Card';
+import { LockedStrategySheet } from '../components/LockedStrategySheet';
+import { useStrategyAccess, DASHBOARD_STRATEGY_KEYS } from '../hooks/useStrategyAccess';
 import type { RootStackParamList } from '../navigation/types';
 import {
   supabase,
   type AnnouncementRow,
   type DocumentRow as DbDocumentRow,
+  type HoursLogRow,
+  type PropertyRow,
 } from '../services/supabase';
+import { useBusiness } from '../business/BusinessContext';
 import {
   loadComplianceRules,
   subscribeToRules,
   type ComplianceRules,
 } from '../services/complianceRules';
+import { findShortfalls, type PropertyShortfall } from '../services/properties';
+import {
+  listAllStrategyDocuments,
+  type StrategyDocumentRow,
+} from '../services/strategyDocuments';
+import {
+  STRATEGY_COMPLIANCE_SLOTS,
+  STRATEGY_COMPLIANCE_ROUTE,
+} from '../services/strategyComplianceSlots';
 
 type DashboardNavigationProp = NativeStackNavigationProp<RootStackParamList>;
 
@@ -53,6 +68,9 @@ interface DashboardData {
   recentDocs: DocumentRow[];
   augustaMax: number;
   hoursRequired: number;
+  properties: PropertyRow[];
+  yearHours: HoursLogRow[];
+  complianceDocs: StrategyDocumentRow[];
 }
 
 const EMPTY_DATA: DashboardData = {
@@ -63,7 +81,18 @@ const EMPTY_DATA: DashboardData = {
   recentDocs: [],
   augustaMax: 14,
   hoursRequired: 750,
+  properties: [],
+  yearHours: [],
+  complianceDocs: [],
 };
+
+interface ComplianceCard {
+  strategyKey: string;
+  title: string;
+  icon: keyof typeof Ionicons.glyphMap;
+  completed: number;
+  total: number;
+}
 
 const ruleNumber = (rules: ComplianceRules | null, strategy: string, key: string, fallback: number): number => {
   const row = rules?.rawDb.find((r) => r.strategy_name === strategy && r.rule_key === key);
@@ -80,10 +109,13 @@ const isAnnouncementActive = (row: AnnouncementRow): boolean => {
 export const DashboardScreen: React.FC = () => {
   const insets = useSafeAreaInsets();
   const navigation = useNavigation<DashboardNavigationProp>();
+  const { activeBusinessId } = useBusiness();
   const [data, setData] = useState<DashboardData>(EMPTY_DATA);
   const [rules, setRules] = useState<ComplianceRules | null>(null);
   const [announcement, setAnnouncement] = useState<AnnouncementRow | null>(null);
   const [dismissedIds, setDismissedIds] = useState<Set<string>>(() => new Set());
+  const access = useStrategyAccess();
+  const [lockedSheet, setLockedSheet] = useState<{ key: string; name: string; description: string } | null>(null);
 
   const loadLatestAnnouncement = useCallback(async () => {
     const { data: rows } = await supabase
@@ -118,39 +150,61 @@ export const DashboardScreen: React.FC = () => {
   const refresh = useCallback(async () => {
     const yearStart = `${new Date().getFullYear()}-01-01`;
     const yearEnd = `${new Date().getFullYear()}-12-31`;
+    const scope = activeBusinessId;
 
-    const [hoursRes, augustaRes, tripsRes, docsCountRes, recentDocsRes] = await Promise.all([
-      supabase
-        .from('hours_log')
-        .select('hours')
-        .gte('activity_date', yearStart)
-        .lte('activity_date', yearEnd),
-      supabase
-        .from('meeting_minutes')
-        .select('id, meeting_date', { count: 'exact' })
-        .ilike('meeting_type', 'Augusta%')
-        .gte('meeting_date', yearStart)
-        .lte('meeting_date', yearEnd),
-      supabase
-        .from('business_trips')
-        .select('id', { count: 'exact', head: true })
-        .gte('departure_date', yearStart)
-        .lte('departure_date', yearEnd),
-      supabase
-        .from('documents')
-        .select('id', { count: 'exact', head: true }),
-      supabase
-        .from('documents')
-        .select('*')
-        .order('created_at', { ascending: false })
-        .limit(3),
-    ]);
+    let hoursQ = supabase
+      .from('hours_log')
+      .select('*')
+      .gte('activity_date', yearStart)
+      .lte('activity_date', yearEnd);
+    if (scope) hoursQ = hoursQ.eq('business_id', scope);
 
-    const hoursYTD = (hoursRes.data ?? []).reduce((sum, r) => sum + (Number(r.hours) || 0), 0);
+    let propertiesQ = supabase.from('properties').select('*');
+    if (scope) propertiesQ = propertiesQ.eq('business_id', scope);
+
+    let augustaQ = supabase
+      .from('meeting_minutes')
+      .select('id, meeting_date', { count: 'exact' })
+      .ilike('meeting_type', 'Augusta%')
+      .gte('meeting_date', yearStart)
+      .lte('meeting_date', yearEnd);
+    if (scope) augustaQ = augustaQ.eq('business_id', scope);
+
+    let tripsQ = supabase
+      .from('business_trips')
+      .select('id', { count: 'exact', head: true })
+      .gte('departure_date', yearStart)
+      .lte('departure_date', yearEnd);
+    if (scope) tripsQ = tripsQ.eq('business_id', scope);
+
+    let docsCountQ = supabase.from('documents').select('id', { count: 'exact', head: true });
+    if (scope) docsCountQ = docsCountQ.eq('business_id', scope);
+
+    let recentDocsQ = supabase
+      .from('documents')
+      .select('*')
+      .order('created_at', { ascending: false })
+      .limit(3);
+    if (scope) recentDocsQ = recentDocsQ.eq('business_id', scope);
+
+    const [hoursRes, augustaRes, tripsRes, docsCountRes, recentDocsRes, propertiesRes, complianceDocs] =
+      await Promise.all([
+        hoursQ,
+        augustaQ,
+        tripsQ,
+        docsCountQ,
+        recentDocsQ,
+        propertiesQ,
+        listAllStrategyDocuments(scope).catch(() => [] as StrategyDocumentRow[]),
+      ]);
+
+    const yearHours = (hoursRes.data ?? []) as HoursLogRow[];
+    const hoursYTD = yearHours.reduce((sum, r) => sum + (Number(r.hours) || 0), 0);
     const augustaDays = augustaRes.count ?? (augustaRes.data?.length ?? 0);
     const tripsThisYear = tripsRes.count ?? 0;
     const docsCount = docsCountRes.count ?? 0;
     const recentDocs = ((recentDocsRes.data ?? []) as DbDocumentRow[]).map(docRowToCard);
+    const properties = (propertiesRes.data ?? []) as PropertyRow[];
 
     setData((prev) => ({
       ...prev,
@@ -159,8 +213,11 @@ export const DashboardScreen: React.FC = () => {
       tripsThisYear,
       docsCount,
       recentDocs,
+      properties,
+      yearHours,
+      complianceDocs,
     }));
-  }, []);
+  }, [activeBusinessId]);
 
   useFocusEffect(
     useCallback(() => {
@@ -215,9 +272,60 @@ export const DashboardScreen: React.FC = () => {
     },
   ];
 
+  const complianceCardDefs: Pick<ComplianceCard, 'strategyKey' | 'title' | 'icon'>[] = [
+    { strategyKey: 's_corp', title: 'S-Corp', icon: 'business-outline' },
+    { strategyKey: 'home_office', title: 'Home Office', icon: 'home-outline' },
+    { strategyKey: 'family_management', title: 'Family Mgmt', icon: 'people-outline' },
+  ];
+  const complianceCards: ComplianceCard[] = complianceCardDefs.map((c) => {
+    const slots = STRATEGY_COMPLIANCE_SLOTS[c.strategyKey] ?? [];
+    const rows = data.complianceDocs.filter(
+      (r) => r.strategy_key === c.strategyKey && r.file_url,
+    );
+    const satisfied = new Set(rows.map((r) => r.document_key));
+    // Home Office residence: lease satisfies the closing-disclosure slot.
+    if (c.strategyKey === 'home_office' && satisfied.has('lease_agreement')) {
+      satisfied.add('closing_disclosure');
+    }
+    const completed = slots.reduce((n, s) => n + (satisfied.has(s.key) ? 1 : 0), 0);
+    return { ...c, completed, total: slots.length };
+  });
+
   const hoursPct = Math.min(100, Math.round((data.hoursYTD / Math.max(1, hoursRequired)) * 100));
   const augustaPct = Math.min(100, Math.round((data.augustaDays / Math.max(1, augustaMax)) * 100));
   const hoursRemaining = Math.max(0, hoursRequired - Math.round(data.hoursYTD));
+
+  // Per-property warnings: any ungrouped property (or grouping-election group)
+  // that is behind on the material participation threshold. This fires
+  // independently of the overall hoursYTD-vs-threshold check so a user with
+  // many small properties cannot hide one that is way behind.
+  const propertyShortfalls: PropertyShortfall[] = findShortfalls(
+    data.properties,
+    data.yearHours,
+    hoursRequired,
+  );
+  const worstShortfall: PropertyShortfall | null =
+    propertyShortfalls.length > 0
+      ? propertyShortfalls.reduce((worst, s) => (s.hours < worst.hours ? s : worst))
+      : null;
+  const propertyAlertTitle = worstShortfall
+    ? `Warning: ${
+        worstShortfall.groupName
+          ? `${worstShortfall.groupName} group`
+          : worstShortfall.property.property_name
+      } has only ${worstShortfall.hours.toFixed(0)} hours`
+    : null;
+  const propertyAlertDetail = worstShortfall
+    ? `Needs ${hoursRequired} to meet material participation${
+        worstShortfall.groupName ? ' as a group' : ' individually'
+      }${
+        propertyShortfalls.length > 1
+          ? ` · ${propertyShortfalls.length - 1} more ${
+              propertyShortfalls.length - 1 === 1 ? 'property' : 'properties'
+            } behind`
+          : ''
+      }.`
+    : null;
 
   return (
     <View style={styles.root}>
@@ -244,6 +352,14 @@ export const DashboardScreen: React.FC = () => {
         ]}
         showsVerticalScrollIndicator={false}
       >
+        {propertyAlertTitle && propertyAlertDetail ? (
+          <AlertBanner
+            title={propertyAlertTitle}
+            detail={propertyAlertDetail}
+            onPress={() => navigation.navigate('Properties')}
+          />
+        ) : null}
+
         <AlertBanner
           title={
             hoursRemaining === 0
@@ -300,24 +416,81 @@ export const DashboardScreen: React.FC = () => {
         <View style={styles.section}>
           <SectionHeader title="Strategies" action="View all" />
           <View style={styles.strategyList}>
-            {strategies.map((s) => (
-              <StrategyCard
-                key={s.id}
-                strategy={s}
-                onPress={() => {
-                  if (s.id === BUSINESS_TRAVEL_STRATEGY_ID) {
-                    navigation.dispatch(
-                      CommonActions.navigate({
-                        name: 'Tabs',
-                        params: { screen: 'Trips' },
-                      }),
-                    );
-                    return;
+            {strategies.map((s) => {
+              const stratKey = DASHBOARD_STRATEGY_KEYS[s.id];
+              const locked = stratKey ? !access.hasStrategy(stratKey) : false;
+              const onCardPress = () => {
+                if (locked && stratKey) {
+                  setLockedSheet({ key: stratKey, name: s.name, description: s.description });
+                  return;
+                }
+                if (s.id === BUSINESS_TRAVEL_STRATEGY_ID) {
+                  navigation.dispatch(
+                    CommonActions.navigate({
+                      name: 'Tabs',
+                      params: { screen: 'Trips' },
+                    }),
+                  );
+                  return;
+                }
+                navigation.navigate('StrategyDetail', { strategy: s });
+              };
+              if (locked) {
+                return (
+                  <Pressable key={s.id} onPress={onCardPress} style={styles.lockedWrap}>
+                    <View pointerEvents="none" style={styles.lockedInner}>
+                      <StrategyCard strategy={s} />
+                    </View>
+                    <View style={styles.lockedBadge}>
+                      <Ionicons name="lock-closed" size={16} color={colors.amber} />
+                    </View>
+                  </Pressable>
+                );
+              }
+              return <StrategyCard key={s.id} strategy={s} onPress={onCardPress} />;
+            })}
+          </View>
+        </View>
+
+        <View style={styles.section}>
+          <SectionHeader title="Compliance Documents" />
+          <View style={styles.complianceList}>
+            {complianceCards.map((card) => {
+              const pct = card.total === 0 ? 0 : Math.round((card.completed / card.total) * 100);
+              const done = card.completed === card.total && card.total > 0;
+              return (
+                <Pressable
+                  key={card.strategyKey}
+                  onPress={() =>
+                    navigation.navigate(STRATEGY_COMPLIANCE_ROUTE[card.strategyKey] as never)
                   }
-                  navigation.navigate('StrategyDetail', { strategy: s });
-                }}
-              />
-            ))}
+                  style={({ pressed }) => [
+                    styles.complianceCard,
+                    pressed && { opacity: 0.85 },
+                  ]}
+                >
+                  <View style={[styles.complianceIcon, { backgroundColor: done ? colors.tealLight : colors.lightBlue }]}>
+                    <Ionicons
+                      name={card.icon}
+                      size={18}
+                      color={done ? colors.teal : colors.midNavy}
+                    />
+                  </View>
+                  <View style={styles.complianceText}>
+                    <Text style={styles.complianceTitle}>{card.title}</Text>
+                    <Text style={styles.complianceMeta}>
+                      {card.completed} of {card.total} documents
+                    </Text>
+                  </View>
+                  <View style={styles.compliancePctWrap}>
+                    <Text style={[styles.compliancePct, { color: done ? colors.teal : colors.midNavy }]}>
+                      {pct}%
+                    </Text>
+                    <Ionicons name="chevron-forward" size={16} color={colors.mutedText} />
+                  </View>
+                </Pressable>
+              );
+            })}
           </View>
         </View>
 
@@ -346,6 +519,14 @@ export const DashboardScreen: React.FC = () => {
       <View style={styles.voiceWrap}>
         <VoiceLogStrip />
       </View>
+
+      <LockedStrategySheet
+        visible={lockedSheet !== null}
+        title={lockedSheet?.name ?? ''}
+        description={lockedSheet?.description ?? ''}
+        requiredTier={access.requiredTierFor(lockedSheet?.key ?? '')}
+        onClose={() => setLockedSheet(null)}
+      />
     </View>
   );
 };
@@ -383,5 +564,65 @@ const styles = StyleSheet.create({
     left: 0,
     right: 0,
     bottom: 0,
+  },
+  lockedWrap: {
+    position: 'relative',
+  },
+  lockedInner: {
+    opacity: 0.5,
+  },
+  lockedBadge: {
+    position: 'absolute',
+    top: 12,
+    right: 12,
+    width: 28,
+    height: 28,
+    borderRadius: 14,
+    backgroundColor: 'rgba(186,117,23,0.18)',
+    alignItems: 'center',
+    justifyContent: 'center',
+  },
+  complianceList: {
+    gap: spacing.sm,
+  },
+  complianceCard: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: spacing.md,
+    backgroundColor: colors.white,
+    borderRadius: 12,
+    borderWidth: 0.5,
+    borderColor: colors.cardBorder,
+    paddingVertical: spacing.md,
+    paddingHorizontal: spacing.lg,
+  },
+  complianceIcon: {
+    width: 36,
+    height: 36,
+    borderRadius: 10,
+    alignItems: 'center',
+    justifyContent: 'center',
+  },
+  complianceText: {
+    flex: 1,
+  },
+  complianceTitle: {
+    color: colors.bodyText,
+    fontSize: 14,
+    fontWeight: '700',
+  },
+  complianceMeta: {
+    color: colors.mutedText,
+    fontSize: 12,
+    marginTop: 2,
+  },
+  compliancePctWrap: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: 4,
+  },
+  compliancePct: {
+    fontSize: 13,
+    fontWeight: '700',
   },
 });

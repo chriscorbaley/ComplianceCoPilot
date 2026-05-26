@@ -52,6 +52,9 @@ import {
   requireUserId,
   type BusinessTripRow,
 } from '../services/supabase';
+import { useBusiness } from '../business/BusinessContext';
+import { useKeepAwakeWhile } from '../hooks/useKeepAwakeWhile';
+import { KeepAwakeIndicator } from '../components/KeepAwakeIndicator';
 
 type TabKey = 'analyzer' | 'log' | 'history' | 'rules';
 
@@ -151,18 +154,22 @@ export const BusinessTravelScreen: React.FC = () => {
       .catch((e: Error) => setRulesError(e.message));
   }, []);
 
+  const { activeBusinessId } = useBusiness();
+
   const loadTrips = React.useCallback(async () => {
     try {
-      const { data, error } = await supabase
+      let query = supabase
         .from('business_trips')
         .select('*')
         .order('departure_date', { ascending: false, nullsFirst: false });
+      if (activeBusinessId) query = query.eq('business_id', activeBusinessId);
+      const { data, error } = await query;
       if (error) throw error;
       setTrips(((data ?? []) as BusinessTripRow[]).map(tripRowToEntry));
     } catch (e) {
       Alert.alert('Could not load trips', e instanceof Error ? e.message : String(e));
     }
-  }, []);
+  }, [activeBusinessId]);
 
   useFocusEffect(
     React.useCallback(() => {
@@ -244,6 +251,7 @@ const AnalyzerTab: React.FC<AnalyzerTabProps> = ({ rules, insets }) => {
   const [recording, setRecording] = useState<Audio.Recording | null>(null);
   const [isRecording, setIsRecording] = useState(false);
   const [transcribing, setTranscribing] = useState(false);
+  useKeepAwakeWhile(isRecording, 'travel-analyzer');
   const [transcript, setTranscript] = useState('');
   const [analyzing, setAnalyzing] = useState(false);
   const [analyzeError, setAnalyzeError] = useState<string | null>(null);
@@ -481,13 +489,16 @@ const AnalyzerTab: React.FC<AnalyzerTabProps> = ({ rules, insets }) => {
             </Animated.View>
           </TouchableOpacity>
           <View style={styles.micText}>
-            <Text style={styles.micTitle}>
-              {isRecording
-                ? 'Listening…'
-                : transcribing
-                  ? 'Transcribing…'
-                  : 'Tap to record'}
-            </Text>
+            <View style={styles.micTitleRow}>
+              <Text style={styles.micTitle}>
+                {isRecording
+                  ? 'Listening…'
+                  : transcribing
+                    ? 'Transcribing…'
+                    : 'Tap to record'}
+              </Text>
+              <KeepAwakeIndicator visible={isRecording} />
+            </View>
             <Text style={styles.micHint}>
               {isRecording
                 ? 'Tap again to stop'
@@ -756,6 +767,7 @@ interface LogTripTabProps {
 }
 
 const LogTripTab: React.FC<LogTripTabProps> = ({ rules, insets, onSaved }) => {
+  const { activeBusinessId } = useBusiness();
   const [tripType, setTripType] = useState<TripType>('domestic');
   const [destination, setDestination] = useState('');
   const [departure, setDeparture] = useState('');
@@ -827,6 +839,7 @@ const LogTripTab: React.FC<LogTripTabProps> = ({ rules, insets, onSaved }) => {
       const userId = await requireUserId();
       const { error } = await supabase.from('business_trips').insert({
         user_id: userId,
+        business_id: activeBusinessId,
         trip_type: tripType,
         destination,
         countries_visited: countries
@@ -1384,6 +1397,11 @@ const styles = StyleSheet.create({
     backgroundColor: '#E0352B',
   },
   micText: { flex: 1 },
+  micTitleRow: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: spacing.sm,
+  },
   micTitle: {
     ...typography.bodyMedium,
     color: colors.bodyText,

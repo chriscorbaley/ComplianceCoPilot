@@ -3,8 +3,10 @@ import { StatusBar } from 'expo-status-bar';
 import { NavigationContainer, DefaultTheme } from '@react-navigation/native';
 import { SafeAreaProvider } from 'react-native-safe-area-context';
 import { RootStack } from './src/navigation/RootStack';
+import { OnboardingStack } from './src/navigation/OnboardingStack';
 import { colors } from './src/theme';
 import { AuthProvider, useAuth } from './src/auth/AuthContext';
+import { BusinessProvider } from './src/business/BusinessContext';
 import { LoginScreen } from './src/screens/LoginScreen';
 import { SignUpScreen } from './src/screens/SignUpScreen';
 import { SplashScreen } from './src/screens/SplashScreen';
@@ -24,7 +26,7 @@ const navTheme = {
 const SPLASH_DURATION_MS = 1500;
 
 const Gate: React.FC = () => {
-  const { session, loading } = useAuth();
+  const { session, loading, onboardingCompleted, isAdmin } = useAuth();
   const [splashElapsed, setSplashElapsed] = useState(false);
   const [authView, setAuthView] = useState<'signin' | 'signup'>('signin');
 
@@ -41,10 +43,19 @@ const Gate: React.FC = () => {
       <SignUpScreen onBackToSignIn={() => setAuthView('signin')} />
     );
   }
+  if (!onboardingCompleted && !isAdmin) {
+    return (
+      <NavigationContainer theme={navTheme}>
+        <OnboardingStack />
+      </NavigationContainer>
+    );
+  }
   return (
-    <NavigationContainer theme={navTheme}>
-      <RootStack />
-    </NavigationContainer>
+    <BusinessProvider>
+      <NavigationContainer theme={navTheme}>
+        <RootStack />
+      </NavigationContainer>
+    </BusinessProvider>
   );
 };
 

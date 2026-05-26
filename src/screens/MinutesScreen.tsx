@@ -41,6 +41,11 @@ import {
   requireUserId,
   type MeetingMinutesRow,
 } from '../services/supabase';
+import { useBusiness } from '../business/BusinessContext';
+import { useKeepAwakeWhile } from '../hooks/useKeepAwakeWhile';
+import { KeepAwakeIndicator } from '../components/KeepAwakeIndicator';
+import { useStrategyAccess } from '../hooks/useStrategyAccess';
+import { LockedScreen } from '../components/LockedScreen';
 
 const CHUNK_INTERVAL_MS = 3000;
 const TYPE_ON_MS_PER_CHAR = 30;
@@ -123,8 +128,23 @@ const rowToRecent = (row: MeetingMinutesRow): RecentMinute => ({
 });
 
 export const MinutesScreen: React.FC = () => {
+  const access = useStrategyAccess();
+  if (!access.isPro) {
+    return (
+      <LockedScreen
+        title="AI Meeting Minutes"
+        description="Voice-transcribed board meeting minutes with AI-generated documents are part of the Pro plan."
+        requiredTier="Pro"
+      />
+    );
+  }
+  return <MinutesScreenInner />;
+};
+
+const MinutesScreenInner: React.FC = () => {
   const insets = useSafeAreaInsets();
   const navigation = useNavigation<NativeStackNavigationProp<RootStackParamList>>();
+  const { activeBusinessId } = useBusiness();
 
   const [meetingType, setMeetingType] = useState<MeetingType>(MEETING_TYPES[0]);
   const [dropdownOpen, setDropdownOpen] = useState(false);
@@ -138,6 +158,7 @@ export const MinutesScreen: React.FC = () => {
 
   const [recording, setRecording] = useState(false);
   const [transcribing, setTranscribing] = useState(false);
+  useKeepAwakeWhile(recording, 'minutes-screen');
   const activeRecRef = useRef<Audio.Recording | null>(null);
   const chunkLoopActiveRef = useRef(false);
   const breakChunkRef = useRef<(() => void) | null>(null);
@@ -188,17 +209,19 @@ export const MinutesScreen: React.FC = () => {
 
   const loadRecent = useCallback(async () => {
     try {
-      const { data, error } = await supabase
+      let query = supabase
         .from('meeting_minutes')
         .select('*')
         .order('meeting_date', { ascending: false })
         .limit(20);
+      if (activeBusinessId) query = query.eq('business_id', activeBusinessId);
+      const { data, error } = await query;
       if (error) throw error;
       setRecentMinutes(((data ?? []) as MeetingMinutesRow[]).map(rowToRecent));
     } catch (e) {
       Alert.alert('Could not load minutes', e instanceof Error ? e.message : String(e));
     }
-  }, []);
+  }, [activeBusinessId]);
 
   useFocusEffect(
     useCallback(() => {
@@ -388,6 +411,7 @@ export const MinutesScreen: React.FC = () => {
 
       const { error } = await supabase.from('meeting_minutes').insert({
         user_id: userId,
+        business_id: activeBusinessId,
         meeting_type: meetingType,
         location: meetingLocation,
         meeting_date: dateIso,
@@ -405,6 +429,7 @@ export const MinutesScreen: React.FC = () => {
       try {
         const { error: docErr } = await supabase.from('documents').insert({
           user_id: userId,
+          business_id: activeBusinessId,
           name: buildMinutesDocName(meetingType, dateIso),
           strategy_category: MEETING_TYPE_TO_STRATEGY[meetingType],
           file_type: 'minutes',
@@ -496,6 +521,7 @@ export const MinutesScreen: React.FC = () => {
           const userId = await requireUserId();
           const { error: docErr } = await supabase.from('documents').insert({
             user_id: userId,
+            business_id: activeBusinessId,
             name: buildMinutesDocName(rowType, row.rawDate),
             strategy_category: MEETING_TYPE_TO_STRATEGY[rowType],
             file_type: 'minutes',
@@ -704,6 +730,7 @@ export const MinutesScreen: React.FC = () => {
                 ? 'Finishing transcription…'
                 : 'Tap the mic to begin streaming'}
             </Text>
+            <KeepAwakeIndicator visible={recording} style={styles.keepAwakeBadge} />
           </View>
         </Card>
 
@@ -991,6 +1018,9 @@ const styles = StyleSheet.create({
     color: colors.mutedText,
     fontSize: 13,
     flex: 1,
+  },
+  keepAwakeBadge: {
+    marginLeft: spacing.sm,
   },
   transcript: {
     backgroundColor: colors.white,
