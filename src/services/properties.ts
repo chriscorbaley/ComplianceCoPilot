@@ -7,22 +7,51 @@ import {
   requireUserId,
   type PropertyRow,
   type PropertyType,
+  type MpTestKey,
   type HoursLogRow,
 } from './supabase';
 
-export const PROPERTY_TYPES: PropertyType[] = [
-  'residential',
-  'commercial',
-  'STR',
-  'land',
-];
+export const PROPERTY_TYPES: PropertyType[] = ['long_term', 'short_term'];
 
 export const PROPERTY_TYPE_LABEL: Record<PropertyType, string> = {
-  residential: 'Residential',
-  commercial: 'Commercial',
-  STR: 'Short-term rental',
-  land: 'Land',
+  long_term: 'Long-term rental',
+  short_term: 'Short-term rental',
 };
+
+// Plain-language label per Material Participation test. Test 6 is intentionally
+// omitted per the v2 spec.
+export const MP_TEST_LABEL: Record<MpTestKey, string> = {
+  test_1:
+    'I spent more than 500 hours managing this property this year',
+  test_2:
+    'Virtually all management of this property was done by me',
+  test_3:
+    'I spent more than 100 hours and no one else spent more time on it than I did',
+  test_4:
+    'I spent more than 100 hours on this property and my total time across all my significant activities exceeds 500 hours',
+  test_5:
+    'I materially participated in this property in at least 5 of the last 10 years',
+  test_7:
+    'Based on facts and circumstances I was the primary person managing this property and spent more than 100 hours on it',
+};
+
+export const MP_TEST_SHORT_LABEL: Record<MpTestKey, string> = {
+  test_1: 'Test 1 — 500+ hours',
+  test_2: 'Test 2 — substantially all participation',
+  test_3: 'Test 3 — 100+ hours, more than anyone else',
+  test_4: 'Test 4 — 100+ hours and 500+ across significant activities',
+  test_5: 'Test 5 — 5 of the last 10 years',
+  test_7: 'Test 7 — facts and circumstances, 100+ hours',
+};
+
+export const MP_TEST_ORDER: MpTestKey[] = [
+  'test_1',
+  'test_2',
+  'test_3',
+  'test_4',
+  'test_5',
+  'test_7',
+];
 
 export interface PropertyFormInput {
   business_id: string | null;
@@ -31,6 +60,9 @@ export interface PropertyFormInput {
   address: string | null;
   has_grouping_election: boolean;
   grouping_group_name: string | null;
+  mp_test_selected?: MpTestKey | null;
+  grouping_election?: boolean;
+  active?: boolean;
 }
 
 export async function listProperties(businessId: string | null): Promise<PropertyRow[]> {
@@ -39,6 +71,7 @@ export async function listProperties(businessId: string | null): Promise<Propert
     .from('properties')
     .select('*')
     .eq('user_id', userId)
+    .eq('active', true)
     .order('created_at', { ascending: true });
   if (businessId) q = q.eq('business_id', businessId);
   const { data, error } = await q;
@@ -48,22 +81,48 @@ export async function listProperties(businessId: string | null): Promise<Propert
 
 export async function createProperty(input: PropertyFormInput): Promise<PropertyRow> {
   const userId = await requireUserId();
+  const payload = {
+    user_id: userId,
+    business_id: input.business_id,
+    property_name: input.property_name.trim(),
+    property_type: input.property_type,
+    address: input.address?.trim() || null,
+    has_grouping_election: input.has_grouping_election,
+    grouping_group_name: input.has_grouping_election
+      ? input.grouping_group_name?.trim() || null
+      : null,
+    mp_test_selected: input.mp_test_selected ?? null,
+    grouping_election: input.grouping_election ?? false,
+    active: input.active ?? true,
+  };
   const { data, error } = await supabase
     .from('properties')
-    .insert({
-      user_id: userId,
-      business_id: input.business_id,
-      property_name: input.property_name.trim(),
-      property_type: input.property_type,
-      address: input.address?.trim() || null,
-      has_grouping_election: input.has_grouping_election,
-      grouping_group_name: input.has_grouping_election
-        ? input.grouping_group_name?.trim() || null
-        : null,
-    })
+    .insert(payload)
     .select('*')
     .single();
-  if (error || !data) throw error ?? new Error('Could not create property');
+  if (error || !data) {
+    // Surface the full PostgrestError to the JS console so code/message/hint/
+    // details are visible during debugging. The alert in the UI only sees
+    // err.message, which on a bare Supabase error stringifies to "[object
+    // Object]" — so we wrap it in a real Error with the readable parts.
+    console.error('[createProperty] supabase insert failed', {
+      payload,
+      error,
+      code: error?.code,
+      message: error?.message,
+      details: error?.details,
+      hint: error?.hint,
+    });
+    const parts = [
+      error?.message,
+      error?.code ? `(code ${error.code})` : null,
+      error?.hint ? `Hint: ${error.hint}` : null,
+      error?.details ? `Details: ${error.details}` : null,
+    ].filter(Boolean);
+    throw new Error(
+      parts.length > 0 ? parts.join(' — ') : 'Could not create property',
+    );
+  }
   return data as PropertyRow;
 }
 
@@ -71,18 +130,22 @@ export async function updateProperty(
   id: string,
   input: PropertyFormInput,
 ): Promise<PropertyRow> {
+  const updates: Record<string, unknown> = {
+    business_id: input.business_id,
+    property_name: input.property_name.trim(),
+    property_type: input.property_type,
+    address: input.address?.trim() || null,
+    has_grouping_election: input.has_grouping_election,
+    grouping_group_name: input.has_grouping_election
+      ? input.grouping_group_name?.trim() || null
+      : null,
+  };
+  if (input.mp_test_selected !== undefined) updates.mp_test_selected = input.mp_test_selected;
+  if (input.grouping_election !== undefined) updates.grouping_election = input.grouping_election;
+  if (input.active !== undefined) updates.active = input.active;
   const { data, error } = await supabase
     .from('properties')
-    .update({
-      business_id: input.business_id,
-      property_name: input.property_name.trim(),
-      property_type: input.property_type,
-      address: input.address?.trim() || null,
-      has_grouping_election: input.has_grouping_election,
-      grouping_group_name: input.has_grouping_election
-        ? input.grouping_group_name?.trim() || null
-        : null,
-    })
+    .update(updates)
     .eq('id', id)
     .select('*')
     .single();

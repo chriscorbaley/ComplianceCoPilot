@@ -19,12 +19,14 @@ import { useBusiness } from '../business/BusinessContext';
 import {
   PROPERTY_TYPES,
   PROPERTY_TYPE_LABEL,
+  MP_TEST_LABEL,
+  MP_TEST_ORDER,
   createProperty,
   listProperties,
   updateProperty,
   type PropertyFormInput,
 } from '../services/properties';
-import type { PropertyRow, PropertyType } from '../services/supabase';
+import type { PropertyRow, PropertyType, MpTestKey } from '../services/supabase';
 import type { RootStackParamList } from '../navigation/types';
 
 type Route = RouteProp<RootStackParamList, 'PropertyEdit'>;
@@ -43,6 +45,7 @@ export const PropertyEditScreen: React.FC = () => {
   const [address, setAddress] = useState('');
   const [hasGrouping, setHasGrouping] = useState(false);
   const [groupName, setGroupName] = useState('');
+  const [mpTest, setMpTest] = useState<MpTestKey | null>(null);
   const [saving, setSaving] = useState(false);
   const [existingGroupNames, setExistingGroupNames] = useState<string[]>([]);
 
@@ -75,6 +78,7 @@ export const PropertyEditScreen: React.FC = () => {
             setAddress(e.address ?? '');
             setHasGrouping(e.has_grouping_election);
             setGroupName(e.grouping_group_name ?? '');
+            setMpTest(e.mp_test_selected);
           }
         }
       } catch (err) {
@@ -107,6 +111,8 @@ export const PropertyEditScreen: React.FC = () => {
       address: address || null,
       has_grouping_election: hasGrouping,
       grouping_group_name: hasGrouping ? groupName : null,
+      mp_test_selected: mpTest,
+      grouping_election: hasGrouping,
     };
     setSaving(true);
     try {
@@ -161,6 +167,30 @@ export const PropertyEditScreen: React.FC = () => {
               >
                 <Text style={[styles.chipText, active && styles.chipTextActive]}>
                   {PROPERTY_TYPE_LABEL[t]}
+                </Text>
+              </TouchableOpacity>
+            );
+          })}
+        </View>
+
+        <Text style={styles.label}>Material Participation Test</Text>
+        <View style={styles.mpTestList}>
+          {MP_TEST_ORDER.map((t) => {
+            const active = mpTest === t;
+            return (
+              <TouchableOpacity
+                key={t}
+                style={[styles.mpTestRow, active && styles.mpTestRowActive]}
+                onPress={() => setMpTest(active ? null : t)}
+                activeOpacity={0.85}
+              >
+                <View
+                  style={[styles.mpTestDot, active && styles.mpTestDotActive]}
+                />
+                <Text
+                  style={[styles.mpTestText, active && styles.mpTestTextActive]}
+                >
+                  {MP_TEST_LABEL[t]}
                 </Text>
               </TouchableOpacity>
             );
@@ -366,5 +396,44 @@ const styles = StyleSheet.create({
     color: colors.mutedText,
     textAlign: 'center',
     marginTop: spacing.md,
+  },
+  mpTestList: {
+    gap: spacing.sm,
+  },
+  mpTestRow: {
+    flexDirection: 'row',
+    alignItems: 'flex-start',
+    gap: spacing.md,
+    backgroundColor: colors.white,
+    borderRadius: 10,
+    borderWidth: StyleSheet.hairlineWidth,
+    borderColor: colors.cardBorder,
+    padding: spacing.md,
+  },
+  mpTestRowActive: {
+    borderColor: colors.teal,
+    borderWidth: 2,
+    backgroundColor: colors.tealLight,
+  },
+  mpTestDot: {
+    width: 16,
+    height: 16,
+    borderRadius: 8,
+    borderWidth: 2,
+    borderColor: colors.divider,
+    marginTop: 2,
+  },
+  mpTestDotActive: {
+    borderColor: colors.teal,
+    backgroundColor: colors.teal,
+  },
+  mpTestText: {
+    flex: 1,
+    color: colors.bodyText,
+    fontSize: 13,
+    lineHeight: 18,
+  },
+  mpTestTextActive: {
+    fontWeight: '700',
   },
 });

@@ -23,6 +23,13 @@ alter table public.users
   add column if not exists subscription_start  timestamptz,
   add column if not exists onboarding_completed boolean not null default false;
 
+-- Real estate v2 onboarding state.
+alter table public.users
+  add column if not exists re_has_properties        boolean,
+  add column if not exists total_work_hours_this_year numeric,
+  add column if not exists reps_pursuit_active      boolean,
+  add column if not exists re_grouping_election     boolean;
+
 -- Automatically mirror auth.users → public.users on signup.
 create or replace function public.handle_new_user()
 returns trigger
@@ -67,7 +74,7 @@ create table if not exists public.properties (
   user_id uuid not null references public.users(id) on delete cascade,
   business_id uuid references public.businesses(id) on delete set null,
   property_name text not null,
-  property_type text check (property_type in ('residential','commercial','STR','land')),
+  property_type text,
   address text,
   has_grouping_election boolean not null default false,
   grouping_group_name text,
@@ -80,6 +87,36 @@ create index if not exists properties_business_idx
 create index if not exists properties_group_idx
   on public.properties(user_id, grouping_group_name)
   where has_grouping_election = true;
+
+-- Real estate v2 schema for properties:
+--   • property_type is now 'long_term' | 'short_term' (was residential|commercial|STR|land)
+--   • mp_test_selected: which material participation test the user chose
+--   • active: soft-delete flag
+--   • grouping_election: per-property mirror of users.re_grouping_election
+alter table public.properties
+  add column if not exists mp_test_selected text,
+  add column if not exists active boolean not null default true,
+  add column if not exists grouping_election boolean not null default false;
+
+-- Migrate existing property_type values to the new long_term|short_term enum.
+update public.properties set property_type = 'short_term'
+  where property_type = 'STR';
+update public.properties set property_type = 'long_term'
+  where property_type in ('residential', 'commercial', 'land');
+
+-- Swap the old CHECK constraint for the new one. Drop-if-exists protects
+-- against re-running on a fresh install where the old constraint never existed.
+alter table public.properties
+  drop constraint if exists properties_property_type_check;
+alter table public.properties
+  add constraint properties_property_type_check
+    check (property_type is null or property_type in ('long_term', 'short_term'));
+alter table public.properties
+  drop constraint if exists properties_mp_test_selected_check;
+alter table public.properties
+  add constraint properties_mp_test_selected_check
+    check (mp_test_selected is null or mp_test_selected in
+      ('test_1','test_2','test_3','test_4','test_5','test_7'));
 
 -- ─── hours_log ───────────────────────────────────────────────────────────
 create table if not exists public.hours_log (
@@ -98,6 +135,14 @@ alter table public.hours_log
   add column if not exists business_id uuid references public.businesses(id) on delete set null;
 alter table public.hours_log
   add column if not exists property_id uuid references public.properties(id) on delete set null;
+alter table public.hours_log
+  add column if not exists hours_type text;
+alter table public.hours_log
+  drop constraint if exists hours_log_hours_type_check;
+alter table public.hours_log
+  add constraint hours_log_hours_type_check
+    check (hours_type is null or hours_type in
+      ('reps_general', 'material_participation', 'str_participation'));
 create index if not exists hours_log_user_date_idx
   on public.hours_log(user_id, activity_date desc);
 create index if not exists hours_log_business_idx
@@ -401,8 +446,24 @@ end $$;
 -- ═══════════════════════════════════════════════════════════════════════════
 
 insert into public.compliance_rules (strategy_name, rule_key, rule_value, display_label) values
-  ('real_estate',             'hours_required',            '750',                                                      'Material participation — annual hours'),
+  -- Real estate Gate 1 (REPS) and material participation tests
+  ('real_estate',             'reps_gate1_hours',          '750',                                                      'REPS Gate 1 — annual real-property hours'),
+  ('real_estate',             'reps_majority_services_pct','50',                                                       'REPS Gate 1 — majority services threshold (%)'),
+  ('real_estate',             'mp_test_1_hours',           '500',                                                      'MP Test 1 — annual hours threshold'),
+  ('real_estate',             'mp_test_3_hours',           '100',                                                      'MP Test 3 — annual hours threshold'),
+  ('real_estate',             'mp_test_4_hours',           '100',                                                      'MP Test 4 — annual hours threshold'),
+  ('real_estate',             'mp_test_4_total_hours',     '500',                                                      'MP Test 4 — combined significant-activity hours'),
+  ('real_estate',             'mp_test_7_hours',           '100',                                                      'MP Test 7 — annual hours threshold'),
+  ('real_estate',             'hours_required',            '750',                                                      'Material participation — annual hours (legacy)'),
   ('real_estate',             'required_docs',             'activity_log,property_list',                                'Real estate — required documents'),
+  -- Short-term rentals
+  ('str',                     'avg_period_max_days',       '7',                                                        'STR — maximum average rental period (days)'),
+  ('str',                     'mp_test_1_hours',           '500',                                                      'STR MP Test 1 — annual hours threshold'),
+  ('str',                     'mp_test_3_hours',           '100',                                                      'STR MP Test 3 — annual hours threshold'),
+  ('str',                     'mp_test_4_hours',           '100',                                                      'STR MP Test 4 — annual hours threshold'),
+  ('str',                     'mp_test_4_total_hours',     '500',                                                      'STR MP Test 4 — combined significant-activity hours'),
+  ('str',                     'mp_test_7_hours',           '100',                                                      'STR MP Test 7 — annual hours threshold'),
+  ('str',                     'required_docs',             'activity_log,property_list,rental_period_log',              'STR — required documents'),
   ('augusta_rule',            'max_days',                  '14',                                                       'Augusta Rule — annual day cap'),
   ('augusta_rule',            'required_docs',             'rental_agreement,meeting_minutes,payment_records',          'Augusta Rule — required documents'),
   ('s_corp',                  'required_docs',             'salary_documentation,payroll_records,quarterly_filings',    'S-Corp — required documents'),
@@ -420,12 +481,13 @@ on conflict (strategy_name, rule_key) do nothing;
 
 insert into public.strategies (id, display_name, sort_order) values
   ('real_estate',        'Real Estate Professional Status',  1),
-  ('augusta_rule',       'Augusta Rule',                     2),
-  ('s_corp',             'S-Corp Reasonable Compensation',   3),
-  ('business_travel',    'Business Travel Deductibility',    4),
-  ('home_office',        'Home Office',                      5),
-  ('family_management',  'Family Management Company',        6),
-  ('vehicle',            'Vehicle / Section 179',            7)
+  ('str',                'Short-Term Rentals',               2),
+  ('augusta_rule',       'Augusta Rule',                     3),
+  ('s_corp',             'S-Corp Reasonable Compensation',   4),
+  ('business_travel',    'Business Travel Deductibility',    5),
+  ('home_office',        'Home Office',                      6),
+  ('family_management',  'Family Management Company',        7),
+  ('vehicle',            'Vehicle / Section 179',            8)
 on conflict (id) do nothing;
 
 -- ═══════════════════════════════════════════════════════════════════════════

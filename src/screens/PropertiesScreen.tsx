@@ -14,6 +14,7 @@ import { useFocusEffect, useNavigation } from '@react-navigation/native';
 import type { NativeStackNavigationProp } from '@react-navigation/native-stack';
 import { colors, radius, shadow, spacing, typography } from '../theme';
 import { StatusPill, type StatusVariant } from '../components/StatusPill';
+import { useAuth } from '../auth/AuthContext';
 import { useBusiness } from '../business/BusinessContext';
 import {
   supabase,
@@ -25,7 +26,6 @@ import {
   computeParticipation,
   deleteProperty,
   listProperties,
-  setGroupingElection,
   type ParticipationStatus,
 } from '../services/properties';
 import {
@@ -58,6 +58,7 @@ const ruleNumber = (
 
 export const PropertiesScreen: React.FC = () => {
   const navigation = useNavigation<Nav>();
+  const { session, refreshProfile } = useAuth();
   const { activeBusinessId, activeBusiness } = useBusiness();
   const [properties, setProperties] = useState<PropertyRow[]>([]);
   const [yearHours, setYearHours] = useState<HoursLogRow[]>([]);
@@ -99,20 +100,34 @@ export const PropertiesScreen: React.FC = () => {
 
   const threshold = ruleNumber(rules, 'real_estate', 'hours_required', 750);
 
-  const handleToggleGrouping = async (prop: PropertyRow, next: boolean) => {
+  const handleGroupingToggle = async (value: boolean) => {
+    const userId = session?.user.id;
+    if (!userId) {
+      Alert.alert('Could not update', 'You must be signed in to change this setting.');
+      return;
+    }
     try {
-      // Re-use an existing group name from the active business if there is
-      // one — otherwise fall back to the default the service supplies.
-      const existingGroup = properties.find(
-        (p) => p.has_grouping_election && p.grouping_group_name,
-      );
-      const groupName = next
-        ? (prop.grouping_group_name ?? existingGroup?.grouping_group_name ?? null)
-        : null;
-      await setGroupingElection(prop.id, next, groupName);
+      const { error } = await supabase
+        .from('users')
+        .update({ re_grouping_election: value })
+        .eq('id', userId);
+      if (error) throw error;
+      const { error: propError } = await supabase
+        .from('properties')
+        .update({ grouping_election: value })
+        .eq('user_id', userId)
+        .eq('property_type', 'long_term');
+      if (propError) throw propError;
+      await refreshProfile();
       await reload();
     } catch (e) {
-      Alert.alert('Could not update', e instanceof Error ? e.message : String(e));
+      const message =
+        e && typeof e === 'object' && 'message' in e
+          ? String((e as { message: unknown }).message)
+          : e instanceof Error
+            ? e.message
+            : 'Unknown error';
+      Alert.alert('Could not update', message);
     }
   };
 
@@ -252,13 +267,13 @@ export const PropertiesScreen: React.FC = () => {
                   <View style={styles.toggleText}>
                     <Text style={styles.toggleTitle}>Grouping election</Text>
                     <Text style={styles.toggleHint}>
-                      Combine hours with other properties in this group for the
+                      Combine hours across all long-term properties for the
                       material participation test.
                     </Text>
                   </View>
                   <Switch
-                    value={p.has_grouping_election}
-                    onValueChange={(v) => handleToggleGrouping(p, v)}
+                    value={p.grouping_election}
+                    onValueChange={(value) => handleGroupingToggle(value)}
                     trackColor={{ false: colors.divider, true: colors.midNavy }}
                     thumbColor={colors.white}
                   />
