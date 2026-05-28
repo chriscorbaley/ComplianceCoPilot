@@ -57,7 +57,6 @@ export interface PropertyFormInput {
   business_id: string | null;
   property_name: string;
   property_type: PropertyType | null;
-  address: string | null;
   has_grouping_election: boolean;
   grouping_group_name: string | null;
   mp_test_selected?: MpTestKey | null;
@@ -86,7 +85,6 @@ export async function createProperty(input: PropertyFormInput): Promise<Property
     business_id: input.business_id,
     property_name: input.property_name.trim(),
     property_type: input.property_type,
-    address: input.address?.trim() || null,
     has_grouping_election: input.has_grouping_election,
     grouping_group_name: input.has_grouping_election
       ? input.grouping_group_name?.trim() || null
@@ -134,7 +132,6 @@ export async function updateProperty(
     business_id: input.business_id,
     property_name: input.property_name.trim(),
     property_type: input.property_type,
-    address: input.address?.trim() || null,
     has_grouping_election: input.has_grouping_election,
     grouping_group_name: input.has_grouping_election
       ? input.grouping_group_name?.trim() || null

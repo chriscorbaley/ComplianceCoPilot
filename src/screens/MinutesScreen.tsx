@@ -47,8 +47,22 @@ import { KeepAwakeIndicator } from '../components/KeepAwakeIndicator';
 import { useStrategyAccess } from '../hooks/useStrategyAccess';
 import { LockedScreen } from '../components/LockedScreen';
 
-const CHUNK_INTERVAL_MS = 3000;
 const TYPE_ON_MS_PER_CHAR = 30;
+
+// Whole-file transcription only — no chunking. Splitting audio mid-recording
+// drops the words that straddle a chunk boundary, which was the main cause of
+// missed content. We record one continuous file and send it to Whisper once.
+
+// Context prompt fed to Whisper. Priming it with the meeting domain sharply
+// improves accuracy on business vocabulary and suppresses URL hallucinations.
+const WHISPER_PROMPT =
+  'This is a business meeting transcript for tax compliance documentation. ' +
+  'The speaker is discussing business activities, strategies, attendees, and ' +
+  'decisions made at the meeting.';
+
+// Recordings shorter than this are almost always accidental taps and are the
+// single biggest source of hallucinated URLs/phrases, so we never send them.
+const MIN_RECORDING_MS = 2000;
 
 type MeetingType =
   | 'Augusta Rule business meeting'
@@ -160,10 +174,7 @@ const MinutesScreenInner: React.FC = () => {
   const [transcribing, setTranscribing] = useState(false);
   useKeepAwakeWhile(recording, 'minutes-screen');
   const activeRecRef = useRef<Audio.Recording | null>(null);
-  const chunkLoopActiveRef = useRef(false);
-  const breakChunkRef = useRef<(() => void) | null>(null);
-  const transcribeQueueRef = useRef<Promise<void>>(Promise.resolve());
-  const inFlightCountRef = useRef(0);
+  const recordStartRef = useRef<number>(0);
   const typeBufferRef = useRef('');
   const typeTimerRef = useRef<ReturnType<typeof setInterval> | null>(null);
 
@@ -196,6 +207,17 @@ const MinutesScreenInner: React.FC = () => {
     typeBufferRef.current += (needsSpace ? ' ' : '') + text;
     startTypeOn();
   }, [startTypeOn]);
+
+  // Whole-file transcripts arrive in one piece and can be thousands of chars,
+  // so we append them directly rather than animating char-by-char (which would
+  // take minutes). The typewriter is reserved for short voice-inbox prefills.
+  const appendTranscript = useCallback((text: string) => {
+    if (!text) return;
+    setTranscript((prev) => {
+      if (!prev) return text;
+      return /\s$/.test(prev) ? prev + text : `${prev} ${text}`;
+    });
+  }, []);
 
   const consumeIfMeetingMinutes = useCallback(() => {
     const pending = peek();
@@ -260,86 +282,15 @@ const MinutesScreenInner: React.FC = () => {
     return () => {
       if (elapsedTimerRef.current) clearInterval(elapsedTimerRef.current);
       if (typeTimerRef.current) clearInterval(typeTimerRef.current);
-      chunkLoopActiveRef.current = false;
-      if (breakChunkRef.current) breakChunkRef.current();
       const r = activeRecRef.current;
       if (r) r.stopAndUnloadAsync().catch(() => undefined);
     };
   }, []);
 
-  const enqueueChunkUri = useCallback(
-    (uri: string) => {
-      inFlightCountRef.current += 1;
-      setTranscribing(true);
-      transcribeQueueRef.current = transcribeQueueRef.current.then(async () => {
-        try {
-          const text = await transcribe(uri, {
-            prompt: `Meeting minutes for a ${meetingType}.`,
-          });
-          if (text) enqueueText(text);
-        } catch (e) {
-          console.warn('[minutes] chunk transcribe failed', e);
-          if (e instanceof MissingProxyError) {
-            Alert.alert('Proxy not configured', e.message);
-          } else if (e instanceof ProxyUnreachableError) {
-            Alert.alert('Proxy unreachable', e.message);
-          } else {
-            // Don't block subsequent chunks — surface the error inline.
-            enqueueText(` [transcription error: ${e instanceof Error ? e.message : String(e)}] `);
-          }
-        } finally {
-          inFlightCountRef.current = Math.max(0, inFlightCountRef.current - 1);
-          if (inFlightCountRef.current === 0) setTranscribing(false);
-        }
-      });
-    },
-    [meetingType, enqueueText],
-  );
-
-  const runChunkLoop = useCallback(async () => {
-    chunkLoopActiveRef.current = true;
-    try {
-      await prepareAudioMode();
-      while (chunkLoopActiveRef.current) {
-        const rec = new Audio.Recording();
-        try {
-          await rec.prepareToRecordAsync(M4A_44100_OPTIONS);
-          await rec.startAsync();
-        } catch (e) {
-          Alert.alert('Recording error', e instanceof Error ? e.message : String(e));
-          break;
-        }
-        activeRecRef.current = rec;
-
-        await new Promise<void>((resolve) => {
-          const id = setTimeout(() => {
-            breakChunkRef.current = null;
-            resolve();
-          }, CHUNK_INTERVAL_MS);
-          breakChunkRef.current = () => {
-            clearTimeout(id);
-            breakChunkRef.current = null;
-            resolve();
-          };
-        });
-
-        let uri: string | null = null;
-        try {
-          await rec.stopAndUnloadAsync();
-          uri = rec.getURI();
-        } catch {
-          // ignore
-        }
-        activeRecRef.current = null;
-        if (uri) enqueueChunkUri(uri);
-      }
-    } finally {
-      chunkLoopActiveRef.current = false;
-      await releaseAudioMode().catch(() => undefined);
-    }
-  }, [enqueueChunkUri]);
-
-  const startStreaming = async () => {
+  // Start a single, continuous recording. There is deliberately no automatic
+  // duration cutoff — the recording runs until the user taps stop, however long
+  // that takes. Keep-awake is engaged the moment `recording` flips true.
+  const beginRecording = async () => {
     try {
       const granted = await ensureMicPermission();
       if (!granted) {
@@ -349,30 +300,113 @@ const MinutesScreenInner: React.FC = () => {
         );
         return;
       }
+      await prepareAudioMode();
+      const rec = new Audio.Recording();
+      await rec.prepareToRecordAsync(M4A_44100_OPTIONS);
+      await rec.startAsync();
+      activeRecRef.current = rec;
+      recordStartRef.current = Date.now();
       setRecording(true);
       setElapsedMs(0);
       elapsedTimerRef.current = setInterval(() => {
         setElapsedMs((m) => m + 1000);
       }, 1000);
-      void runChunkLoop();
     } catch (e) {
+      activeRecRef.current = null;
+      await releaseAudioMode().catch(() => undefined);
       Alert.alert('Could not start recording', e instanceof Error ? e.message : String(e));
     }
   };
 
-  const stopStreaming = () => {
+  // Stop the recording, enforce the minimum length, then send the complete file
+  // to Whisper in one call.
+  const endRecording = async () => {
+    const rec = activeRecRef.current;
+    const durationMs = recordStartRef.current ? Date.now() - recordStartRef.current : 0;
+
+    // Flip out of the recording state first — this stops the timer and releases
+    // the keep-awake lock via useKeepAwakeWhile.
     setRecording(false);
     if (elapsedTimerRef.current) {
       clearInterval(elapsedTimerRef.current);
       elapsedTimerRef.current = null;
     }
-    chunkLoopActiveRef.current = false;
-    if (breakChunkRef.current) breakChunkRef.current();
+    activeRecRef.current = null;
+    recordStartRef.current = 0;
+
+    if (!rec) {
+      await releaseAudioMode().catch(() => undefined);
+      return;
+    }
+
+    let uri: string | null = null;
+    try {
+      await rec.stopAndUnloadAsync();
+      uri = rec.getURI();
+    } catch (e) {
+      console.warn('[minutes] stop recording failed', e);
+    } finally {
+      await releaseAudioMode().catch(() => undefined);
+    }
+
+    // Minimum-length guard. Very short recordings are the most common source of
+    // hallucinated URLs, so we never send them to Whisper.
+    if (durationMs < MIN_RECORDING_MS) {
+      Alert.alert(
+        'Recording too short',
+        'Recording too short — please speak for at least a few seconds.',
+      );
+      return;
+    }
+    if (!uri) {
+      Alert.alert(
+        'No audio captured',
+        'The recording produced no audio. Please try again.',
+      );
+      return;
+    }
+
+    setTranscribing(true);
+    try {
+      const text = await transcribe(uri, {
+        prompt: WHISPER_PROMPT,
+        language: 'en',
+      });
+      // Confirm the Whisper response actually came back. If "Transcribing…"
+      // never clears, check whether this logs — no log means the request never
+      // resolved (proxy unreachable / wrong EXPO_PUBLIC_PROXY_URL).
+      console.log('[minutes] whisper response received', {
+        chars: text.length,
+        preview: text.slice(0, 80),
+      });
+      if (text) {
+        appendTranscript(text);
+      } else {
+        Alert.alert(
+          'Nothing transcribed',
+          'Whisper returned an empty transcript. Please try recording again.',
+        );
+      }
+    } catch (e) {
+      console.warn('[minutes] transcribe failed', e);
+      if (e instanceof MissingProxyError) {
+        Alert.alert('Proxy not configured', e.message);
+      } else if (e instanceof ProxyUnreachableError) {
+        Alert.alert('Proxy unreachable', e.message);
+      } else {
+        Alert.alert(
+          'Transcription failed',
+          e instanceof Error ? e.message : String(e),
+        );
+      }
+    } finally {
+      setTranscribing(false);
+    }
   };
 
   const onMicPress = () => {
-    if (recording) stopStreaming();
-    else void startStreaming();
+    if (recording) void endRecording();
+    else void beginRecording();
   };
 
   const openDocument = useCallback(
@@ -689,6 +723,16 @@ const MinutesScreenInner: React.FC = () => {
 
           <AnimatedWaveform active={recording} style={styles.waveform} />
 
+          {transcribing ? (
+            <View style={styles.transcribingBanner}>
+              <ActivityIndicator size="small" color={colors.midNavy} />
+              <Text style={styles.transcribingText}>
+                Transcribing your recording… this may take a moment for longer
+                recordings
+              </Text>
+            </View>
+          ) : null}
+
           <View style={styles.micRow}>
             <TouchableOpacity
               activeOpacity={0.85}
@@ -725,10 +769,10 @@ const MinutesScreenInner: React.FC = () => {
             </TouchableOpacity>
             <Text style={styles.micHint}>
               {recording
-                ? 'Streaming to Whisper every 3s — tap to stop'
+                ? 'Recording — tap to stop when finished'
                 : transcribing
-                ? 'Finishing transcription…'
-                : 'Tap the mic to begin streaming'}
+                ? 'Transcribing your recording…'
+                : 'Tap the mic to begin recording'}
             </Text>
             <KeepAwakeIndicator visible={recording} style={styles.keepAwakeBadge} />
           </View>
@@ -983,6 +1027,22 @@ const styles = StyleSheet.create({
   },
   waveform: {
     marginVertical: spacing.xs,
+  },
+  transcribingBanner: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: spacing.sm,
+    backgroundColor: colors.lightBlue,
+    borderRadius: radius.card,
+    paddingHorizontal: spacing.md,
+    paddingVertical: spacing.sm,
+  },
+  transcribingText: {
+    ...typography.body,
+    color: colors.midNavy,
+    fontSize: 13,
+    fontWeight: '600',
+    flex: 1,
   },
   micRow: {
     flexDirection: 'row',

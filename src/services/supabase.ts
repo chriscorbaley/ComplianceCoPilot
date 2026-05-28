@@ -78,7 +78,6 @@ export interface PropertyRow {
   business_id: string | null;
   property_name: string;
   property_type: PropertyType | null;
-  address: string | null;
   has_grouping_election: boolean;
   grouping_group_name: string | null;
   created_at: string;

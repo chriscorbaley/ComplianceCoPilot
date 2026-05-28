@@ -261,7 +261,20 @@ export const DocsScreen: React.FC = () => {
       setDocs(merged);
       setComplianceRows(complianceRes);
     } catch (e) {
-      Alert.alert('Could not load documents', e instanceof Error ? e.message : String(e));
+      // Supabase PostgrestError is a plain object (not an Error instance), so
+      // `String(e)` would render "[object Object]". Pull the message field, and
+      // log the full shape (code/details/hint) to Metro for diagnosis.
+      const error = e as { message?: string; code?: string; details?: string; hint?: string };
+      console.error('[Documents] fetch failed', {
+        message: error?.message,
+        code: error?.code,
+        details: error?.details,
+        hint: error?.hint,
+      });
+      Alert.alert(
+        'Could not load documents',
+        error?.message || JSON.stringify(error),
+      );
     }
   }, [activeBusinessId]);
 

@@ -30,7 +30,9 @@ import {
   type Verdict,
 } from './deductibilityEngine';
 
-const PROXY_URL = process.env.EXPO_PUBLIC_PROXY_URL;
+// Falls back to localhost for iOS simulator testing on the same Mac. For a
+// physical device, set EXPO_PUBLIC_PROXY_URL in .env to the Mac's LAN IP.
+const PROXY_URL = process.env.EXPO_PUBLIC_PROXY_URL || 'http://localhost:8787';
 
 export class MissingProxyError extends Error {
   constructor() {
@@ -89,7 +91,10 @@ async function probeProxy(base: string): Promise<void> {
 
 // ────────────────────────────── Recording ───────────────────────────────
 
-// m4a / AAC at 44.1 kHz, mono, 64 kbps. Whisper accepts this format directly.
+// m4a / AAC at 44.1 kHz, mono, 128 kbps — highest practical speech quality.
+// Mono is deliberate: speech recognition is more accurate from a single channel
+// and the file is half the size of stereo. iOS uses MAX quality; Android uses
+// the AAC encoder. Whisper accepts this format directly.
 export const M4A_44100_OPTIONS: Audio.RecordingOptions = {
   isMeteringEnabled: false,
   android: {
@@ -98,22 +103,22 @@ export const M4A_44100_OPTIONS: Audio.RecordingOptions = {
     audioEncoder: Audio.AndroidAudioEncoder.AAC,
     sampleRate: 44100,
     numberOfChannels: 1,
-    bitRate: 64000,
+    bitRate: 128000,
   },
   ios: {
     extension: '.m4a',
     outputFormat: Audio.IOSOutputFormat.MPEG4AAC,
-    audioQuality: Audio.IOSAudioQuality.HIGH,
+    audioQuality: Audio.IOSAudioQuality.MAX,
     sampleRate: 44100,
     numberOfChannels: 1,
-    bitRate: 64000,
+    bitRate: 128000,
     linearPCMBitDepth: 16,
     linearPCMIsBigEndian: false,
     linearPCMIsFloat: false,
   },
   web: {
     mimeType: 'audio/webm',
-    bitsPerSecond: 64000,
+    bitsPerSecond: 128000,
   },
 };
 
@@ -156,6 +161,30 @@ export async function stopRecordingAndGetUri(
 
 // Whisper accepts m4a/mp3/mp4/wav/webm/mpga/mpeg/oga/ogg/flac. We record m4a.
 const WHISPER_SUPPORTED = new Set(['m4a', 'mp3', 'mp4', 'wav', 'webm', 'mpga', 'mpeg', 'oga', 'ogg', 'flac']);
+
+// Post-transcription cleanup for known Whisper artifacts. On near-silence
+// Whisper hallucinates URLs ("www.…", "https://…") and repeats short phrases;
+// neither is ever real speech in a dictated meeting. This runs on every
+// transcript the proxy returns.
+export function cleanTranscript(text: string): string {
+  if (!text) return '';
+  let out = text;
+
+  // 1. Strip http(s) URLs — these are hallucinations, not spoken words.
+  out = out.replace(/https?:\/\/\S+/gi, '');
+
+  // 2. Collapse a phrase (1–8 words) repeated 3+ times in a row down to one
+  //    occurrence. Catches "thank you. thank you. thank you." style artifacts.
+  out = out.replace(
+    /(\b[\w']+(?:\s+[\w']+){0,7})(?:[\s,.!?-]+\1\b){2,}/gi,
+    '$1',
+  );
+
+  // 3. Normalize whitespace left behind by the removals, then trim.
+  out = out.replace(/[ \t]{2,}/g, ' ').replace(/ +([.,!?;:])/g, '$1');
+
+  return out.trim();
+}
 
 // Returns file size in bytes for a file:// URI, or null if it cannot be
 // inspected. RN's fetch can read file:// URIs as blobs, so we use that to
@@ -214,7 +243,9 @@ export async function transcribe(
     type: ext === 'm4a' ? 'audio/m4a' : `audio/${ext}`,
   } as unknown as Blob);
   if (opts.prompt) form.append('prompt', opts.prompt);
-  if (opts.language) form.append('language', opts.language);
+  // Default to English — pinning the language stops Whisper from drifting into
+  // the wrong language on quiet passages, a common source of garbage output.
+  form.append('language', opts.language ?? 'en');
 
   let res: Response;
   try {
@@ -240,7 +271,7 @@ export async function transcribe(
     throw new Error(`Transcribe ${res.status}: ${detail || res.statusText}`);
   }
   const data = (await res.json()) as { text?: string };
-  return (data.text ?? '').trim();
+  return cleanTranscript(data.text ?? '');
 }
 
 export type ActivityType =

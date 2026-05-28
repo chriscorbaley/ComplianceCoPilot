@@ -210,11 +210,6 @@ export const PropertiesScreen: React.FC = () => {
                       <Text style={styles.cardName} numberOfLines={1}>
                         {p.property_name}
                       </Text>
-                      {p.address ? (
-                        <Text style={styles.cardAddress} numberOfLines={2}>
-                          {p.address}
-                        </Text>
-                      ) : null}
                       {p.property_type ? (
                         <Text style={styles.cardType}>
                           {PROPERTY_TYPE_LABEL[p.property_type]}

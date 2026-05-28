@@ -6,6 +6,27 @@ import { supabase, requireUserId, type BusinessRow, type EntityType } from './su
 
 const LOGO_BUCKET = 'business-logos';
 
+// A bare Supabase PostgrestError is a plain object, not an Error instance — so
+// callers that do `err instanceof Error ? err.message : String(err)` end up
+// printing "[object Object]". Wrap it in a real Error with the readable parts
+// (message/code/hint/details) and log the full object for debugging.
+function toReadableError(error: unknown, fallback: string): Error {
+  const e = (error ?? {}) as {
+    message?: string;
+    code?: string;
+    hint?: string;
+    details?: string;
+  };
+  console.error(`[businesses] ${fallback}`, error);
+  const parts = [
+    e.message,
+    e.code ? `(code ${e.code})` : null,
+    e.hint ? `Hint: ${e.hint}` : null,
+    e.details ? `Details: ${e.details}` : null,
+  ].filter(Boolean);
+  return new Error(parts.length > 0 ? parts.join(' — ') : fallback);
+}
+
 export const ENTITY_TYPES: EntityType[] = [
   'LLC',
   'S-Corp',
@@ -60,7 +81,7 @@ export async function createBusiness(input: BusinessFormInput): Promise<Business
     })
     .select('*')
     .single();
-  if (error || !data) throw error ?? new Error('Could not create business');
+  if (error || !data) throw toReadableError(error, 'Could not create business');
   return data as BusinessRow;
 }
 
@@ -77,7 +98,7 @@ export async function updateBusiness(id: string, input: BusinessFormInput): Prom
     .eq('id', id)
     .select('*')
     .single();
-  if (error || !data) throw error ?? new Error('Could not update business');
+  if (error || !data) throw toReadableError(error, 'Could not update business');
   return data as BusinessRow;
 }
 

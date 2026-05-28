@@ -42,7 +42,6 @@ export const PropertyEditScreen: React.FC = () => {
   const [loading, setLoading] = useState(!!editingId);
   const [propertyName, setPropertyName] = useState('');
   const [propertyType, setPropertyType] = useState<PropertyType | null>(null);
-  const [address, setAddress] = useState('');
   const [hasGrouping, setHasGrouping] = useState(false);
   const [groupName, setGroupName] = useState('');
   const [mpTest, setMpTest] = useState<MpTestKey | null>(null);
@@ -75,7 +74,6 @@ export const PropertyEditScreen: React.FC = () => {
           if (e) {
             setPropertyName(e.property_name);
             setPropertyType(e.property_type);
-            setAddress(e.address ?? '');
             setHasGrouping(e.has_grouping_election);
             setGroupName(e.grouping_group_name ?? '');
             setMpTest(e.mp_test_selected);
@@ -108,7 +106,6 @@ export const PropertyEditScreen: React.FC = () => {
       business_id: activeBusinessId,
       property_name: propertyName,
       property_type: propertyType,
-      address: address || null,
       has_grouping_election: hasGrouping,
       grouping_group_name: hasGrouping ? groupName : null,
       mp_test_selected: mpTest,
@@ -196,16 +193,6 @@ export const PropertyEditScreen: React.FC = () => {
             );
           })}
         </View>
-
-        <Text style={styles.label}>Address</Text>
-        <TextInput
-          value={address}
-          onChangeText={setAddress}
-          style={[styles.input, styles.multiline]}
-          placeholder="Street, City, State ZIP"
-          placeholderTextColor={colors.subtleText}
-          multiline
-        />
 
         <View style={styles.toggleBlock}>
           <View style={styles.toggleRow}>

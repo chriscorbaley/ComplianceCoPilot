@@ -531,11 +531,9 @@ const HoursScreenInner: React.FC = () => {
                 const name = bucket.property
                   ? bucket.property.property_name
                   : 'General / Administrative';
-                const subtitle = bucket.property?.address
-                  ? bucket.property.address
-                  : bucket.property
-                    ? null
-                    : 'Hours not tied to a specific property';
+                const subtitle = bucket.property
+                  ? null
+                  : 'Hours not tied to a specific property';
                 const last = i === propertyBreakdown.length - 1;
                 return (
                   <View
@@ -830,17 +828,6 @@ const PropertyPickerModal: React.FC<PropertyPickerModalProps> = ({
                     >
                       {p.property_name}
                     </Text>
-                    {p.address ? (
-                      <Text
-                        style={[
-                          modalStyles.optionSubtitle,
-                          active && modalStyles.optionSubtitleActive,
-                        ]}
-                        numberOfLines={1}
-                      >
-                        {p.address}
-                      </Text>
-                    ) : null}
                   </View>
                 </TouchableOpacity>
               );
