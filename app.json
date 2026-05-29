@@ -25,7 +25,9 @@
         "backgroundColor": "#042C53"
       },
       "package": "com.compliancecopilot.app",
-      "permissions": ["android.permission.RECORD_AUDIO"]
+      "permissions": [
+        "android.permission.RECORD_AUDIO"
+      ]
     },
     "plugins": [
       [
@@ -40,7 +42,8 @@
           "merchantIdentifier": "merchant.com.compliancecopilot.app",
           "enableGooglePay": false
         }
-      ]
+      ],
+      "@react-native-community/datetimepicker"
     ]
   }
 }

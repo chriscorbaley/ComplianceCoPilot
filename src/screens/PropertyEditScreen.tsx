@@ -21,6 +21,8 @@ import {
   PROPERTY_TYPE_LABEL,
   MP_TEST_LABEL,
   MP_TEST_ORDER,
+  MP_TEST_INT,
+  MP_TEST_FROM_INT,
   createProperty,
   listProperties,
   updateProperty,
@@ -63,7 +65,7 @@ export const PropertyEditScreen: React.FC = () => {
         const names = Array.from(
           new Set(
             props
-              .filter((p) => p.has_grouping_election && p.grouping_group_name)
+              .filter((p) => p.grouping_election && p.grouping_group_name)
               .map((p) => p.grouping_group_name as string),
           ),
         );
@@ -74,9 +76,11 @@ export const PropertyEditScreen: React.FC = () => {
           if (e) {
             setPropertyName(e.property_name);
             setPropertyType(e.property_type);
-            setHasGrouping(e.has_grouping_election);
+            setHasGrouping(!!e.grouping_election);
             setGroupName(e.grouping_group_name ?? '');
-            setMpTest(e.mp_test_selected);
+            // mp_test_selected comes back as an integer code from Postgres; map
+            // it back to the string key the selector renders against.
+            setMpTest(e.mp_test_selected != null ? MP_TEST_FROM_INT[e.mp_test_selected] ?? null : null);
           }
         }
       } catch (err) {
@@ -105,11 +109,12 @@ export const PropertyEditScreen: React.FC = () => {
     const payload: PropertyFormInput = {
       business_id: activeBusinessId,
       property_name: propertyName,
-      property_type: propertyType,
-      has_grouping_election: hasGrouping,
-      grouping_group_name: hasGrouping ? groupName : null,
-      mp_test_selected: mpTest,
+      // The DB check constraint requires exactly 'long_term' or 'short_term';
+      // default to long_term when the user hasn't picked a type.
+      property_type: propertyType ?? 'long_term',
+      mp_test_selected: mpTest ? MP_TEST_INT[mpTest] : null,
       grouping_election: hasGrouping,
+      grouping_group_name: hasGrouping ? groupName : null,
     };
     setSaving(true);
     try {

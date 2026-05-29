@@ -44,7 +44,7 @@ export const RegulatoryAlertsInbox: React.FC<RegulatoryAlertsInboxProps> = ({
   useEffect(() => {
     load();
     const channel = supabase
-      .channel('admin-alerts-inbox-stream')
+      .channel('admin-alerts-inbox-stream-' + Date.now())
       .on(
         'postgres_changes',
         { event: '*', schema: 'public', table: 'regulatory_alerts' },

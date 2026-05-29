@@ -53,14 +53,34 @@ export const MP_TEST_ORDER: MpTestKey[] = [
   'test_7',
 ];
 
+// properties.mp_test_selected is an integer column in Postgres, while the app
+// models the choice as a string key for readability. Map at the boundary.
+export const MP_TEST_INT: Record<MpTestKey, number> = {
+  test_1: 1,
+  test_2: 2,
+  test_3: 3,
+  test_4: 4,
+  test_5: 5,
+  test_7: 7,
+};
+
+export const MP_TEST_FROM_INT: Record<number, MpTestKey> = {
+  1: 'test_1',
+  2: 'test_2',
+  3: 'test_3',
+  4: 'test_4',
+  5: 'test_5',
+  7: 'test_7',
+};
+
 export interface PropertyFormInput {
   business_id: string | null;
   property_name: string;
-  property_type: PropertyType | null;
-  has_grouping_election: boolean;
+  property_type: PropertyType;
   grouping_group_name: string | null;
-  mp_test_selected?: MpTestKey | null;
-  grouping_election?: boolean;
+  // Integer code (1–5, 7) matching the Postgres mp_test_selected column.
+  mp_test_selected?: number | null;
+  grouping_election: boolean;
   active?: boolean;
 }
 
@@ -85,12 +105,11 @@ export async function createProperty(input: PropertyFormInput): Promise<Property
     business_id: input.business_id,
     property_name: input.property_name.trim(),
     property_type: input.property_type,
-    has_grouping_election: input.has_grouping_election,
-    grouping_group_name: input.has_grouping_election
+    mp_test_selected: input.mp_test_selected ?? null,
+    grouping_election: input.grouping_election,
+    grouping_group_name: input.grouping_election
       ? input.grouping_group_name?.trim() || null
       : null,
-    mp_test_selected: input.mp_test_selected ?? null,
-    grouping_election: input.grouping_election ?? false,
     active: input.active ?? true,
   };
   const { data, error } = await supabase
@@ -132,13 +151,12 @@ export async function updateProperty(
     business_id: input.business_id,
     property_name: input.property_name.trim(),
     property_type: input.property_type,
-    has_grouping_election: input.has_grouping_election,
-    grouping_group_name: input.has_grouping_election
+    grouping_election: input.grouping_election,
+    grouping_group_name: input.grouping_election
       ? input.grouping_group_name?.trim() || null
       : null,
   };
   if (input.mp_test_selected !== undefined) updates.mp_test_selected = input.mp_test_selected;
-  if (input.grouping_election !== undefined) updates.grouping_election = input.grouping_election;
   if (input.active !== undefined) updates.active = input.active;
   const { data, error } = await supabase
     .from('properties')
@@ -165,7 +183,7 @@ export async function setGroupingElection(
   const { data, error } = await supabase
     .from('properties')
     .update({
-      has_grouping_election: enabled,
+      grouping_election: enabled,
       grouping_group_name: enabled ? (groupName?.trim() || 'Rental Portfolio Group 1') : null,
     })
     .eq('id', id)
@@ -266,6 +284,110 @@ export interface PropertyShortfall {
   threshold: number;
   status: ParticipationStatus;
   groupName: string | null;
+}
+
+// ── Per-property compliance warnings ────────────────────────────────────
+// Surfaced as amber cards on the Properties screen (and mirrored on the
+// dashboard). Each property can raise zero or more warnings. Thresholds are
+// passed in by the caller so they originate from compliance_rules, never
+// hardcoded here.
+
+export type PropertyWarningKind =
+  | 'behind_pace'
+  | 'str_avg_days'
+  | 'no_recent_activity';
+
+export interface PropertyWarning {
+  kind: PropertyWarningKind;
+  message: string;
+}
+
+// Local "YYYY-MM-DD" so the comparison against activity_date (a plain date
+// column) does not pick up a UTC offset.
+function localIsoDate(d: Date): string {
+  const y = d.getFullYear();
+  const mo = String(d.getMonth() + 1).padStart(2, '0');
+  const day = String(d.getDate()).padStart(2, '0');
+  return `${y}-${mo}-${day}`;
+}
+
+export interface PropertyWarningOptions {
+  now?: Date;
+  // Short-term rental average-rental-period ceiling (days). A property whose
+  // average stay drops to/below this loses rental treatment under §469.
+  strMaxDays?: number;
+  // Average rental period in days for this property, if we have booking data
+  // to derive it. The app does not yet capture per-stay data, so callers pass
+  // undefined and this warning stays dormant until that data exists.
+  avgRentalDays?: number | null;
+}
+
+// Returns the active compliance warnings for a single property. Covers:
+//   1. Hours behind pace for the selected material-participation test.
+//   2. Average rental period approaching the 7-day short-term limit (STR).
+//   3. No activity logged in the last 30 days.
+export function computePropertyWarnings(
+  property: PropertyRow,
+  allProperties: PropertyRow[],
+  yearHours: HoursLogRow[],
+  threshold: number,
+  options: PropertyWarningOptions = {},
+): PropertyWarning[] {
+  const now = options.now ?? new Date();
+  const warnings: PropertyWarning[] = [];
+
+  const part = computeParticipation(property, allProperties, yearHours, threshold, now);
+
+  // 1) Behind pace for material participation.
+  if (part.status === 'At Risk' || part.status === 'Not Met') {
+    const where = part.groupName
+      ? ` across the ${part.groupName} group`
+      : '';
+    warnings.push({
+      kind: 'behind_pace',
+      message:
+        `Behind pace for material participation — only ${part.hours.toFixed(0)} of ` +
+        `${threshold} hours logged${where} so far this year. Log more hours before ` +
+        `Dec 31 to stay on track for the ${threshold}-hour test.`,
+    });
+  }
+
+  // 2) Short-term rental average stay nearing the disqualifying limit.
+  if (property.property_type === 'short_term') {
+    const maxDays = options.strMaxDays ?? 7;
+    const avg = options.avgRentalDays;
+    if (typeof avg === 'number' && avg > 0 && avg <= maxDays + 1.5) {
+      warnings.push({
+        kind: 'str_avg_days',
+        message:
+          `Average rental period is ${avg.toFixed(1)} days — approaching the ` +
+          `${maxDays}-day short-term limit. An average stay of ${maxDays} days or ` +
+          `less can disqualify rental treatment under §469. Review your booking mix.`,
+      });
+    }
+  }
+
+  // 3) No activity logged in the last 30 days (for this property or its group).
+  const ids = new Set(part.combinedPropertyIds);
+  const cutoff = new Date(now);
+  cutoff.setDate(cutoff.getDate() - 30);
+  const cutoffIso = localIsoDate(cutoff);
+  const hasRecent = yearHours.some(
+    (r) =>
+      r.property_id != null &&
+      ids.has(r.property_id) &&
+      (r.activity_date ?? '') >= cutoffIso,
+  );
+  if (!hasRecent) {
+    warnings.push({
+      kind: 'no_recent_activity',
+      message:
+        'No activity logged in the last 30 days. Add recent hours to keep a ' +
+        'contemporaneous record — gaps in the log weaken an audit defense.',
+    });
+  }
+
+  return warnings;
 }
 
 export function findShortfalls(

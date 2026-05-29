@@ -1,4 +1,4 @@
-import React, { useCallback, useMemo, useState } from 'react';
+import React, { useCallback, useEffect, useMemo, useState } from 'react';
 import {
   Alert,
   Linking,
@@ -15,8 +15,11 @@ import { useSafeAreaInsets } from 'react-native-safe-area-context';
 import { useFocusEffect, useNavigation } from '@react-navigation/native';
 import type { NativeStackNavigationProp } from '@react-navigation/native-stack';
 import * as DocumentPicker from 'expo-document-picker';
+import * as Print from 'expo-print';
+import * as Sharing from 'expo-sharing';
 import { colors, radius, shadow, spacing, typography } from '../theme';
 import type { RootStackParamList } from '../navigation/types';
+import { DocumentViewer } from '../components/DocumentViewer';
 import {
   supabase,
   requireUserId,
@@ -145,14 +148,21 @@ const rowToDoc = (row: DocumentRow): DocEntry => {
   // For locally-generated minutes documents, file_url stores the full
   // document text — not a remote URL — so it's searchable as content. For
   // uploaded files file_url is a URI and matches act like path searches.
-  const minutesText = fileType === 'minutes' ? row.file_url ?? '' : '';
+  // Minutes and activity-log docs store their full text in file_url (not a
+  // remote URL), so that text is searchable as document content.
+  const inlineText =
+    fileType === 'minutes' ||
+    fileType === 'activity_log' ||
+    fileType === 'augusta_meeting'
+      ? row.file_url ?? ''
+      : '';
   const searchBlob = [
     row.name ?? '',
     strategy,
     row.strategy_category ?? '',
     fileType ?? '',
     ...dateSearchTokens(row.created_at),
-    minutesText,
+    inlineText,
   ]
     .join('\n')
     .toLowerCase();
@@ -225,10 +235,62 @@ const BADGE_COLORS: Record<Strategy, { bg: string; fg: string }> = {
 
 const MINUTES_BADGE = { bg: colors.tealLight, fg: colors.teal };
 
-const STRATEGY_TO_MEETING_LABEL: Record<string, string> = {
-  augusta_rule: 'Augusta Rule business meeting',
-  s_corp: 'S-Corp board meeting',
-  family_management: 'Family management company meeting',
+// Auto-generated real estate activity records get a teal Real Estate badge and
+// a clock icon so they read as a distinct, time-stamped audit entry.
+const ACTIVITY_BADGE = { bg: colors.tealLight, fg: colors.teal };
+
+// file_type values whose file_url holds the document text itself (not a remote
+// URI). These render in the in-app viewer and share as a generated PDF.
+const TEXT_DOC_TYPES = new Set(['minutes', 'activity_log', 'augusta_meeting']);
+// Of the text docs, these are user-editable in place.
+const EDITABLE_DOC_TYPES = new Set(['minutes', 'activity_log']);
+
+const escapeHtmlDoc = (s: string): string =>
+  s
+    .replace(/&/g, '&amp;')
+    .replace(/</g, '&lt;')
+    .replace(/>/g, '&gt;')
+    .replace(/"/g, '&quot;')
+    .replace(/'/g, '&#39;');
+
+// Renders a text document to a PDF (preserving headings/bullets/line breaks)
+// and presents the share sheet.
+const shareDocTextAsPdf = async (name: string, text: string): Promise<void> => {
+  const available = await Sharing.isAvailableAsync();
+  if (!available) throw new Error('Sharing is not available on this device.');
+  const body = text
+    .split(/\r?\n/)
+    .map((raw) => {
+      const line = raw.replace(/\s+$/, '');
+      if (!line.trim()) return '<div style="height:8px"></div>';
+      const heading = /^(#{1,3})\s+(.*)$/.exec(line);
+      if (heading) {
+        return `<h${heading[1].length}>${escapeHtmlDoc(
+          heading[2].replace(/\*\*/g, ''),
+        )}</h${heading[1].length}>`;
+      }
+      const bullet = /^\s*[-*•]\s+(.*)$/.exec(line);
+      if (bullet) return `<li>${escapeHtmlDoc(bullet[1].replace(/\*\*/g, ''))}</li>`;
+      return `<p>${escapeHtmlDoc(line.replace(/\*\*/g, ''))}</p>`;
+    })
+    .join('\n');
+  const html = `<!doctype html><html><head><meta charset="utf-8" />
+<style>
+  @page { margin: 48px; }
+  body { font-family: -apple-system, Helvetica, Arial, sans-serif; color: #1A1A2E; font-size: 12pt; line-height: 1.5; }
+  h1 { color: #042C53; font-size: 18pt; border-bottom: 2px solid #042C53; padding-bottom: 8px; }
+  h2 { color: #042C53; font-size: 14pt; } h3 { color: #1A1A2E; font-size: 12pt; }
+  p { margin: 4px 0 8px 0; } li { margin: 2px 0; }
+</style></head><body>
+  <h1>${escapeHtmlDoc(name)}</h1>
+  ${body}
+</body></html>`;
+  const { uri } = await Print.printToFileAsync({ html, base64: false });
+  await Sharing.shareAsync(uri, {
+    mimeType: 'application/pdf',
+    UTI: 'com.adobe.pdf',
+    dialogTitle: 'Share Document',
+  });
 };
 
 export const DocsScreen: React.FC = () => {
@@ -238,7 +300,15 @@ export const DocsScreen: React.FC = () => {
   const [filter, setFilter] = useState<ChipFilter>('All');
   const [docs, setDocs] = useState<DocEntry[]>([]);
   const [complianceRows, setComplianceRows] = useState<StrategyDocumentRow[]>([]);
+  // `search` is the raw, instantly-reflected input value; `debouncedSearch`
+  // lags it by 300ms and is what actually drives filtering, so a fast typist
+  // doesn't re-run the filter on every keystroke. `searchFocused` toggles the
+  // navy focus border.
   const [search, setSearch] = useState('');
+  const [debouncedSearch, setDebouncedSearch] = useState('');
+  const [searchFocused, setSearchFocused] = useState(false);
+  // The document currently open in the in-app viewer (null when closed).
+  const [viewerDoc, setViewerDoc] = useState<DocEntry | null>(null);
 
   const loadDocs = useCallback(async () => {
     try {
@@ -280,11 +350,33 @@ export const DocsScreen: React.FC = () => {
 
   useFocusEffect(
     useCallback(() => {
+      // Start each visit with a clean search — search state is never persisted
+      // across navigation. Resetting both values keeps the input and the
+      // filter in sync the moment the screen regains focus.
+      setSearch('');
+      setDebouncedSearch('');
       loadDocs();
     }, [loadDocs]),
   );
 
-  const trimmedSearch = search.trim();
+  // Debounce the raw input by 300ms before it reaches the filter. Each
+  // keystroke restarts the timer; only a 300ms pause commits the value.
+  useEffect(() => {
+    const handle = setTimeout(() => setDebouncedSearch(search), 300);
+    return () => clearTimeout(handle);
+  }, [search]);
+
+  // Instant clear — bypasses the debounce by resetting both values together so
+  // the input empties and results restore in the same render.
+  const clearSearch = useCallback(() => {
+    setSearch('');
+    setDebouncedSearch('');
+  }, []);
+
+  // Raw input presence drives the clear (X) button so it appears as you type;
+  // the debounced value drives filtering and the results feedback below.
+  const hasInput = search.trim().length > 0;
+  const trimmedSearch = debouncedSearch.trim();
   const searchActive = trimmedSearch.length > 0;
 
   const filtered = useMemo(() => {
@@ -335,26 +427,58 @@ export const DocsScreen: React.FC = () => {
 
   const openDoc = (doc: DocEntry) => {
     if (doc.isCompliance) {
+      // Compliance uploads live in Storage — open via their signed URL.
       openCompliance(doc);
       return;
     }
-    if (doc.fileType === 'minutes' && doc.fileUrl) {
-      const meetingLabel =
-        (doc.strategy && STRATEGY_TO_MEETING_LABEL[STRATEGY_DB_KEY[doc.strategy]]) ||
-        'Meeting';
-      navigation.navigate('MinutesDocument', {
-        document: doc.fileUrl,
-        meetingType: meetingLabel,
-        meetingDate: formatDocDate(doc.createdAt),
-        location: '—',
-      });
-      return;
+    // Everything else opens in the in-app viewer: minutes/activity_log are
+    // editable; uploaded files and other generated docs are read-only.
+    setViewerDoc(doc);
+  };
+
+  // Persist edits made in the viewer. Updates the documents row and, for
+  // minutes, the mirrored meeting_minutes record so both stay in sync.
+  const handleViewerSave = async (newContent: string) => {
+    if (!viewerDoc) return;
+    const userId = await requireUserId();
+    const { error } = await supabase
+      .from('documents')
+      .update({ file_url: newContent })
+      .eq('id', viewerDoc.id)
+      .eq('user_id', userId);
+    if (error) throw new Error(error.message);
+    if (viewerDoc.fileType === 'minutes' && viewerDoc.fileUrl) {
+      const { error: mErr } = await supabase
+        .from('meeting_minutes')
+        .update({ minutes_document: newContent })
+        .eq('user_id', userId)
+        .eq('minutes_document', viewerDoc.fileUrl);
+      if (mErr) console.warn('[Documents] meeting_minutes sync failed', mErr);
     }
-    navigation.navigate('DocumentDetail', {
-      title: doc.name,
-      meta: doc.meta,
-      strategy: doc.strategy,
-    });
+    // Reflect the new text locally so a follow-up save matches correctly and
+    // the list shows the edit on next focus.
+    setViewerDoc({ ...viewerDoc, fileUrl: newContent });
+    await loadDocs();
+  };
+
+  const handleViewerShare = async () => {
+    if (!viewerDoc) return;
+    try {
+      if (TEXT_DOC_TYPES.has(viewerDoc.fileType ?? '')) {
+        await shareDocTextAsPdf(viewerDoc.name, viewerDoc.fileUrl ?? '');
+      } else if (viewerDoc.fileUrl) {
+        const available = await Sharing.isAvailableAsync();
+        if (!available) {
+          Alert.alert('Sharing not available', 'This device cannot share files.');
+          return;
+        }
+        await Sharing.shareAsync(viewerDoc.fileUrl);
+      } else {
+        Alert.alert('Nothing to share', 'This document has no shareable file.');
+      }
+    } catch (e) {
+      Alert.alert('Could not share', e instanceof Error ? e.message : String(e));
+    }
   };
 
   const onUpload = async () => {
@@ -397,31 +521,33 @@ export const DocsScreen: React.FC = () => {
       </View>
 
       <View style={styles.searchWrap}>
-        <View style={styles.searchBar}>
+        <View style={[styles.searchBar, searchFocused && styles.searchBarFocused]}>
           <Ionicons
             name="search-outline"
             size={16}
-            color={colors.mutedText}
+            color="#888888"
             style={styles.searchIcon}
           />
           <TextInput
             value={search}
             onChangeText={setSearch}
-            placeholder="Search documents, dates, keywords"
+            onFocus={() => setSearchFocused(true)}
+            onBlur={() => setSearchFocused(false)}
+            placeholder="Search documents, dates, keywords..."
             placeholderTextColor={colors.subtleText}
             style={styles.searchInput}
             autoCorrect={false}
             autoCapitalize="none"
             returnKeyType="search"
           />
-          {searchActive ? (
+          {hasInput ? (
             <TouchableOpacity
-              onPress={() => setSearch('')}
+              onPress={clearSearch}
               hitSlop={{ top: 8, bottom: 8, left: 8, right: 8 }}
               style={styles.searchClear}
               accessibilityLabel="Clear search"
             >
-              <Ionicons name="close-circle" size={18} color={colors.mutedText} />
+              <Ionicons name="close-circle" size={18} color="#888888" />
             </TouchableOpacity>
           ) : null}
         </View>
@@ -468,28 +594,29 @@ export const DocsScreen: React.FC = () => {
 
         {searchActive && filtered.length === 0 ? (
           <View style={styles.emptySearchCard}>
-            <Ionicons name="search-outline" size={28} color={colors.midNavy} />
+            <Ionicons name="search-outline" size={40} color="#CCCCCC" />
             <Text style={styles.emptySearchTitle}>
               No documents match your search
             </Text>
-            <Text style={styles.emptySearchHint}>
-              Try a different keyword, month, or year.
-            </Text>
-            <TouchableOpacity
-              activeOpacity={0.85}
-              style={styles.clearSearchBtn}
-              onPress={() => setSearch('')}
-            >
-              <Ionicons name="close" size={14} color={colors.white} />
-              <Text style={styles.clearSearchBtnText}>Clear search</Text>
+            <TouchableOpacity activeOpacity={0.7} onPress={clearSearch}>
+              <Text style={styles.clearSearchLink}>Clear search</Text>
             </TouchableOpacity>
           </View>
         ) : (
         <View style={styles.listCard}>
           {filtered.map((doc, i) => {
             const isMinutes = doc.fileType === 'minutes';
-            const badge = isMinutes ? MINUTES_BADGE : BADGE_COLORS[doc.strategy];
-            const badgeLabel = isMinutes ? 'Minutes' : doc.strategy;
+            const isActivity = doc.fileType === 'activity_log';
+            const badge = isActivity
+              ? ACTIVITY_BADGE
+              : isMinutes
+                ? MINUTES_BADGE
+                : BADGE_COLORS[doc.strategy];
+            const badgeLabel = isActivity
+              ? 'Real Estate'
+              : isMinutes
+                ? 'Minutes'
+                : doc.strategy;
             const isLast = i === filtered.length - 1 && missingSlots.length === 0;
             return (
               <TouchableOpacity
@@ -498,11 +625,11 @@ export const DocsScreen: React.FC = () => {
                 onPress={() => openDoc(doc)}
                 style={[styles.row, !isLast && styles.rowDivider]}
               >
-                <View style={styles.pdfIcon}>
+                <View style={[styles.pdfIcon, isActivity && styles.activityIcon]}>
                   <Ionicons
-                    name="document-text"
+                    name={isActivity ? 'time-outline' : 'document-text'}
                     size={15}
-                    color={colors.midNavy}
+                    color={isActivity ? colors.teal : colors.midNavy}
                   />
                 </View>
                 <View style={styles.rowText}>
@@ -569,6 +696,22 @@ export const DocsScreen: React.FC = () => {
         </View>
         )}
       </ScrollView>
+
+      {viewerDoc ? (
+        <DocumentViewer
+          document={{
+            name: viewerDoc.name,
+            meta: viewerDoc.meta,
+            content: TEXT_DOC_TYPES.has(viewerDoc.fileType ?? '')
+              ? viewerDoc.fileUrl ?? ''
+              : 'This is an uploaded file and can’t be edited in-app. Use Share to open or send it.',
+          }}
+          editable={EDITABLE_DOC_TYPES.has(viewerDoc.fileType ?? '')}
+          onSave={handleViewerSave}
+          onShare={handleViewerShare}
+          onClose={() => setViewerDoc(null)}
+        />
+      ) : null}
     </View>
   );
 };
@@ -597,18 +740,23 @@ const styles = StyleSheet.create({
   },
   searchWrap: {
     backgroundColor: colors.background,
-    paddingHorizontal: spacing.lg,
+    paddingHorizontal: 14,
     paddingTop: spacing.md,
+    // 10px gap between the search bar and the filter chips below.
+    paddingBottom: 10,
   },
   searchBar: {
     flexDirection: 'row',
     alignItems: 'center',
     backgroundColor: colors.white,
     borderRadius: 10,
-    borderWidth: 1,
-    borderColor: colors.navy,
+    borderWidth: 0.5,
+    borderColor: '#CCCCCC',
     paddingHorizontal: spacing.md,
     paddingVertical: 10,
+  },
+  searchBarFocused: {
+    borderColor: colors.midNavy,
   },
   searchIcon: {
     marginRight: spacing.sm,
@@ -625,7 +773,8 @@ const styles = StyleSheet.create({
   },
   resultCount: {
     ...typography.caption,
-    color: colors.mutedText,
+    color: '#888888',
+    fontSize: 12,
     paddingVertical: spacing.sm,
   },
   emptySearchCard: {
@@ -646,31 +795,18 @@ const styles = StyleSheet.create({
     fontSize: 14,
     textAlign: 'center',
   },
-  emptySearchHint: {
-    ...typography.body,
-    color: colors.mutedText,
-    fontSize: 12,
+  clearSearchLink: {
+    color: colors.midNavy,
+    fontSize: 13,
+    fontWeight: '600',
     textAlign: 'center',
-  },
-  clearSearchBtn: {
-    flexDirection: 'row',
-    alignItems: 'center',
-    gap: 4,
-    backgroundColor: colors.midNavy,
-    paddingHorizontal: spacing.md,
-    paddingVertical: 8,
-    borderRadius: 8,
     marginTop: spacing.xs,
-  },
-  clearSearchBtnText: {
-    color: colors.white,
-    fontSize: 12,
-    fontWeight: '700',
   },
   chipsScroll: {
     flexGrow: 0,
     backgroundColor: colors.background,
-    paddingVertical: spacing.md,
+    // Top gap comes from searchWrap's 10px paddingBottom; only pad below.
+    paddingBottom: spacing.md,
   },
   chipsContent: {
     paddingLeft: 14,
@@ -733,6 +869,9 @@ const styles = StyleSheet.create({
     backgroundColor: colors.lightBlue,
     alignItems: 'center',
     justifyContent: 'center',
+  },
+  activityIcon: {
+    backgroundColor: colors.tealLight,
   },
   rowText: {
     flex: 1,

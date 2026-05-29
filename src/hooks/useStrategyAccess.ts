@@ -7,6 +7,9 @@ export interface StrategyAccess {
   tier: SubscriptionTier | null;
   isAdmin: boolean;
   isPro: boolean;
+  // Voice logging is available to Core and Pro subscribers; admins (null tier)
+  // count as Pro.
+  canUseVoice: boolean;
   hasStrategy: (key: string) => boolean;
   hasAnyStrategy: (keys: string[]) => boolean;
   requiredTierFor: (key: string) => 'Core' | 'Pro';
@@ -28,6 +31,8 @@ export function useStrategyAccess(): StrategyAccess {
       tier: subscriptionTier,
       isAdmin,
       isPro: isAdmin || subscriptionTier === 'pro',
+      canUseVoice:
+        isAdmin || subscriptionTier === 'core' || subscriptionTier === 'pro',
       hasStrategy: (key: string) => isAdmin || set.has(key),
       hasAnyStrategy: (keys: string[]) => isAdmin || keys.some((k) => set.has(k)),
       requiredTierFor: () => (subscriptionTier === 'starter' ? 'Core' : 'Pro'),

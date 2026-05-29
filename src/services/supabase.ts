@@ -34,6 +34,7 @@ export interface UserRow {
   subscription_status: SubscriptionStatus | null;
   subscription_start: string | null;
   onboarding_completed: boolean;
+  re_grouping_election: boolean | null;
 }
 
 export interface TosAcceptanceRow {
@@ -70,7 +71,9 @@ export type BusinessInsert = Omit<BusinessRow, 'id' | 'created_at' | 'is_default
   is_default?: boolean;
 };
 
-export type PropertyType = 'residential' | 'commercial' | 'STR' | 'land';
+// v2 enum, matching the properties_property_type_check constraint in
+// schema.sql. (v1 used 'residential' | 'commercial' | 'STR' | 'land'.)
+export type PropertyType = 'long_term' | 'short_term';
 
 export interface PropertyRow {
   id: string;
@@ -79,6 +82,10 @@ export interface PropertyRow {
   property_name: string;
   property_type: PropertyType | null;
   has_grouping_election: boolean;
+  // v2 per-property mirror of users.re_grouping_election. This is the column
+  // the manage-properties toggle reads and writes; has_grouping_election is
+  // the legacy v1 column still read by computeParticipation.
+  grouping_election: boolean;
   grouping_group_name: string | null;
   created_at: string;
 }
@@ -97,6 +104,10 @@ export interface HoursLogRow {
   category: string | null;
   hours: number | null;
   activity_date: string | null;
+  // Participation bucket recorded on each row (reps_general /
+  // material_participation / str_participation). Surfaced in the audit export
+  // and editable from the Hours activity log.
+  hours_type: string | null;
   created_at: string;
 }
 

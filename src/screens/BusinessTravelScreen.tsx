@@ -16,10 +16,13 @@ import { Ionicons } from '@expo/vector-icons';
 import { Audio } from 'expo-av';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
 import { colors, radius, shadow, spacing, typography } from '../theme';
+import { DateInputField, DatePickerModal } from '../components/DateInputField';
 import { Header } from '../components/Header';
 import { Card } from '../components/Card';
 import { SectionHeader } from '../components/SectionHeader';
 import { StatusPill } from '../components/StatusPill';
+import { EditableListRow } from '../components/EditableListRow';
+import { EditFormSheet } from '../components/EditFormSheet';
 import { AnimatedWaveform } from '../components/AnimatedWaveform';
 import {
   ComplianceRule,
@@ -51,6 +54,7 @@ import {
   supabase,
   requireUserId,
   type BusinessTripRow,
+  type DayLogJson,
 } from '../services/supabase';
 import { useBusiness } from '../business/BusinessContext';
 import { useKeepAwakeWhile } from '../hooks/useKeepAwakeWhile';
@@ -77,6 +81,28 @@ interface TripHistoryEntry {
   verdict: Verdict;
   deduct_pct: number;
   purpose: string;
+  // 'draft' for future-dated trips not yet finalized; otherwise the saved status.
+  status: string;
+  // Full source row, carried so the edit sheet can pre-fill every field
+  // (expenses, raw dates, countries) that the lossy summary doesn't keep.
+  raw: BusinessTripRow;
+}
+
+// Data carried from the AI Analyzer into the Log Trip form when the user taps
+// "Log This Trip". Everything here is what the analyzer already determined; the
+// user still completes dates, purpose, and expense amounts before saving.
+interface TripPrefill {
+  trip_type: TripType;
+  destination: string;
+  total_days: number;
+  business_days: number;
+  personal_days: number;
+  business_day_pct: number;
+  transport_deduct_pct: number;
+  compliance_verdict: Verdict;
+  compliance_notes: string;
+  countries?: string[];
+  day_by_day_log: DayLogJson | null;
 }
 
 const MONTH_SHORT_BT = [
@@ -84,12 +110,57 @@ const MONTH_SHORT_BT = [
   'Jul', 'Aug', 'Sep', 'Oct', 'Nov', 'Dec',
 ];
 
+// Earliest selectable trip date — shared by both date pickers.
+const MIN_TRIP_DATE = new Date('2020-01-01');
+
+// Display format for every date in the Business Travel form: MM/DD/YYYY.
+const formatDateMMDDYYYY = (date: Date): string => {
+  const month = String(date.getMonth() + 1).padStart(2, '0');
+  const day = String(date.getDate()).padStart(2, '0');
+  const year = date.getFullYear();
+  return month + '/' + day + '/' + year;
+};
+
+// Short "Nov 20" form used in the Total Days helper text.
+const formatDateShort = (date: Date): string =>
+  `${MONTH_SHORT_BT[date.getMonth()]} ${date.getDate()}`;
+
+// Convert a picked Date back to an ISO calendar date (YYYY-MM-DD) for Supabase.
+// Uses local date parts so the day never shifts across time zones.
+const toISODate = (date: Date): string => {
+  const month = String(date.getMonth() + 1).padStart(2, '0');
+  const day = String(date.getDate()).padStart(2, '0');
+  return `${date.getFullYear()}-${month}-${day}`;
+};
+
+// Two years after a date — the return picker's maximum, so trips can be
+// pre-planned (and cross-year returns selected) well into the future.
+const twoYearsAfter = (date: Date): Date => {
+  const r = new Date(date);
+  r.setFullYear(r.getFullYear() + 2);
+  return r;
+};
+
+// Both departure and return days count, so the span is inclusive of both ends.
+const calculateTotalDays = (departure: Date, returnDate: Date): number => {
+  const diffTime = Math.abs(returnDate.getTime() - departure.getTime());
+  const diffDays = Math.ceil(diffTime / (1000 * 60 * 60 * 24)) + 1;
+  return diffDays;
+};
+
+// Parse a stored ISO calendar date (YYYY-MM-DD) without time-zone drift.
+const parseISODate = (iso: string): Date | null => {
+  const m = /^(\d{4})-(\d{2})-(\d{2})/.exec(iso);
+  if (m) return new Date(Number(m[1]), Number(m[2]) - 1, Number(m[3]));
+  const d = new Date(iso);
+  return Number.isNaN(d.getTime()) ? null : d;
+};
+
 const formatDateRange = (start: string | null, end: string | null): string => {
   const fmt = (iso: string | null) => {
     if (!iso) return '';
-    const d = new Date(iso);
-    if (Number.isNaN(d.getTime())) return iso;
-    return `${MONTH_SHORT_BT[d.getMonth()]} ${d.getDate()}, ${d.getFullYear()}`;
+    const d = parseISODate(iso);
+    return d ? formatDateMMDDYYYY(d) : iso;
   };
   if (start && end) return `${fmt(start)} – ${fmt(end)}`;
   return fmt(start || end);
@@ -107,6 +178,8 @@ const tripRowToEntry = (row: BusinessTripRow): TripHistoryEntry => ({
   verdict: (row.compliance_verdict as Verdict) ?? 'not_deductible',
   deduct_pct: row.transport_deduct_pct ?? 0,
   purpose: row.purpose ?? '',
+  status: row.status ?? 'logged',
+  raw: row,
 });
 
 const verdictTheme: Record<
@@ -140,6 +213,9 @@ const dayTheme = {
 };
 
 const NOT_DEDUCT_RED = '#B33A3A';
+// Amber used for the draft button, draft badge, and future-trip info banner.
+const DRAFT_AMBER = '#BA7517';
+const DRAFT_BANNER_BG = '#FAEEDA';
 
 export const BusinessTravelScreen: React.FC = () => {
   const insets = useSafeAreaInsets();
@@ -147,6 +223,10 @@ export const BusinessTravelScreen: React.FC = () => {
   const [rules, setRules] = useState<ComplianceRules | null>(null);
   const [rulesError, setRulesError] = useState<string | null>(null);
   const [trips, setTrips] = useState<TripHistoryEntry[]>([]);
+  // Pre-fill payload handed from the AI Analyzer to the Log Trip form.
+  const [prefill, setPrefill] = useState<TripPrefill | null>(null);
+  // The trip row currently open in the edit sheet (Trip History → tap a row).
+  const [editingTrip, setEditingTrip] = useState<BusinessTripRow | null>(null);
 
   useEffect(() => {
     loadComplianceRules()
@@ -220,20 +300,39 @@ export const BusinessTravelScreen: React.FC = () => {
       ) : (
         <View style={styles.body}>
           {tab === 'analyzer' && (
-            <AnalyzerTab rules={rules} insets={insets} />
+            <AnalyzerTab
+              rules={rules}
+              insets={insets}
+              onLogTrip={(p) => {
+                setPrefill(p);
+                setTab('log');
+              }}
+            />
           )}
           {tab === 'log' && (
             <LogTripTab
               rules={rules}
               insets={insets}
+              prefill={prefill}
+              onConsumePrefill={() => setPrefill(null)}
               onSaved={async () => {
                 await loadTrips();
+                setPrefill(null);
                 setTab('history');
               }}
             />
           )}
-          {tab === 'history' && <HistoryTab trips={trips} insets={insets} />}
+          {tab === 'history' && (
+            <HistoryTab trips={trips} insets={insets} onEdit={setEditingTrip} />
+          )}
           {tab === 'rules' && <RulesTab rules={rules} insets={insets} />}
+
+          <TripEditSheet
+            trip={editingTrip}
+            rules={rules}
+            onClose={() => setEditingTrip(null)}
+            onSaved={loadTrips}
+          />
         </View>
       )}
     </View>
@@ -245,9 +344,10 @@ export const BusinessTravelScreen: React.FC = () => {
 interface AnalyzerTabProps {
   rules: ComplianceRules;
   insets: { bottom: number };
+  onLogTrip: (prefill: TripPrefill) => void;
 }
 
-const AnalyzerTab: React.FC<AnalyzerTabProps> = ({ rules, insets }) => {
+const AnalyzerTab: React.FC<AnalyzerTabProps> = ({ rules, insets, onLogTrip }) => {
   const [recording, setRecording] = useState<Audio.Recording | null>(null);
   const [isRecording, setIsRecording] = useState(false);
   const [transcribing, setTranscribing] = useState(false);
@@ -569,7 +669,12 @@ const AnalyzerTab: React.FC<AnalyzerTabProps> = ({ rules, insets }) => {
       </Card>
 
       {parsed && result ? (
-        <ResultBlock parsed={parsed} result={result} rules={rules} />
+        <ResultBlock
+          parsed={parsed}
+          result={result}
+          rules={rules}
+          onLogTrip={onLogTrip}
+        />
       ) : null}
     </ScrollView>
   );
@@ -579,12 +684,35 @@ interface ResultBlockProps {
   parsed: ParsedItinerary;
   result: DeductibilityResult;
   rules: ComplianceRules;
+  onLogTrip: (prefill: TripPrefill) => void;
 }
 
-const ResultBlock: React.FC<ResultBlockProps> = ({ parsed, result, rules }) => {
+const ResultBlock: React.FC<ResultBlockProps> = ({ parsed, result, rules, onLogTrip }) => {
   const v = verdictTheme[result.verdict];
   const tripBadgeLabel =
     result.trip_type === 'domestic' ? 'Domestic' : 'International';
+
+  const handleLogTrip = () => {
+    onLogTrip({
+      trip_type: result.trip_type,
+      destination: parsed.destination,
+      total_days: result.total_days,
+      business_days: result.counted_business_days,
+      personal_days: result.personal_days,
+      business_day_pct: result.business_day_pct,
+      transport_deduct_pct: result.breakdown.transportation_pct,
+      compliance_verdict: result.verdict,
+      compliance_notes: result.rationale,
+      countries: parsed.countries,
+      day_by_day_log: parsed.days.length
+        ? parsed.days.map((d) => ({
+            date: d.date,
+            type: d.kind,
+            description: d.label,
+          }))
+        : null,
+    });
+  };
 
   return (
     <>
@@ -726,6 +854,15 @@ const ResultBlock: React.FC<ResultBlockProps> = ({ parsed, result, rules }) => {
           isLast
         />
       </Card>
+
+      <TouchableOpacity
+        activeOpacity={0.85}
+        onPress={handleLogTrip}
+        style={styles.logTripBtn}
+      >
+        <Ionicons name="add-circle" size={18} color={colors.white} />
+        <Text style={styles.logTripBtnText}>Log This Trip</Text>
+      </TouchableOpacity>
     </>
   );
 };
@@ -763,17 +900,32 @@ const BreakdownRow: React.FC<{
 interface LogTripTabProps {
   rules: ComplianceRules;
   insets: { bottom: number };
+  prefill?: TripPrefill | null;
+  onConsumePrefill?: () => void;
   onSaved: () => Promise<void> | void;
 }
 
-const LogTripTab: React.FC<LogTripTabProps> = ({ rules, insets, onSaved }) => {
+const LogTripTab: React.FC<LogTripTabProps> = ({
+  rules,
+  insets,
+  prefill,
+  onConsumePrefill,
+  onSaved,
+}) => {
   const { activeBusinessId } = useBusiness();
   const [tripType, setTripType] = useState<TripType>('domestic');
   const [destination, setDestination] = useState('');
-  const [departure, setDeparture] = useState('');
-  const [returnDate, setReturnDate] = useState('');
+  const [departureDate, setDepartureDate] = useState<Date | null>(null);
+  const [returnDateValue, setReturnDateValue] = useState<Date | null>(null);
+  // Which date picker is open. Only one at a time; both render full-width below
+  // the two-column date row so the spinner is never clipped.
+  const [showDeparturePicker, setShowDeparturePicker] = useState(false);
+  const [showReturnPicker, setShowReturnPicker] = useState(false);
   const [businessDays, setBusinessDays] = useState('');
   const [totalDays, setTotalDays] = useState('');
+  // True when Total Days was filled automatically (from the AI Analyzer or the
+  // date pickers). When true the field is read-only and shows an "Auto" badge.
+  const [totalDaysAuto, setTotalDaysAuto] = useState(false);
   const [purpose, setPurpose] = useState('');
   const [countries, setCountries] = useState('');
   const [intlReason, setIntlReason] = useState('');
@@ -782,6 +934,40 @@ const LogTripTab: React.FC<LogTripTabProps> = ({ rules, insets, onSaved }) => {
   const [expMeals, setExpMeals] = useState('');
   const [expOther, setExpOther] = useState('');
   const [preview, setPreview] = useState<DeductibilityResult | null>(null);
+  // True once the form has been pre-filled by the AI Analyzer. Drives the
+  // teal "auto-filled" field borders and the amber prompt over the fields the
+  // user still has to complete. The analyzer's day-by-day log is held here so
+  // it can be saved with the trip.
+  const [autoFilled, setAutoFilled] = useState(false);
+  const [prefillDayLog, setPrefillDayLog] = useState<DayLogJson | null>(null);
+
+  // Apply the analyzer payload once when it arrives, then clear it from the
+  // parent so re-renders don't clobber subsequent manual edits.
+  useEffect(() => {
+    if (!prefill) return;
+    setTripType(prefill.trip_type);
+    setDestination(prefill.destination);
+    setTotalDays(prefill.total_days ? String(prefill.total_days) : '');
+    // The analyzer already determined total days, so present it as auto-filled.
+    // If the user later picks both dates it recalculates automatically.
+    setTotalDaysAuto(!!prefill.total_days);
+    setBusinessDays(prefill.business_days ? String(prefill.business_days) : '');
+    setCountries(prefill.countries?.join(', ') ?? '');
+    setPrefillDayLog(prefill.day_by_day_log);
+    setPreview(null);
+    setAutoFilled(true);
+    onConsumePrefill?.();
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [prefill]);
+
+  // Auto-calculate Total Days whenever both dates are selected. The return
+  // picker already prevents a return earlier than departure.
+  useEffect(() => {
+    if (departureDate && returnDateValue) {
+      setTotalDays(String(calculateTotalDays(departureDate, returnDateValue)));
+      setTotalDaysAuto(true);
+    }
+  }, [departureDate, returnDateValue]);
 
   const parseN = (s: string) => {
     const n = parseFloat(s);
@@ -807,13 +993,6 @@ const LogTripTab: React.FC<LogTripTabProps> = ({ rules, insets, onSaved }) => {
       rules,
     });
     setPreview(result);
-  };
-
-  const toIsoDate = (s: string): string | null => {
-    if (!s) return null;
-    if (/^\d{4}-\d{2}-\d{2}$/.test(s)) return s;
-    const d = new Date(s);
-    return Number.isNaN(d.getTime()) ? null : d.toISOString().slice(0, 10);
   };
 
   const onSubmit = async () => {
@@ -846,14 +1025,14 @@ const LogTripTab: React.FC<LogTripTabProps> = ({ rules, insets, onSaved }) => {
           ? countries.split(',').map((c) => c.trim()).filter(Boolean)
           : null,
         purpose,
-        departure_date: toIsoDate(departure),
-        return_date: toIsoDate(returnDate),
+        departure_date: departureDate ? toISODate(departureDate) : null,
+        return_date: returnDateValue ? toISODate(returnDateValue) : null,
         total_days: total,
         business_days: result.business_days,
         personal_days: result.personal_days,
         business_day_pct: result.business_day_pct,
         transport_deduct_pct: result.breakdown.transportation_pct,
-        day_by_day_log: null,
+        day_by_day_log: prefillDayLog,
         itinerary_transcript: null,
         compliance_verdict: result.verdict,
         compliance_notes: result.rationale,
@@ -861,14 +1040,51 @@ const LogTripTab: React.FC<LogTripTabProps> = ({ rules, insets, onSaved }) => {
         expenses_lodging: parseN(expLodging) || null,
         expenses_meals: parseN(expMeals) || null,
         expenses_other: parseN(expOther) || null,
-        status: 'logged',
+        // Future-dated trips are saved as drafts; everything else keeps the
+        // existing 'logged' status.
+        status: isFutureTrip ? 'draft' : 'logged',
       });
       if (error) throw new Error(error.message);
+      if (isFutureTrip) {
+        Alert.alert(
+          'Saved as draft',
+          'Trip saved as draft. You can edit and finalize it once the trip is complete.',
+        );
+      }
       await onSaved();
     } catch (e) {
       Alert.alert('Could not save trip', e instanceof Error ? e.message : String(e));
     }
   };
+
+  const today = useMemo(() => new Date(), []);
+  // Departures can be pre-planned up to two years out so future trips can be
+  // saved as drafts. (Was previously capped at today.)
+  const maxDepartureDate = useMemo(() => twoYearsAfter(today), [today]);
+  // Returns can be pre-planned up to two years out — this also unblocks
+  // cross-year trips (December departure, January return next year).
+  const maxReturnDate = useMemo(() => twoYearsAfter(today), [today]);
+  // A trip whose departure is after today is saved as a draft to be finalized
+  // once travel is complete. Compared on calendar day only.
+  const isFutureTrip = useMemo(() => {
+    if (!departureDate) return false;
+    const start = new Date();
+    start.setHours(0, 0, 0, 0);
+    const departure = new Date(departureDate);
+    departure.setHours(0, 0, 0, 0);
+    return departure > start;
+  }, [departureDate]);
+  // "5 day trip — Nov 20 to Nov 24", shown once both dates are picked.
+  const totalDaysHelper =
+    departureDate && returnDateValue
+      ? `${calculateTotalDays(departureDate, returnDateValue)} day trip — ` +
+        `${formatDateShort(departureDate)} to ${formatDateShort(returnDateValue)}`
+      : undefined;
+  // Visual confirmation that a year boundary crossing is intentional.
+  const crossesYear =
+    departureDate != null &&
+    returnDateValue != null &&
+    returnDateValue.getFullYear() !== departureDate.getFullYear();
 
   return (
     <ScrollView
@@ -881,7 +1097,26 @@ const LogTripTab: React.FC<LogTripTabProps> = ({ rules, insets, onSaved }) => {
       keyboardShouldPersistTaps="handled"
     >
       <Card padded>
-        <Text style={styles.sectionLabel}>Trip type</Text>
+        {autoFilled ? (
+          <View style={styles.prefillNote}>
+            <Ionicons name="information-circle" size={16} color={colors.amber} />
+            <Text style={styles.prefillNoteText}>
+              Please complete the remaining fields below to save your trip. Fields
+              marked with a checkmark were auto-filled by the AI; the amber fields
+              still need your input.
+            </Text>
+          </View>
+        ) : null}
+
+        <View style={styles.fieldLabelRow}>
+          <Text style={styles.sectionLabel}>Trip type</Text>
+          {autoFilled ? (
+            <View style={styles.autofillTag}>
+              <Ionicons name="checkmark-circle" size={12} color={colors.teal} />
+              <Text style={styles.autofillTagText}>AI</Text>
+            </View>
+          ) : null}
+        </View>
         <View style={styles.segmentRow}>
           {(['domestic', 'international'] as const).map((kind) => {
             const active = tripType === kind;
@@ -934,6 +1169,7 @@ const LogTripTab: React.FC<LogTripTabProps> = ({ rules, insets, onSaved }) => {
               placeholder="e.g. Germany, France"
               value={countries}
               onChangeText={setCountries}
+              autofilled={autoFilled && countries.trim().length > 0}
             />
             <LabeledInput
               label="Primary business reason"
@@ -949,24 +1185,81 @@ const LogTripTab: React.FC<LogTripTabProps> = ({ rules, insets, onSaved }) => {
           placeholder="e.g. Phoenix, AZ"
           value={destination}
           onChangeText={setDestination}
+          autofilled={autoFilled && destination.trim().length > 0}
         />
         <View style={styles.fieldRow}>
-          <LabeledInput
+          <DateInputField
             label="Departure date"
-            placeholder="YYYY-MM-DD"
-            value={departure}
-            onChangeText={setDeparture}
+            value={departureDate}
+            onChange={setDepartureDate}
+            minimumDate={MIN_TRIP_DATE}
+            maximumDate={maxDepartureDate}
             style={styles.flexHalf}
+            pickerVisible={showDeparturePicker}
+            onPickerVisibleChange={(v) => {
+              setShowDeparturePicker(v);
+              if (v) setShowReturnPicker(false);
+            }}
           />
           <View style={styles.fieldGap} />
-          <LabeledInput
+          <DateInputField
             label="Return date"
-            placeholder="YYYY-MM-DD"
-            value={returnDate}
-            onChangeText={setReturnDate}
+            value={returnDateValue}
+            onChange={setReturnDateValue}
+            minimumDate={departureDate ?? MIN_TRIP_DATE}
+            maximumDate={maxReturnDate}
             style={styles.flexHalf}
+            pickerVisible={showReturnPicker}
+            onPickerVisibleChange={(v) => {
+              setShowReturnPicker(v);
+              if (v) setShowDeparturePicker(false);
+            }}
           />
         </View>
+        {crossesYear ? (
+          <Text style={styles.crossYearNote}>
+            Trip crosses into {returnDateValue?.getFullYear()}
+          </Text>
+        ) : null}
+
+        {isFutureTrip ? (
+          <View style={styles.futureTripBanner}>
+            <Ionicons name="information-circle" size={16} color={DRAFT_AMBER} />
+            <Text style={styles.futureTripBannerText}>
+              Future trips are saved as drafts and can be finalized after travel
+              is complete.
+            </Text>
+          </View>
+        ) : null}
+
+        {/* Bottom-sheet pickers with OK / Cancel — scrolling a column only
+            updates an internal temp date, so the user can set month, day, and
+            year before confirming. */}
+        <DatePickerModal
+          visible={showDeparturePicker}
+          title="Departure Date"
+          value={departureDate}
+          minimumDate={MIN_TRIP_DATE}
+          maximumDate={maxDepartureDate}
+          onConfirm={(d) => {
+            setDepartureDate(d);
+            setShowDeparturePicker(false);
+          }}
+          onCancel={() => setShowDeparturePicker(false)}
+        />
+        <DatePickerModal
+          visible={showReturnPicker}
+          title="Return Date"
+          value={returnDateValue}
+          fallback={departureDate ?? undefined}
+          minimumDate={departureDate ?? MIN_TRIP_DATE}
+          maximumDate={maxReturnDate}
+          onConfirm={(d) => {
+            setReturnDateValue(d);
+            setShowReturnPicker(false);
+          }}
+          onCancel={() => setShowReturnPicker(false)}
+        />
         <View style={styles.fieldRow}>
           <LabeledInput
             label="Business days"
@@ -975,6 +1268,7 @@ const LogTripTab: React.FC<LogTripTabProps> = ({ rules, insets, onSaved }) => {
             value={businessDays}
             onChangeText={setBusinessDays}
             style={styles.flexHalf}
+            autofilled={autoFilled}
           />
           <View style={styles.fieldGap} />
           <LabeledInput
@@ -984,6 +1278,9 @@ const LogTripTab: React.FC<LogTripTabProps> = ({ rules, insets, onSaved }) => {
             value={totalDays}
             onChangeText={setTotalDays}
             style={styles.flexHalf}
+            editable={!totalDaysAuto}
+            autoBadge={totalDaysAuto}
+            helperText={totalDaysHelper}
           />
         </View>
         <LabeledInput
@@ -992,6 +1289,7 @@ const LogTripTab: React.FC<LogTripTabProps> = ({ rules, insets, onSaved }) => {
           value={purpose}
           onChangeText={setPurpose}
           multiline
+          highlight={autoFilled}
         />
 
         <Text style={[styles.sectionLabel, styles.sectionGap]}>Expenses</Text>
@@ -1003,6 +1301,7 @@ const LogTripTab: React.FC<LogTripTabProps> = ({ rules, insets, onSaved }) => {
             value={expTransport}
             onChangeText={setExpTransport}
             style={styles.flexHalf}
+            highlight={autoFilled}
           />
           <View style={styles.fieldGap} />
           <LabeledInput
@@ -1012,6 +1311,7 @@ const LogTripTab: React.FC<LogTripTabProps> = ({ rules, insets, onSaved }) => {
             value={expLodging}
             onChangeText={setExpLodging}
             style={styles.flexHalf}
+            highlight={autoFilled}
           />
         </View>
         <View style={styles.fieldRow}>
@@ -1022,6 +1322,7 @@ const LogTripTab: React.FC<LogTripTabProps> = ({ rules, insets, onSaved }) => {
             value={expMeals}
             onChangeText={setExpMeals}
             style={styles.flexHalf}
+            highlight={autoFilled}
           />
           <View style={styles.fieldGap} />
           <LabeledInput
@@ -1031,6 +1332,7 @@ const LogTripTab: React.FC<LogTripTabProps> = ({ rules, insets, onSaved }) => {
             value={expOther}
             onChangeText={setExpOther}
             style={styles.flexHalf}
+            highlight={autoFilled}
           />
         </View>
 
@@ -1046,10 +1348,12 @@ const LogTripTab: React.FC<LogTripTabProps> = ({ rules, insets, onSaved }) => {
           <TouchableOpacity
             activeOpacity={0.85}
             onPress={onSubmit}
-            style={[styles.btn, styles.btnPrimary]}
+            style={[styles.btn, isFutureTrip ? styles.btnDraft : styles.btnPrimary]}
           >
             <Ionicons name="save-outline" size={16} color={colors.white} />
-            <Text style={styles.btnPrimaryText}>Save trip</Text>
+            <Text style={styles.btnPrimaryText}>
+              {isFutureTrip ? 'Save as Draft' : 'Save trip'}
+            </Text>
           </TouchableOpacity>
         </View>
       </Card>
@@ -1099,18 +1403,62 @@ const LabeledInput: React.FC<{
   keyboardType?: 'default' | 'numeric' | 'decimal-pad';
   multiline?: boolean;
   style?: any;
-}> = ({ label, placeholder, value, onChangeText, keyboardType, multiline, style }) => (
+  // Teal border + checkmark: filled by the AI Analyzer.
+  autofilled?: boolean;
+  // Amber border: a field the user still needs to complete.
+  highlight?: boolean;
+  // When false the field is read-only and shown on a light gray background.
+  editable?: boolean;
+  // Teal "Auto" badge next to the label — value was calculated automatically.
+  autoBadge?: boolean;
+  // Caption rendered below the field (e.g. the "5 day trip" summary).
+  helperText?: string;
+}> = ({
+  label,
+  placeholder,
+  value,
+  onChangeText,
+  keyboardType,
+  multiline,
+  style,
+  autofilled,
+  highlight,
+  editable = true,
+  autoBadge,
+  helperText,
+}) => (
   <View style={[styles.field, style]}>
-    <Text style={styles.fieldLabel}>{label}</Text>
+    <View style={styles.fieldLabelRow}>
+      <Text style={styles.fieldLabel}>{label}</Text>
+      {autofilled ? (
+        <View style={styles.autofillTag}>
+          <Ionicons name="checkmark-circle" size={12} color={colors.teal} />
+          <Text style={styles.autofillTagText}>AI</Text>
+        </View>
+      ) : null}
+      {autoBadge ? (
+        <View style={styles.autoBadge}>
+          <Text style={styles.autoBadgeText}>Auto</Text>
+        </View>
+      ) : null}
+    </View>
     <TextInput
-      style={[styles.fieldInput, multiline && styles.fieldInputMulti]}
+      style={[
+        styles.fieldInput,
+        multiline && styles.fieldInputMulti,
+        autofilled && styles.fieldInputAuto,
+        highlight && styles.fieldInputManual,
+        editable === false && styles.fieldInputReadOnly,
+      ]}
       placeholder={placeholder}
       placeholderTextColor={colors.subtleText}
       value={value}
       onChangeText={onChangeText}
       keyboardType={keyboardType ?? 'default'}
       multiline={multiline}
+      editable={editable}
     />
+    {helperText ? <Text style={styles.fieldHelper}>{helperText}</Text> : null}
   </View>
 );
 
@@ -1119,7 +1467,8 @@ const LabeledInput: React.FC<{
 const HistoryTab: React.FC<{
   trips: TripHistoryEntry[];
   insets: { bottom: number };
-}> = ({ trips, insets }) => {
+  onEdit: (row: BusinessTripRow) => void;
+}> = ({ trips, insets, onEdit }) => {
   return (
     <ScrollView
       style={styles.scroll}
@@ -1136,13 +1485,18 @@ const HistoryTab: React.FC<{
           </Text>
         </Card>
       ) : (
-        trips.map((t) => <TripRow key={t.id} trip={t} />)
+        trips.map((t) => (
+          <TripRow key={t.id} trip={t} onPress={() => onEdit(t.raw)} />
+        ))
       )}
     </ScrollView>
   );
 };
 
-const TripRow: React.FC<{ trip: TripHistoryEntry }> = ({ trip }) => {
+const TripRow: React.FC<{ trip: TripHistoryEntry; onPress: () => void }> = ({
+  trip,
+  onPress,
+}) => {
   const pillProps = (() => {
     if (trip.verdict === 'full_deduction') {
       return { label: '100% deductible', variant: 'success' as const };
@@ -1157,9 +1511,14 @@ const TripRow: React.FC<{ trip: TripHistoryEntry }> = ({ trip }) => {
   })();
   const pillBg = trip.verdict === 'not_deductible' ? '#FCEBEB' : undefined;
   const pillFg = trip.verdict === 'not_deductible' ? NOT_DEDUCT_RED : undefined;
+  const isDraft = trip.status === 'draft';
 
   return (
-    <View style={styles.tripRow}>
+    <EditableListRow
+      onPress={onPress}
+      style={styles.tripRow}
+      contentStyle={styles.tripRowContent}
+    >
       <View style={styles.tripIconWrap}>
         <Ionicons
           name={
@@ -1174,7 +1533,13 @@ const TripRow: React.FC<{ trip: TripHistoryEntry }> = ({ trip }) => {
           <Text style={styles.tripRowDest} numberOfLines={1}>
             {trip.destination}
           </Text>
-          {pillBg ? (
+          {isDraft ? (
+            <View style={[styles.pillCustom, styles.draftPill]}>
+              <Text style={[styles.pillCustomText, styles.draftPillText]}>
+                Draft
+              </Text>
+            </View>
+          ) : pillBg ? (
             <View style={[styles.pillCustom, { backgroundColor: pillBg }]}>
               <Text style={[styles.pillCustomText, { color: pillFg }]}>
                 {pillProps.label}
@@ -1194,9 +1559,525 @@ const TripRow: React.FC<{ trip: TripHistoryEntry }> = ({ trip }) => {
           </Text>
         ) : null}
       </View>
-    </View>
+    </EditableListRow>
   );
 };
+
+// ───────────────────────── Trip edit sheet (Fix 3) ──────────────────────────
+
+type TripStatus = 'documented' | 'receipts_needed' | 'planned';
+
+const TRIP_STATUS_OPTIONS: Array<{ key: TripStatus; label: string }> = [
+  { key: 'documented', label: 'Documented' },
+  { key: 'receipts_needed', label: 'Receipts Needed' },
+  { key: 'planned', label: 'Planned' },
+];
+
+// Map any stored status onto the three editable buckets. Legacy 'logged' rows
+// and anything unrecognized read as Documented.
+const normalizeTripStatus = (s: string | null): TripStatus =>
+  s === 'receipts_needed' ? 'receipts_needed' : s === 'planned' ? 'planned' : 'documented';
+
+// Calendar-day comparison: is this date strictly after today?
+const isFutureDate = (d: Date): boolean => {
+  const start = new Date();
+  start.setHours(0, 0, 0, 0);
+  const day = new Date(d);
+  day.setHours(0, 0, 0, 0);
+  return day > start;
+};
+
+interface TripEditSheetProps {
+  trip: BusinessTripRow | null;
+  rules: ComplianceRules;
+  onClose: () => void;
+  onSaved: () => Promise<void> | void;
+}
+
+const TripEditSheet: React.FC<TripEditSheetProps> = ({
+  trip,
+  rules,
+  onClose,
+  onSaved,
+}) => {
+  const [tripType, setTripType] = useState<TripType>('domestic');
+  const [destination, setDestination] = useState('');
+  const [departureDate, setDepartureDate] = useState<Date | null>(null);
+  const [returnDateValue, setReturnDateValue] = useState<Date | null>(null);
+  const [showDeparturePicker, setShowDeparturePicker] = useState(false);
+  const [showReturnPicker, setShowReturnPicker] = useState(false);
+  const [businessDays, setBusinessDays] = useState('');
+  const [totalDays, setTotalDays] = useState('');
+  const [purpose, setPurpose] = useState('');
+  const [expTransport, setExpTransport] = useState('');
+  const [expLodging, setExpLodging] = useState('');
+  const [expMeals, setExpMeals] = useState('');
+  const [expOther, setExpOther] = useState('');
+  const [status, setStatus] = useState<TripStatus>('documented');
+  const [saving, setSaving] = useState(false);
+
+  const isDraft = trip?.status === 'draft';
+
+  const numToStr = (n: number | null): string =>
+    n != null && Number.isFinite(n) ? String(n) : '';
+
+  // Pre-fill every field from the source row whenever a trip opens.
+  useEffect(() => {
+    if (!trip) return;
+    setTripType((trip.trip_type ?? 'domestic') as TripType);
+    setDestination(trip.destination ?? '');
+    setDepartureDate(parseISODate(trip.departure_date ?? ''));
+    setReturnDateValue(parseISODate(trip.return_date ?? ''));
+    setBusinessDays(numToStr(trip.business_days));
+    setTotalDays(numToStr(trip.total_days));
+    setPurpose(trip.purpose ?? '');
+    setExpTransport(numToStr(trip.expenses_transport));
+    setExpLodging(numToStr(trip.expenses_lodging));
+    setExpMeals(numToStr(trip.expenses_meals));
+    setExpOther(numToStr(trip.expenses_other));
+    setStatus(normalizeTripStatus(trip.status));
+  }, [trip]);
+
+  // Recompute total days whenever both dates are set.
+  useEffect(() => {
+    if (departureDate && returnDateValue) {
+      setTotalDays(String(calculateTotalDays(departureDate, returnDateValue)));
+    }
+  }, [departureDate, returnDateValue]);
+
+  const parseN = (s: string) => {
+    const n = parseFloat(s);
+    return Number.isFinite(n) ? n : 0;
+  };
+
+  const totalNum = parseN(totalDays);
+  const businessNum = parseN(businessDays);
+  const personalDays = Math.max(0, totalNum - businessNum);
+  const today = useMemo(() => new Date(), []);
+
+  const persist = async (targetStatus: string) => {
+    if (!trip) return;
+    if (!destination.trim() || totalNum <= 0) {
+      Alert.alert('Destination and total days are required.');
+      return;
+    }
+    setSaving(true);
+    try {
+      const userId = await requireUserId();
+      const result = evaluateFromCounts({
+        trip_type: tripType,
+        destination: destination.trim(),
+        purpose,
+        total_days: totalNum,
+        business_days: businessNum,
+        countries: trip.countries_visited ?? undefined,
+        rules,
+      });
+      const { error } = await supabase
+        .from('business_trips')
+        .update({
+          trip_type: tripType,
+          destination: destination.trim(),
+          purpose,
+          departure_date: departureDate ? toISODate(departureDate) : null,
+          return_date: returnDateValue ? toISODate(returnDateValue) : null,
+          total_days: totalNum,
+          business_days: result.business_days,
+          personal_days: result.personal_days,
+          business_day_pct: result.business_day_pct,
+          transport_deduct_pct: result.breakdown.transportation_pct,
+          compliance_verdict: result.verdict,
+          compliance_notes: result.rationale,
+          expenses_transport: parseN(expTransport) || null,
+          expenses_lodging: parseN(expLodging) || null,
+          expenses_meals: parseN(expMeals) || null,
+          expenses_other: parseN(expOther) || null,
+          status: targetStatus,
+        })
+        .eq('id', trip.id)
+        .eq('user_id', userId);
+      if (error) throw new Error(error.message);
+      await onSaved();
+      onClose();
+    } catch (e) {
+      Alert.alert('Could not save trip', e instanceof Error ? e.message : String(e));
+    } finally {
+      setSaving(false);
+    }
+  };
+
+  const handleDelete = async () => {
+    if (!trip) return;
+    setSaving(true);
+    try {
+      const userId = await requireUserId();
+      const { error } = await supabase
+        .from('business_trips')
+        .delete()
+        .eq('id', trip.id)
+        .eq('user_id', userId);
+      if (error) throw new Error(error.message);
+      await onSaved();
+      onClose();
+    } catch (e) {
+      Alert.alert('Could not delete trip', e instanceof Error ? e.message : String(e));
+    } finally {
+      setSaving(false);
+    }
+  };
+
+  // Finalize is allowed once travel has started (departure today or earlier).
+  const canFinalize = !departureDate || !isFutureDate(departureDate);
+
+  const finalizeAction = isDraft ? (
+    <View>
+      <TouchableOpacity
+        activeOpacity={0.85}
+        disabled={!canFinalize || saving}
+        onPress={() => persist('documented')}
+        style={[
+          tripEditStyles.finalizeBtn,
+          (!canFinalize || saving) && tripEditStyles.finalizeBtnDisabled,
+        ]}
+      >
+        <Ionicons name="checkmark-done" size={18} color={colors.white} />
+        <Text style={tripEditStyles.finalizeBtnText}>Finalize Trip</Text>
+      </TouchableOpacity>
+      {!canFinalize && departureDate ? (
+        <Text style={tripEditStyles.finalizeHint}>
+          Available after {formatDateMMDDYYYY(departureDate)}
+        </Text>
+      ) : null}
+    </View>
+  ) : null;
+
+  return (
+    <EditFormSheet
+      title={isDraft ? 'Edit Draft Trip' : 'Edit Trip'}
+      visible={!!trip}
+      onClose={onClose}
+      onSave={() => persist(isDraft ? 'draft' : status)}
+      onDelete={handleDelete}
+      saving={saving}
+      saveLabel={isDraft ? 'Save Draft' : 'Save Changes'}
+      deleteLabel="Delete Trip"
+      deleteConfirmTitle="Delete this trip?"
+      deleteConfirmMessage="Delete this trip? This cannot be undone."
+      extraActions={finalizeAction}
+    >
+      {isDraft ? (
+        <View style={tripEditStyles.draftBanner}>
+          <Ionicons name="information-circle" size={16} color={DRAFT_AMBER} />
+          <Text style={tripEditStyles.draftBannerText}>
+            This trip is saved as a draft. Update the details and tap Finalize
+            Trip to mark it as complete.
+          </Text>
+        </View>
+      ) : null}
+
+      <View>
+        <Text style={styles.fieldLabel}>Trip type</Text>
+        <View style={styles.segmentRow}>
+          {(['domestic', 'international'] as const).map((kind) => {
+            const active = tripType === kind;
+            return (
+              <TouchableOpacity
+                key={kind}
+                activeOpacity={0.85}
+                onPress={() => setTripType(kind)}
+                style={[styles.segmentBtn, active && styles.segmentBtnActive]}
+              >
+                <Ionicons
+                  name={kind === 'domestic' ? 'flag-outline' : 'globe-outline'}
+                  size={14}
+                  color={active ? colors.white : colors.navy}
+                />
+                <Text
+                  style={[
+                    styles.segmentLabel,
+                    active && styles.segmentLabelActive,
+                  ]}
+                >
+                  {kind === 'domestic' ? 'Domestic' : 'International'}
+                </Text>
+              </TouchableOpacity>
+            );
+          })}
+        </View>
+      </View>
+
+      <LabeledInput
+        label="Destination"
+        placeholder="e.g. Phoenix, AZ"
+        value={destination}
+        onChangeText={setDestination}
+      />
+
+      <View style={styles.fieldRow}>
+        <TripDateField
+          label="Departure date"
+          value={departureDate}
+          onPress={() => {
+            setShowDeparturePicker(true);
+            setShowReturnPicker(false);
+          }}
+          style={styles.flexHalf}
+        />
+        <View style={styles.fieldGap} />
+        <TripDateField
+          label="Return date"
+          value={returnDateValue}
+          onPress={() => {
+            setShowReturnPicker(true);
+            setShowDeparturePicker(false);
+          }}
+          style={styles.flexHalf}
+        />
+      </View>
+
+      <View style={styles.fieldRow}>
+        <LabeledInput
+          label="Business days"
+          placeholder="0"
+          keyboardType="numeric"
+          value={businessDays}
+          onChangeText={setBusinessDays}
+          style={styles.flexHalf}
+        />
+        <View style={styles.fieldGap} />
+        <LabeledInput
+          label="Total days"
+          placeholder="0"
+          value={totalDays}
+          onChangeText={setTotalDays}
+          style={styles.flexHalf}
+          editable={!(departureDate && returnDateValue)}
+          autoBadge={!!(departureDate && returnDateValue)}
+        />
+      </View>
+
+      <LabeledInput
+        label="Personal days"
+        value={String(personalDays)}
+        onChangeText={() => undefined}
+        editable={false}
+        helperText="Total days minus business days"
+      />
+
+      <LabeledInput
+        label="Business purpose"
+        placeholder="What was the trip for?"
+        value={purpose}
+        onChangeText={setPurpose}
+        multiline
+      />
+
+      <Text style={[styles.sectionLabel, styles.sectionGap]}>Expenses</Text>
+      <View style={styles.fieldRow}>
+        <LabeledInput
+          label="Transport"
+          placeholder="0.00"
+          keyboardType="decimal-pad"
+          value={expTransport}
+          onChangeText={setExpTransport}
+          style={styles.flexHalf}
+        />
+        <View style={styles.fieldGap} />
+        <LabeledInput
+          label="Lodging"
+          placeholder="0.00"
+          keyboardType="decimal-pad"
+          value={expLodging}
+          onChangeText={setExpLodging}
+          style={styles.flexHalf}
+        />
+      </View>
+      <View style={styles.fieldRow}>
+        <LabeledInput
+          label="Meals"
+          placeholder="0.00"
+          keyboardType="decimal-pad"
+          value={expMeals}
+          onChangeText={setExpMeals}
+          style={styles.flexHalf}
+        />
+        <View style={styles.fieldGap} />
+        <LabeledInput
+          label="Other"
+          placeholder="0.00"
+          keyboardType="decimal-pad"
+          value={expOther}
+          onChangeText={setExpOther}
+          style={styles.flexHalf}
+        />
+      </View>
+
+      {!isDraft ? (
+        <View>
+          <Text style={styles.fieldLabel}>Status</Text>
+          <View style={tripEditStyles.statusWrap}>
+            {TRIP_STATUS_OPTIONS.map((opt) => {
+              const active = status === opt.key;
+              return (
+                <TouchableOpacity
+                  key={opt.key}
+                  activeOpacity={0.8}
+                  onPress={() => setStatus(opt.key)}
+                  style={[
+                    tripEditStyles.statusChip,
+                    active && tripEditStyles.statusChipActive,
+                  ]}
+                >
+                  <Text
+                    style={[
+                      tripEditStyles.statusChipText,
+                      active && tripEditStyles.statusChipTextActive,
+                    ]}
+                  >
+                    {opt.label}
+                  </Text>
+                </TouchableOpacity>
+              );
+            })}
+          </View>
+        </View>
+      ) : null}
+
+      <DatePickerModal
+        visible={showDeparturePicker}
+        title="Departure Date"
+        value={departureDate}
+        minimumDate={MIN_TRIP_DATE}
+        maximumDate={twoYearsAfter(today)}
+        onConfirm={(d) => {
+          setDepartureDate(d);
+          setShowDeparturePicker(false);
+        }}
+        onCancel={() => setShowDeparturePicker(false)}
+      />
+      <DatePickerModal
+        visible={showReturnPicker}
+        title="Return Date"
+        value={returnDateValue}
+        fallback={departureDate ?? undefined}
+        minimumDate={departureDate ?? MIN_TRIP_DATE}
+        maximumDate={twoYearsAfter(today)}
+        onConfirm={(d) => {
+          setReturnDateValue(d);
+          setShowReturnPicker(false);
+        }}
+        onCancel={() => setShowReturnPicker(false)}
+      />
+    </EditFormSheet>
+  );
+};
+
+// Read-only date field that opens a DatePickerModal — mirrors the Business
+// Travel form's MM/DD/YYYY + OK-button date entry inside the edit sheet.
+const TripDateField: React.FC<{
+  label: string;
+  value: Date | null;
+  onPress: () => void;
+  style?: any;
+}> = ({ label, value, onPress, style }) => (
+  <View style={[styles.field, style]}>
+    <Text style={styles.fieldLabel}>{label}</Text>
+    <TouchableOpacity
+      activeOpacity={0.7}
+      onPress={onPress}
+      style={[styles.fieldInput, tripEditStyles.dateRow]}
+    >
+      <Text style={value ? tripEditStyles.dateText : tripEditStyles.datePlaceholder}>
+        {value ? formatDateMMDDYYYY(value) : 'MM/DD/YYYY'}
+      </Text>
+      <Ionicons name="calendar-outline" size={18} color={colors.midNavy} />
+    </TouchableOpacity>
+  </View>
+);
+
+const tripEditStyles = StyleSheet.create({
+  draftBanner: {
+    flexDirection: 'row',
+    alignItems: 'flex-start',
+    gap: 8,
+    backgroundColor: DRAFT_BANNER_BG,
+    borderRadius: radius.card,
+    padding: spacing.md,
+  },
+  draftBannerText: {
+    ...typography.body,
+    color: DRAFT_AMBER,
+    flex: 1,
+    fontSize: 12,
+    lineHeight: 17,
+  },
+  dateRow: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    justifyContent: 'space-between',
+  },
+  dateText: {
+    ...typography.body,
+    color: colors.bodyText,
+    fontSize: 14,
+  },
+  datePlaceholder: {
+    ...typography.body,
+    color: colors.subtleText,
+    fontSize: 14,
+  },
+  statusWrap: {
+    flexDirection: 'row',
+    flexWrap: 'wrap',
+    gap: spacing.sm,
+  },
+  statusChip: {
+    paddingHorizontal: spacing.md,
+    paddingVertical: 8,
+    borderRadius: radius.pill,
+    borderWidth: StyleSheet.hairlineWidth,
+    borderColor: colors.cardBorder,
+    backgroundColor: colors.white,
+  },
+  statusChipActive: {
+    backgroundColor: colors.midNavy,
+    borderColor: colors.midNavy,
+  },
+  statusChipText: {
+    ...typography.caption,
+    color: colors.bodyText,
+    fontSize: 13,
+    fontWeight: '600',
+  },
+  statusChipTextActive: {
+    color: colors.white,
+  },
+  finalizeBtn: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    justifyContent: 'center',
+    gap: spacing.xs + 2,
+    backgroundColor: colors.teal,
+    borderRadius: radius.card,
+    paddingVertical: 14,
+  },
+  finalizeBtnDisabled: {
+    opacity: 0.45,
+  },
+  finalizeBtnText: {
+    ...typography.bodyMedium,
+    color: colors.white,
+    fontWeight: '700',
+    fontSize: 15,
+  },
+  finalizeHint: {
+    ...typography.caption,
+    color: colors.mutedText,
+    fontSize: 12,
+    textAlign: 'center',
+    marginTop: spacing.xs,
+  },
+});
 
 // ───────────────────────────── Rules tab ────────────────────────────────
 
@@ -1450,6 +2331,11 @@ const styles = StyleSheet.create({
     backgroundColor: colors.navy,
     ...shadow.raised,
   },
+  // Amber variant shown when a future departure date makes this a draft save.
+  btnDraft: {
+    backgroundColor: DRAFT_AMBER,
+    ...shadow.raised,
+  },
   btnPrimaryText: {
     ...typography.bodyMedium,
     color: colors.white,
@@ -1691,6 +2577,30 @@ const styles = StyleSheet.create({
   },
   flexHalf: { flex: 1, marginBottom: 0 },
   fieldGap: { width: spacing.sm },
+  // Small helper under the date row confirming an intentional year crossing.
+  crossYearNote: {
+    color: '#888888',
+    fontSize: 11,
+    marginTop: -spacing.sm,
+    marginBottom: spacing.sm,
+  },
+  // Shown only while a future departure date is selected — explains drafts.
+  futureTripBanner: {
+    flexDirection: 'row',
+    gap: 8,
+    alignItems: 'flex-start',
+    backgroundColor: DRAFT_BANNER_BG,
+    padding: spacing.md,
+    borderRadius: radius.card,
+    marginBottom: spacing.md,
+  },
+  futureTripBannerText: {
+    ...typography.body,
+    color: DRAFT_AMBER,
+    flex: 1,
+    fontSize: 12,
+    lineHeight: 17,
+  },
   fieldRow: {
     flexDirection: 'row',
     marginBottom: spacing.md,
@@ -1719,6 +2629,96 @@ const styles = StyleSheet.create({
     minHeight: 64,
     textAlignVertical: 'top',
   },
+  fieldInputAuto: {
+    borderColor: colors.teal,
+    borderWidth: 1.5,
+    backgroundColor: colors.tealLight,
+  },
+  fieldInputManual: {
+    borderColor: colors.amber,
+    borderWidth: 1.5,
+  },
+  fieldInputReadOnly: {
+    backgroundColor: '#F2F4F6',
+    borderColor: colors.cardBorder,
+    borderWidth: 0.5,
+  },
+  autoBadge: {
+    backgroundColor: colors.tealLight,
+    borderRadius: radius.pill,
+    paddingHorizontal: 6,
+    paddingVertical: 1,
+    marginBottom: 4,
+  },
+  autoBadgeText: {
+    ...typography.micro,
+    color: colors.teal,
+    fontSize: 9,
+    fontWeight: '700',
+    letterSpacing: 0.3,
+  },
+  fieldHelper: {
+    ...typography.caption,
+    color: '#888888',
+    fontSize: 11,
+    marginTop: 4,
+  },
+  fieldLabelRow: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: 6,
+  },
+  autofillTag: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: 2,
+    backgroundColor: colors.tealLight,
+    borderRadius: radius.pill,
+    paddingHorizontal: 6,
+    paddingVertical: 1,
+    marginBottom: 4,
+  },
+  autofillTagText: {
+    ...typography.micro,
+    color: colors.teal,
+    fontSize: 9,
+    fontWeight: '700',
+    letterSpacing: 0.3,
+  },
+  prefillNote: {
+    flexDirection: 'row',
+    alignItems: 'flex-start',
+    gap: 8,
+    backgroundColor: colors.amberLight,
+    borderLeftWidth: 4,
+    borderLeftColor: colors.amber,
+    borderRadius: radius.card,
+    padding: spacing.md,
+    marginBottom: spacing.md,
+  },
+  prefillNoteText: {
+    ...typography.body,
+    color: colors.bodyText,
+    flex: 1,
+    fontSize: 12,
+    lineHeight: 17,
+  },
+  logTripBtn: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    justifyContent: 'center',
+    gap: spacing.sm,
+    backgroundColor: colors.navy,
+    borderRadius: 10,
+    paddingVertical: 14,
+    ...shadow.raised,
+  },
+  logTripBtnText: {
+    ...typography.bodyMedium,
+    color: colors.white,
+    fontWeight: '700',
+    fontSize: 15,
+  },
   tripRow: {
     flexDirection: 'row',
     alignItems: 'center',
@@ -1737,6 +2737,9 @@ const styles = StyleSheet.create({
     backgroundColor: colors.lightBlue,
     alignItems: 'center',
     justifyContent: 'center',
+  },
+  tripRowContent: {
+    gap: spacing.md,
   },
   tripRowMain: { flex: 1 },
   tripRowHeader: {
@@ -1772,6 +2775,14 @@ const styles = StyleSheet.create({
   pillCustomText: {
     ...typography.micro,
     fontSize: 11,
+  },
+  // Amber "Draft" badge for future-dated trips awaiting finalization.
+  draftPill: {
+    backgroundColor: DRAFT_BANNER_BG,
+  },
+  draftPillText: {
+    color: DRAFT_AMBER,
+    fontWeight: '700',
   },
   emptyText: {
     ...typography.body,

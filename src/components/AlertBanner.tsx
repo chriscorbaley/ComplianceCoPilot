@@ -20,14 +20,16 @@ export const AlertBanner: React.FC<AlertBannerProps> = ({ title, detail, onPress
         <Ionicons name="warning" size={16} color={colors.white} />
       </View>
       <View style={styles.text}>
-        <Text style={styles.title} numberOfLines={1}>
+        <Text style={styles.title}>
           {title}
         </Text>
-        <Text style={styles.detail} numberOfLines={2}>
+        <Text style={styles.detail}>
           {detail}
         </Text>
       </View>
-      <Ionicons name="chevron-forward" size={18} color={colors.orangeAlert} />
+      {onPress ? (
+        <Ionicons name="chevron-forward" size={18} color={colors.orangeAlert} style={styles.chevron} />
+      ) : null}
     </TouchableOpacity>
   );
 };
@@ -35,13 +37,18 @@ export const AlertBanner: React.FC<AlertBannerProps> = ({ title, detail, onPress
 const styles = StyleSheet.create({
   container: {
     flexDirection: 'row',
-    alignItems: 'center',
+    // Top-align so the icon and chevron stay put as the message wraps to
+    // multiple lines and the banner grows to fit the full text.
+    alignItems: 'flex-start',
     backgroundColor: colors.orangeAlertBg,
     borderRadius: radius.card,
     borderWidth: 0.5,
     borderColor: 'rgba(231, 111, 44, 0.25)',
     padding: spacing.md,
     gap: spacing.md,
+  },
+  chevron: {
+    marginTop: 2,
   },
   iconCircle: {
     width: 32,

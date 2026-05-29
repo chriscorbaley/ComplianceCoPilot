@@ -24,6 +24,7 @@ import {
 import {
   PROPERTY_TYPE_LABEL,
   computeParticipation,
+  computePropertyWarnings,
   deleteProperty,
   listProperties,
   type ParticipationStatus,
@@ -33,6 +34,7 @@ import {
   subscribeToRules,
   type ComplianceRules,
 } from '../services/complianceRules';
+import { readThresholds } from '../services/realEstate';
 import type { RootStackParamList } from '../navigation/types';
 
 type Nav = NativeStackNavigationProp<RootStackParamList>;
@@ -64,6 +66,11 @@ export const PropertiesScreen: React.FC = () => {
   const [yearHours, setYearHours] = useState<HoursLogRow[]>([]);
   const [rules, setRules] = useState<ComplianceRules | null>(null);
   const [loading, setLoading] = useState(true);
+  // Transient inline feedback for the grouping toggle, scoped to one property
+  // row so the user gets confirmation the change saved (not a visual glitch).
+  const [toggleFeedback, setToggleFeedback] = useState<
+    { id: string; ok: boolean; text: string } | null
+  >(null);
 
   const reload = useCallback(async () => {
     try {
@@ -98,36 +105,76 @@ export const PropertiesScreen: React.FC = () => {
     return subscribeToRules(setRules);
   }, []);
 
-  const threshold = ruleNumber(rules, 'real_estate', 'hours_required', 750);
+  // Auto-dismiss the toggle feedback message after a short moment.
+  useEffect(() => {
+    if (!toggleFeedback) return;
+    const timer = setTimeout(() => setToggleFeedback(null), 2500);
+    return () => clearTimeout(timer);
+  }, [toggleFeedback]);
 
-  const handleGroupingToggle = async (value: boolean) => {
+  const threshold = ruleNumber(rules, 'real_estate', 'hours_required', 750);
+  const strMaxDays = rules ? readThresholds(rules.rawDb).str_avg_period_max_days : 7;
+
+  const handleGroupingToggle = async (propertyId: string, newValue: boolean) => {
     const userId = session?.user.id;
     if (!userId) {
       Alert.alert('Could not update', 'You must be signed in to change this setting.');
       return;
     }
+
+    // Snapshot for revert if the save fails.
+    const previous = properties;
+    // Optimistic UI update so the toggle does not snap back while the server
+    // request is in flight.
+    const next = properties.map((p) =>
+      p.id === propertyId ? { ...p, grouping_election: newValue } : p,
+    );
+    setProperties(next);
+    setToggleFeedback(null);
+
     try {
+      // Step 1 — update the specific property.
       const { error } = await supabase
-        .from('users')
-        .update({ re_grouping_election: value })
-        .eq('id', userId);
-      if (error) throw error;
-      const { error: propError } = await supabase
         .from('properties')
-        .update({ grouping_election: value })
-        .eq('user_id', userId)
-        .eq('property_type', 'long_term');
-      if (propError) throw propError;
+        .update({ grouping_election: newValue })
+        .eq('id', propertyId)
+        .eq('user_id', userId);
+      if (error) throw error;
+
+      // Steps 2 & 3 — keep users.re_grouping_election in sync. Turning a
+      // property off means the portfolio is no longer fully elected, so the
+      // user-level flag goes false. Turning one on only flips the user-level
+      // flag true once every long-term property is elected.
+      if (!newValue) {
+        const { error: userError } = await supabase
+          .from('users')
+          .update({ re_grouping_election: false })
+          .eq('id', userId);
+        if (userError) throw userError;
+      } else {
+        const longTerm = next.filter((p) => p.property_type === 'long_term');
+        const allElected =
+          longTerm.length > 0 && longTerm.every((p) => p.grouping_election);
+        if (allElected) {
+          const { error: userError } = await supabase
+            .from('users')
+            .update({ re_grouping_election: true })
+            .eq('id', userId);
+          if (userError) throw userError;
+        }
+      }
+
       await refreshProfile();
-      await reload();
-    } catch (e) {
-      const message =
-        e && typeof e === 'object' && 'message' in e
-          ? String((e as { message: unknown }).message)
-          : e instanceof Error
-            ? e.message
-            : 'Unknown error';
-      Alert.alert('Could not update', message);
+      setToggleFeedback({ id: propertyId, ok: true, text: 'Grouping election updated' });
+    } catch (error) {
+      console.error('[GroupingToggle] save failed', { error, propertyId });
+      // Revert the optimistic change so the UI reflects the real saved state.
+      setProperties(previous);
+      setToggleFeedback({
+        id: propertyId,
+        ok: false,
+        text: 'Could not save grouping election — please try again',
+      });
     }
   };
 
@@ -194,8 +241,16 @@ export const PropertiesScreen: React.FC = () => {
                     x.grouping_group_name === p.grouping_group_name,
                 )
               : [];
+            const warnings = computePropertyWarnings(
+              p,
+              properties,
+              yearHours,
+              threshold,
+              { strMaxDays },
+            );
             return (
-              <View key={p.id} style={styles.card}>
+              <View key={p.id} style={styles.propertyBlock}>
+              <View style={styles.card}>
                 <TouchableOpacity
                   activeOpacity={0.85}
                   onPress={() =>
@@ -268,11 +323,29 @@ export const PropertiesScreen: React.FC = () => {
                   </View>
                   <Switch
                     value={p.grouping_election}
-                    onValueChange={(value) => handleGroupingToggle(value)}
+                    onValueChange={(value) => handleGroupingToggle(p.id, value)}
                     trackColor={{ false: colors.divider, true: colors.midNavy }}
                     thumbColor={colors.white}
                   />
                 </View>
+
+                <Text style={styles.groupingExplain}>
+                  When on, your hours for all long-term properties are combined
+                  for participation tracking.
+                </Text>
+
+                {toggleFeedback?.id === p.id ? (
+                  <Text
+                    style={[
+                      styles.toggleFeedback,
+                      toggleFeedback.ok
+                        ? styles.toggleFeedbackOk
+                        : styles.toggleFeedbackErr,
+                    ]}
+                  >
+                    {toggleFeedback.text}
+                  </Text>
+                ) : null}
 
                 <View style={styles.actionRow}>
                   <TouchableOpacity
@@ -289,6 +362,31 @@ export const PropertiesScreen: React.FC = () => {
                     <Text style={[styles.actionText, { color: '#C0392B' }]}>Delete</Text>
                   </TouchableOpacity>
                 </View>
+              </View>
+
+              {warnings.length > 0 ? (
+                <View style={styles.warningCard}>
+                  <View style={styles.warningIcon}>
+                    <Ionicons name="warning" size={16} color={colors.amber} />
+                  </View>
+                  <View style={styles.warningTextWrap}>
+                    <Text style={styles.warningHeading}>
+                      Compliance {warnings.length > 1 ? 'warnings' : 'warning'}
+                    </Text>
+                    {warnings.map((w, i) => (
+                      <Text
+                        key={w.kind}
+                        style={[
+                          styles.warningMessage,
+                          i > 0 && { marginTop: spacing.sm },
+                        ]}
+                      >
+                        {w.message}
+                      </Text>
+                    ))}
+                  </View>
+                </View>
+              ) : null}
               </View>
             );
           })
@@ -352,6 +450,9 @@ const styles = StyleSheet.create({
     color: colors.mutedText,
     textAlign: 'center',
   },
+  propertyBlock: {
+    gap: spacing.sm,
+  },
   card: {
     backgroundColor: colors.white,
     borderRadius: radius.card,
@@ -360,6 +461,36 @@ const styles = StyleSheet.create({
     borderColor: colors.cardBorder,
     gap: spacing.md,
     ...shadow.card,
+  },
+  warningCard: {
+    flexDirection: 'row',
+    alignItems: 'flex-start',
+    gap: spacing.sm,
+    backgroundColor: colors.amberLight,
+    borderRadius: radius.card,
+    borderLeftWidth: 4,
+    borderLeftColor: colors.amber,
+    paddingVertical: spacing.md,
+    paddingHorizontal: spacing.md,
+  },
+  warningIcon: {
+    marginTop: 1,
+  },
+  warningTextWrap: {
+    flex: 1,
+  },
+  warningHeading: {
+    color: colors.amber,
+    fontSize: 12,
+    fontWeight: '700',
+    textTransform: 'uppercase',
+    letterSpacing: 0.4,
+    marginBottom: 4,
+  },
+  warningMessage: {
+    color: colors.bodyText,
+    fontSize: 13,
+    lineHeight: 18,
   },
   cardHeader: {
     flexDirection: 'row',
@@ -459,6 +590,23 @@ const styles = StyleSheet.create({
     color: colors.mutedText,
     fontSize: 11,
     marginTop: 2,
+  },
+  groupingExplain: {
+    fontSize: 11,
+    color: '#888888',
+    marginTop: -spacing.sm + 2,
+    lineHeight: 15,
+  },
+  toggleFeedback: {
+    fontSize: 12,
+    fontWeight: '600',
+    marginTop: 2,
+  },
+  toggleFeedbackOk: {
+    color: '#1B873F',
+  },
+  toggleFeedbackErr: {
+    color: '#C0392B',
   },
   actionRow: {
     flexDirection: 'row',

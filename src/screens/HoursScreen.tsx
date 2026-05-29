@@ -9,6 +9,7 @@ import {
   ScrollView,
   StyleSheet,
   Text,
+  TextInput,
   TouchableOpacity,
   View,
 } from 'react-native';
@@ -26,6 +27,10 @@ import { AlertBanner } from '../components/AlertBanner';
 import { MetricCard } from '../components/MetricCard';
 import { Card } from '../components/Card';
 import { SectionHeader } from '../components/SectionHeader';
+import { EditableListRow } from '../components/EditableListRow';
+import { EditFormSheet } from '../components/EditFormSheet';
+import { DatePickerModal } from '../components/DateInputField';
+import { type ActivityHoursType } from '../services/activityLog';
 import {
   classifyFromRecording,
   ensureMicPermission,
@@ -42,6 +47,7 @@ import {
   type PropertyRow,
 } from '../services/supabase';
 import { listProperties } from '../services/properties';
+import { saveActivityDocument, deriveHoursType } from '../services/activityLog';
 import { useBusiness } from '../business/BusinessContext';
 import { useKeepAwakeWhile } from '../hooks/useKeepAwakeWhile';
 import { KeepAwakeIndicator } from '../components/KeepAwakeIndicator';
@@ -124,7 +130,7 @@ const noteToInsert = (
   note: ClassifiedNote,
   userId: string,
   businessId: string | null,
-  propertyId: string | null,
+  property: PropertyRow | null,
 ) => {
   const map = STRATEGY_TO_CATEGORY[note.strategy_category] ?? {
     category: 'Admin',
@@ -132,12 +138,132 @@ const noteToInsert = (
   return {
     user_id: userId,
     business_id: businessId,
-    property_id: propertyId,
+    property_id: property?.id ?? null,
     description: note.description || note.business_purpose || 'Voice-logged activity',
     category: map.category,
     hours: note.duration_hours ?? 0,
     activity_date: note.date,
+    // Record the participation bucket so the audit table/export can show it.
+    hours_type: deriveHoursType(property?.property_type ?? null),
   };
+};
+
+// ── Date helpers (shared by the filter sheet + edit sheet) ──────────────────
+
+// Local-time YYYY-MM-DD for a Date — matches how hours_log.activity_date is
+// stored, so string comparisons in the filter never drift across time zones.
+const toISODateLocal = (date: Date): string => {
+  const month = String(date.getMonth() + 1).padStart(2, '0');
+  const day = String(date.getDate()).padStart(2, '0');
+  return `${date.getFullYear()}-${month}-${day}`;
+};
+
+// Parse a stored ISO calendar date (YYYY-MM-DD) into a local Date with no
+// time-zone shift.
+const parseISODateLocal = (iso: string | null): Date | null => {
+  if (!iso) return null;
+  const m = /^(\d{4})-(\d{2})-(\d{2})/.exec(iso);
+  if (m) return new Date(Number(m[1]), Number(m[2]) - 1, Number(m[3]));
+  const d = new Date(iso);
+  return Number.isNaN(d.getTime()) ? null : d;
+};
+
+// MM/DD/YYYY display for the edit-sheet date field.
+const formatDateMMDDYYYY = (date: Date): string => {
+  const month = String(date.getMonth() + 1).padStart(2, '0');
+  const day = String(date.getDate()).padStart(2, '0');
+  return `${month}/${day}/${date.getFullYear()}`;
+};
+
+const MIN_ACTIVITY_DATE = new Date('2020-01-01');
+
+// ── Filter model ────────────────────────────────────────────────────────────
+
+type DateRangeKey = 'week' | 'month' | 'quarter' | 'year' | 'custom';
+type HoursTypeFilter = 'all' | ActivityHoursType;
+// propertyFilter sentinel values: 'all' (every property), '__general__' (rows
+// with no property), or a concrete property id.
+const GENERAL_FILTER_KEY = '__general__';
+
+interface HoursFilters {
+  dateRange: DateRangeKey;
+  customStart: Date | null;
+  customEnd: Date | null;
+  propertyFilter: string;
+  hoursType: HoursTypeFilter;
+}
+
+const DEFAULT_FILTERS: HoursFilters = {
+  dateRange: 'year',
+  customStart: null,
+  customEnd: null,
+  propertyFilter: 'all',
+  hoursType: 'all',
+};
+
+const DATE_RANGE_OPTIONS: Array<{ key: DateRangeKey; label: string }> = [
+  { key: 'week', label: 'This week' },
+  { key: 'month', label: 'This month' },
+  { key: 'quarter', label: 'This quarter' },
+  { key: 'year', label: 'This year' },
+  { key: 'custom', label: 'Custom range' },
+];
+
+const HOURS_TYPE_OPTIONS: Array<{ key: HoursTypeFilter; label: string }> = [
+  { key: 'all', label: 'All types' },
+  { key: 'reps_general', label: 'REPS General' },
+  { key: 'material_participation', label: 'Material Participation' },
+  { key: 'str_participation', label: 'STR Participation' },
+];
+
+// The three editable hours_type buckets (no "all" — every row has one).
+const HOURS_TYPE_EDIT_OPTIONS: Array<{ key: ActivityHoursType; label: string }> = [
+  { key: 'reps_general', label: 'REPS General' },
+  { key: 'material_participation', label: 'Material Participation' },
+  { key: 'str_participation', label: 'STR Participation' },
+];
+
+// Resolve a filter into inclusive YYYY-MM-DD bounds (null = open-ended).
+const computeDateRange = (
+  filters: HoursFilters,
+  now: Date = new Date(),
+): { start: string | null; end: string | null } => {
+  const y = now.getFullYear();
+  switch (filters.dateRange) {
+    case 'week': {
+      const start = new Date(now);
+      start.setDate(now.getDate() - now.getDay()); // back to Sunday
+      const end = new Date(start);
+      end.setDate(start.getDate() + 6);
+      return { start: toISODateLocal(start), end: toISODateLocal(end) };
+    }
+    case 'month': {
+      const start = new Date(y, now.getMonth(), 1);
+      const end = new Date(y, now.getMonth() + 1, 0);
+      return { start: toISODateLocal(start), end: toISODateLocal(end) };
+    }
+    case 'quarter': {
+      const q = Math.floor(now.getMonth() / 3);
+      const start = new Date(y, q * 3, 1);
+      const end = new Date(y, q * 3 + 3, 0);
+      return { start: toISODateLocal(start), end: toISODateLocal(end) };
+    }
+    case 'year':
+      return { start: `${y}-01-01`, end: `${y}-12-31` };
+    case 'custom':
+      return {
+        start: filters.customStart ? toISODateLocal(filters.customStart) : null,
+        end: filters.customEnd ? toISODateLocal(filters.customEnd) : null,
+      };
+  }
+};
+
+const countActiveFilters = (f: HoursFilters): number => {
+  let n = 0;
+  if (f.dateRange !== 'year') n += 1;
+  if (f.propertyFilter !== 'all') n += 1;
+  if (f.hoursType !== 'all') n += 1;
+  return n;
 };
 
 export const HoursScreen: React.FC = () => {
@@ -166,6 +292,9 @@ const HoursScreenInner: React.FC = () => {
   const [expandedPropertyKeys, setExpandedPropertyKeys] = useState<Set<string>>(
     () => new Set(),
   );
+  const [filters, setFilters] = useState<HoursFilters>(DEFAULT_FILTERS);
+  const [filterSheetOpen, setFilterSheetOpen] = useState(false);
+  const [editingRow, setEditingRow] = useState<HoursLogRow | null>(null);
   const recRef = useRef<Audio.Recording | null>(null);
   const pulse = useRef(new Animated.Value(0)).current;
 
@@ -204,13 +333,32 @@ const HoursScreenInner: React.FC = () => {
   const persistNote = useCallback(
     async (note: ClassifiedNote, propertyId: string | null) => {
       const userId = await requireUserId();
-      const insert = noteToInsert(note, userId, activeBusinessId, propertyId);
+      const property = propertyId
+        ? properties.find((p) => p.id === propertyId) ?? null
+        : null;
+      const insert = noteToInsert(note, userId, activeBusinessId, property);
       const { error } = await supabase.from('hours_log').insert(insert);
       if (error) throw new Error(error.message);
       setLastLoggedHours(note.duration_hours);
+      // Mirror this activity into the documents vault so it appears in the
+      // Documents screen under the Real Estate filter as an audit record.
+      // Best-effort: a failure here must not block the hours log itself.
+      try {
+        await saveActivityDocument({
+          userId,
+          businessId: activeBusinessId,
+          propertyName: property ? property.property_name : 'General / Administrative',
+          activityDate: insert.activity_date,
+          description: insert.description,
+          hours: insert.hours,
+          hoursType: insert.hours_type,
+        });
+      } catch (e) {
+        console.warn('[hours] activity document save failed', e);
+      }
       await loadHours();
     },
-    [loadHours, activeBusinessId],
+    [loadHours, activeBusinessId, properties],
   );
 
   // Routes a fresh hours-log note through the property-picker modal when the
@@ -246,7 +394,30 @@ const HoursScreenInner: React.FC = () => {
     }, [consumeIfHoursLog, loadHours, loadProperties]),
   );
 
-  const activityLog: ActivityEntry[] = useMemo(() => rows.map(rowToActivity), [rows]);
+  // The Activity Log list honors the filter sheet. Filters only affect this
+  // list — the metrics and per-property breakdown above always reflect the
+  // full year so the goal math stays stable.
+  const filteredRows = useMemo(() => {
+    const { start, end } = computeDateRange(filters);
+    return rows.filter((r) => {
+      if (filters.propertyFilter !== 'all') {
+        const target =
+          filters.propertyFilter === GENERAL_FILTER_KEY
+            ? null
+            : filters.propertyFilter;
+        if ((r.property_id ?? null) !== target) return false;
+      }
+      if (filters.hoursType !== 'all' && (r.hours_type ?? '') !== filters.hoursType) {
+        return false;
+      }
+      const d = r.activity_date ?? '';
+      if (start && d < start) return false;
+      if (end && d > end) return false;
+      return true;
+    });
+  }, [rows, filters]);
+
+  const activeFilterCount = useMemo(() => countActiveFilters(filters), [filters]);
 
   // Group hours_log rows by property (null → general/administrative). Sort
   // groups by total hours desc so the busiest properties surface first.
@@ -612,33 +783,62 @@ const HoursScreenInner: React.FC = () => {
         ) : null}
 
         <View style={styles.section}>
-          <SectionHeader title="Activity Log" action="Filter" />
+          <View style={styles.activityHeaderRow}>
+            <Text style={styles.activityHeaderTitle}>Activity Log</Text>
+            <TouchableOpacity
+              activeOpacity={0.7}
+              onPress={() => setFilterSheetOpen(true)}
+              hitSlop={8}
+              style={styles.filterBtn}
+            >
+              <Ionicons name="options-outline" size={15} color={colors.midNavy} />
+              <Text style={styles.filterBtnText}>Filter</Text>
+              {activeFilterCount > 0 ? (
+                <View style={styles.filterBadge}>
+                  <Text style={styles.filterBadgeText}>{activeFilterCount}</Text>
+                </View>
+              ) : null}
+            </TouchableOpacity>
+          </View>
           <Card padded>
-            {activityLog.map((entry, i) => (
-              <View
-                key={entry.id}
-                style={[
-                  styles.activityRow,
-                  i !== activityLog.length - 1 && styles.activityRowDivider,
-                ]}
-              >
-                <View style={styles.activityIcon}>
-                  <Ionicons name={entry.icon} size={18} color={colors.midNavy} />
-                </View>
-                <View style={styles.activityText}>
-                  <Text style={styles.activityTitle} numberOfLines={1}>
-                    {entry.title}
-                  </Text>
-                  <Text style={styles.activityMeta} numberOfLines={1}>
-                    {entry.category} · {entry.date}
-                  </Text>
-                </View>
-                <Text style={styles.activityHours}>
-                  {entry.hours.toFixed(1)}
-                  <Text style={styles.activityHoursUnit}> hr</Text>
-                </Text>
-              </View>
-            ))}
+            {filteredRows.length === 0 ? (
+              <Text style={styles.activityEmpty}>
+                {rows.length === 0
+                  ? 'No hours logged yet. Use the voice log below to add one.'
+                  : 'No activities match your filters.'}
+              </Text>
+            ) : (
+              filteredRows.map((r, i) => {
+                const entry = rowToActivity(r);
+                return (
+                  <EditableListRow
+                    key={r.id}
+                    onPress={() => setEditingRow(r)}
+                    contentStyle={styles.activityContent}
+                    style={[
+                      styles.activityRow,
+                      i !== filteredRows.length - 1 && styles.activityRowDivider,
+                    ]}
+                  >
+                    <View style={styles.activityIcon}>
+                      <Ionicons name={entry.icon} size={18} color={colors.midNavy} />
+                    </View>
+                    <View style={styles.activityText}>
+                      <Text style={styles.activityTitle} numberOfLines={1}>
+                        {entry.title}
+                      </Text>
+                      <Text style={styles.activityMeta} numberOfLines={1}>
+                        {entry.category} · {entry.date}
+                      </Text>
+                    </View>
+                    <Text style={styles.activityHours}>
+                      {entry.hours.toFixed(1)}
+                      <Text style={styles.activityHoursUnit}> hr</Text>
+                    </Text>
+                  </EditableListRow>
+                );
+              })
+            )}
           </Card>
         </View>
       </ScrollView>
@@ -734,6 +934,25 @@ const HoursScreenInner: React.FC = () => {
             setPendingNote(null);
           }
         }}
+      />
+
+      <HoursFilterSheet
+        visible={filterSheetOpen}
+        filters={filters}
+        properties={properties}
+        onClose={() => setFilterSheetOpen(false)}
+        onApply={(next) => {
+          setFilters(next);
+          setFilterSheetOpen(false);
+        }}
+        onReset={() => setFilters(DEFAULT_FILTERS)}
+      />
+
+      <HoursEditSheet
+        row={editingRow}
+        properties={properties}
+        onClose={() => setEditingRow(null)}
+        onSaved={loadHours}
       />
     </View>
   );
@@ -855,6 +1074,626 @@ const PropertyPickerModal: React.FC<PropertyPickerModalProps> = ({
     </Modal>
   );
 };
+
+// ── Shared form bits ─────────────────────────────────────────────────────────
+
+const FieldLabel: React.FC<{ text: string }> = ({ text }) => (
+  <Text style={editStyles.fieldLabel}>{text}</Text>
+);
+
+const OptionRow: React.FC<{
+  label: string;
+  active: boolean;
+  onPress: () => void;
+}> = ({ label, active, onPress }) => (
+  <TouchableOpacity
+    activeOpacity={0.8}
+    onPress={onPress}
+    style={[editStyles.option, active && editStyles.optionActive]}
+  >
+    <Text
+      style={[editStyles.optionText, active && editStyles.optionTextActive]}
+      numberOfLines={1}
+    >
+      {label}
+    </Text>
+    {active ? <Ionicons name="checkmark" size={18} color={colors.white} /> : null}
+  </TouchableOpacity>
+);
+
+const FilterChip: React.FC<{
+  label: string;
+  active: boolean;
+  onPress: () => void;
+}> = ({ label, active, onPress }) => (
+  <TouchableOpacity
+    activeOpacity={0.8}
+    onPress={onPress}
+    style={[filterStyles.chip, active && filterStyles.chipActive]}
+  >
+    <Text style={[filterStyles.chipText, active && filterStyles.chipTextActive]}>
+      {label}
+    </Text>
+  </TouchableOpacity>
+);
+
+const DateFieldButton: React.FC<{
+  label: string;
+  value: Date | null;
+  onPress: () => void;
+}> = ({ label, value, onPress }) => (
+  <View style={filterStyles.dateFieldWrap}>
+    <Text style={editStyles.fieldLabel}>{label}</Text>
+    <TouchableOpacity activeOpacity={0.7} onPress={onPress} style={editStyles.dateField}>
+      <Text style={[editStyles.dateText, !value && editStyles.datePlaceholder]}>
+        {value ? formatDateMMDDYYYY(value) : 'MM/DD/YYYY'}
+      </Text>
+      <Ionicons name="calendar-outline" size={18} color={colors.midNavy} />
+    </TouchableOpacity>
+  </View>
+);
+
+// ── Filter sheet (Fix 1) ─────────────────────────────────────────────────────
+
+interface HoursFilterSheetProps {
+  visible: boolean;
+  filters: HoursFilters;
+  properties: PropertyRow[];
+  onClose: () => void;
+  onApply: (filters: HoursFilters) => void;
+  onReset: () => void;
+}
+
+const HoursFilterSheet: React.FC<HoursFilterSheetProps> = ({
+  visible,
+  filters,
+  properties,
+  onClose,
+  onApply,
+  onReset,
+}) => {
+  const [draft, setDraft] = useState<HoursFilters>(filters);
+  const [showStartPicker, setShowStartPicker] = useState(false);
+  const [showEndPicker, setShowEndPicker] = useState(false);
+
+  // Re-seed the draft from the live filters each time the sheet opens.
+  useEffect(() => {
+    if (visible) setDraft(filters);
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [visible]);
+
+  const update = (patch: Partial<HoursFilters>) =>
+    setDraft((d) => ({ ...d, ...patch }));
+
+  return (
+    <Modal visible={visible} transparent animationType="slide" onRequestClose={onClose}>
+      <View style={filterStyles.backdrop}>
+        <View style={filterStyles.sheet}>
+          <View style={filterStyles.header}>
+            <Text style={filterStyles.title}>Filter activity</Text>
+            <TouchableOpacity onPress={onClose} hitSlop={10} accessibilityLabel="Close filters">
+              <Ionicons name="close" size={24} color={colors.mutedText} />
+            </TouchableOpacity>
+          </View>
+
+          <ScrollView
+            style={filterStyles.body}
+            contentContainerStyle={filterStyles.bodyContent}
+            showsVerticalScrollIndicator={false}
+          >
+            <Text style={filterStyles.groupLabel}>Date range</Text>
+            <View style={filterStyles.chipWrap}>
+              {DATE_RANGE_OPTIONS.map((opt) => (
+                <FilterChip
+                  key={opt.key}
+                  label={opt.label}
+                  active={draft.dateRange === opt.key}
+                  onPress={() => update({ dateRange: opt.key })}
+                />
+              ))}
+            </View>
+            {draft.dateRange === 'custom' ? (
+              <View style={filterStyles.customRow}>
+                <DateFieldButton
+                  label="Start"
+                  value={draft.customStart}
+                  onPress={() => {
+                    setShowStartPicker(true);
+                    setShowEndPicker(false);
+                  }}
+                />
+                <View style={filterStyles.customGap} />
+                <DateFieldButton
+                  label="End"
+                  value={draft.customEnd}
+                  onPress={() => {
+                    setShowEndPicker(true);
+                    setShowStartPicker(false);
+                  }}
+                />
+              </View>
+            ) : null}
+
+            <Text style={filterStyles.groupLabel}>Property</Text>
+            <View style={filterStyles.chipWrap}>
+              <FilterChip
+                label="All properties"
+                active={draft.propertyFilter === 'all'}
+                onPress={() => update({ propertyFilter: 'all' })}
+              />
+              <FilterChip
+                label="General / Admin"
+                active={draft.propertyFilter === GENERAL_FILTER_KEY}
+                onPress={() => update({ propertyFilter: GENERAL_FILTER_KEY })}
+              />
+              {properties.map((p) => (
+                <FilterChip
+                  key={p.id}
+                  label={p.property_name}
+                  active={draft.propertyFilter === p.id}
+                  onPress={() => update({ propertyFilter: p.id })}
+                />
+              ))}
+            </View>
+
+            <Text style={filterStyles.groupLabel}>Hours type</Text>
+            <View style={filterStyles.chipWrap}>
+              {HOURS_TYPE_OPTIONS.map((opt) => (
+                <FilterChip
+                  key={opt.key}
+                  label={opt.label}
+                  active={draft.hoursType === opt.key}
+                  onPress={() => update({ hoursType: opt.key })}
+                />
+              ))}
+            </View>
+          </ScrollView>
+
+          <View style={filterStyles.footer}>
+            <View style={filterStyles.footerRow}>
+              <TouchableOpacity
+                activeOpacity={0.85}
+                onPress={() => {
+                  setDraft(DEFAULT_FILTERS);
+                  onReset();
+                }}
+                style={[filterStyles.footerBtn, filterStyles.resetBtn]}
+              >
+                <Text style={filterStyles.resetBtnText}>Reset</Text>
+              </TouchableOpacity>
+              <TouchableOpacity
+                activeOpacity={0.85}
+                onPress={onClose}
+                style={[filterStyles.footerBtn, filterStyles.cancelBtn]}
+              >
+                <Text style={filterStyles.cancelBtnText}>Cancel</Text>
+              </TouchableOpacity>
+            </View>
+            <TouchableOpacity
+              activeOpacity={0.85}
+              onPress={() => onApply(draft)}
+              style={filterStyles.applyBtn}
+            >
+              <Text style={filterStyles.applyBtnText}>Apply</Text>
+            </TouchableOpacity>
+          </View>
+
+          <DatePickerModal
+            visible={showStartPicker}
+            title="Start Date"
+            value={draft.customStart}
+            minimumDate={MIN_ACTIVITY_DATE}
+            onConfirm={(d) => {
+              update({ customStart: d });
+              setShowStartPicker(false);
+            }}
+            onCancel={() => setShowStartPicker(false)}
+          />
+          <DatePickerModal
+            visible={showEndPicker}
+            title="End Date"
+            value={draft.customEnd}
+            fallback={draft.customStart ?? undefined}
+            minimumDate={draft.customStart ?? MIN_ACTIVITY_DATE}
+            onConfirm={(d) => {
+              update({ customEnd: d });
+              setShowEndPicker(false);
+            }}
+            onCancel={() => setShowEndPicker(false)}
+          />
+        </View>
+      </View>
+    </Modal>
+  );
+};
+
+// ── Activity edit sheet (Fix 2) ──────────────────────────────────────────────
+
+interface HoursEditSheetProps {
+  row: HoursLogRow | null;
+  properties: PropertyRow[];
+  onClose: () => void;
+  onSaved: () => Promise<void> | void;
+}
+
+const HoursEditSheet: React.FC<HoursEditSheetProps> = ({
+  row,
+  properties,
+  onClose,
+  onSaved,
+}) => {
+  const [description, setDescription] = useState('');
+  const [date, setDate] = useState<Date | null>(null);
+  const [hours, setHours] = useState('');
+  const [hoursType, setHoursType] = useState<ActivityHoursType>('reps_general');
+  const [propertyId, setPropertyId] = useState<string | null>(null);
+  const [showDatePicker, setShowDatePicker] = useState(false);
+  const [saving, setSaving] = useState(false);
+
+  // Pre-fill every field from the tapped record whenever a new row opens.
+  useEffect(() => {
+    if (!row) return;
+    setDescription(row.description ?? '');
+    setDate(parseISODateLocal(row.activity_date));
+    setHours(row.hours != null ? String(row.hours) : '');
+    setHoursType((row.hours_type as ActivityHoursType) ?? 'reps_general');
+    setPropertyId(row.property_id ?? null);
+  }, [row]);
+
+  const handleSave = async () => {
+    if (!row) return;
+    const hoursNum = parseFloat(hours);
+    setSaving(true);
+    try {
+      const userId = await requireUserId();
+      const { error } = await supabase
+        .from('hours_log')
+        .update({
+          description: description.trim() || null,
+          activity_date: date ? toISODateLocal(date) : row.activity_date,
+          hours: Number.isFinite(hoursNum) ? hoursNum : 0,
+          hours_type: hoursType,
+          property_id: propertyId,
+        })
+        .eq('id', row.id)
+        .eq('user_id', userId);
+      if (error) throw new Error(error.message);
+      await onSaved();
+      onClose();
+    } catch (e) {
+      Alert.alert('Could not save activity', e instanceof Error ? e.message : String(e));
+    } finally {
+      setSaving(false);
+    }
+  };
+
+  const handleDelete = async () => {
+    if (!row) return;
+    setSaving(true);
+    try {
+      const userId = await requireUserId();
+      const { error } = await supabase
+        .from('hours_log')
+        .delete()
+        .eq('id', row.id)
+        .eq('user_id', userId);
+      if (error) throw new Error(error.message);
+      await onSaved();
+      onClose();
+    } catch (e) {
+      Alert.alert('Could not delete activity', e instanceof Error ? e.message : String(e));
+    } finally {
+      setSaving(false);
+    }
+  };
+
+  return (
+    <EditFormSheet
+      title="Edit Activity"
+      visible={!!row}
+      onClose={onClose}
+      onSave={handleSave}
+      onDelete={handleDelete}
+      saving={saving}
+      deleteLabel="Delete Activity"
+      deleteConfirmTitle="Delete this activity?"
+      deleteConfirmMessage="Delete this activity? This cannot be undone."
+    >
+      <View>
+        <FieldLabel text="Activity description" />
+        <TextInput
+          style={[editStyles.input, editStyles.inputMulti]}
+          value={description}
+          onChangeText={setDescription}
+          placeholder="What did you do?"
+          placeholderTextColor={colors.subtleText}
+          multiline
+        />
+      </View>
+
+      <View>
+        <FieldLabel text="Date" />
+        <TouchableOpacity
+          activeOpacity={0.7}
+          onPress={() => setShowDatePicker(true)}
+          style={editStyles.dateField}
+        >
+          <Text style={[editStyles.dateText, !date && editStyles.datePlaceholder]}>
+            {date ? formatDateMMDDYYYY(date) : 'MM/DD/YYYY'}
+          </Text>
+          <Ionicons name="calendar-outline" size={20} color={colors.midNavy} />
+        </TouchableOpacity>
+      </View>
+
+      <View>
+        <FieldLabel text="Hours" />
+        <TextInput
+          style={editStyles.input}
+          value={hours}
+          onChangeText={setHours}
+          keyboardType="decimal-pad"
+          placeholder="0"
+          placeholderTextColor={colors.subtleText}
+        />
+      </View>
+
+      <View>
+        <FieldLabel text="Hours type" />
+        <View style={editStyles.optionList}>
+          {HOURS_TYPE_EDIT_OPTIONS.map((opt) => (
+            <OptionRow
+              key={opt.key}
+              label={opt.label}
+              active={hoursType === opt.key}
+              onPress={() => setHoursType(opt.key)}
+            />
+          ))}
+        </View>
+      </View>
+
+      {properties.length > 0 ? (
+        <View>
+          <FieldLabel text="Property" />
+          <View style={editStyles.optionList}>
+            <OptionRow
+              label="General / Administrative"
+              active={propertyId === null}
+              onPress={() => setPropertyId(null)}
+            />
+            {properties.map((p) => (
+              <OptionRow
+                key={p.id}
+                label={p.property_name}
+                active={propertyId === p.id}
+                onPress={() => setPropertyId(p.id)}
+              />
+            ))}
+          </View>
+        </View>
+      ) : null}
+
+      <DatePickerModal
+        visible={showDatePicker}
+        title="Activity Date"
+        value={date}
+        minimumDate={MIN_ACTIVITY_DATE}
+        onConfirm={(d) => {
+          setDate(d);
+          setShowDatePicker(false);
+        }}
+        onCancel={() => setShowDatePicker(false)}
+      />
+    </EditFormSheet>
+  );
+};
+
+const editStyles = StyleSheet.create({
+  fieldLabel: {
+    ...typography.caption,
+    color: colors.mutedText,
+    fontSize: 11,
+    fontWeight: '700',
+    textTransform: 'uppercase',
+    letterSpacing: 0.5,
+    marginBottom: spacing.xs,
+  },
+  input: {
+    backgroundColor: colors.white,
+    borderWidth: 0.5,
+    borderColor: '#CCCCCC',
+    borderRadius: 8,
+    paddingHorizontal: spacing.md,
+    paddingVertical: 12,
+    ...typography.body,
+    color: colors.bodyText,
+    fontSize: 14,
+  },
+  inputMulti: {
+    minHeight: 64,
+    textAlignVertical: 'top',
+  },
+  dateField: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    justifyContent: 'space-between',
+    backgroundColor: colors.white,
+    borderWidth: 0.5,
+    borderColor: '#CCCCCC',
+    borderRadius: 8,
+    paddingHorizontal: spacing.md,
+    paddingVertical: 12,
+  },
+  dateText: {
+    ...typography.body,
+    color: colors.bodyText,
+    fontSize: 14,
+  },
+  datePlaceholder: {
+    color: colors.subtleText,
+  },
+  optionList: {
+    gap: spacing.sm,
+  },
+  option: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    justifyContent: 'space-between',
+    paddingVertical: 12,
+    paddingHorizontal: spacing.md,
+    borderRadius: 8,
+    borderWidth: StyleSheet.hairlineWidth,
+    borderColor: colors.cardBorder,
+    backgroundColor: colors.white,
+  },
+  optionActive: {
+    backgroundColor: colors.midNavy,
+    borderColor: colors.midNavy,
+  },
+  optionText: {
+    ...typography.bodyMedium,
+    color: colors.bodyText,
+    fontSize: 14,
+    fontWeight: '600',
+    flex: 1,
+    marginRight: spacing.sm,
+  },
+  optionTextActive: {
+    color: colors.white,
+  },
+});
+
+const filterStyles = StyleSheet.create({
+  backdrop: {
+    flex: 1,
+    justifyContent: 'flex-end',
+    backgroundColor: 'rgba(0,0,0,0.4)',
+  },
+  sheet: {
+    backgroundColor: colors.white,
+    borderTopLeftRadius: 16,
+    borderTopRightRadius: 16,
+    maxHeight: '88%',
+  },
+  header: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    justifyContent: 'space-between',
+    paddingHorizontal: spacing.lg,
+    paddingVertical: spacing.md,
+    borderBottomWidth: StyleSheet.hairlineWidth,
+    borderBottomColor: colors.divider,
+  },
+  title: {
+    ...typography.h2,
+    color: colors.bodyText,
+  },
+  body: {
+    flexGrow: 0,
+  },
+  bodyContent: {
+    padding: spacing.lg,
+    gap: spacing.sm,
+  },
+  groupLabel: {
+    ...typography.caption,
+    color: colors.mutedText,
+    fontSize: 11,
+    fontWeight: '700',
+    textTransform: 'uppercase',
+    letterSpacing: 0.5,
+    marginTop: spacing.sm,
+    marginBottom: spacing.xs,
+  },
+  chipWrap: {
+    flexDirection: 'row',
+    flexWrap: 'wrap',
+    gap: spacing.sm,
+  },
+  chip: {
+    paddingHorizontal: spacing.md,
+    paddingVertical: 8,
+    borderRadius: radius.pill,
+    borderWidth: StyleSheet.hairlineWidth,
+    borderColor: colors.cardBorder,
+    backgroundColor: colors.white,
+  },
+  chipActive: {
+    backgroundColor: colors.midNavy,
+    borderColor: colors.midNavy,
+  },
+  chipText: {
+    ...typography.caption,
+    color: colors.bodyText,
+    fontSize: 13,
+    fontWeight: '600',
+  },
+  chipTextActive: {
+    color: colors.white,
+  },
+  customRow: {
+    flexDirection: 'row',
+    marginTop: spacing.sm,
+  },
+  customGap: {
+    width: spacing.md,
+  },
+  dateFieldWrap: {
+    flex: 1,
+  },
+  footer: {
+    paddingHorizontal: spacing.lg,
+    paddingTop: spacing.md,
+    paddingBottom: spacing.xl,
+    gap: spacing.sm,
+    borderTopWidth: StyleSheet.hairlineWidth,
+    borderTopColor: colors.divider,
+  },
+  footerRow: {
+    flexDirection: 'row',
+    gap: spacing.md,
+  },
+  footerBtn: {
+    flex: 1,
+    alignItems: 'center',
+    justifyContent: 'center',
+    paddingVertical: 12,
+    borderRadius: 8,
+    borderWidth: 1.5,
+  },
+  resetBtn: {
+    borderColor: colors.amber,
+    backgroundColor: colors.white,
+  },
+  resetBtnText: {
+    ...typography.bodyMedium,
+    color: colors.amber,
+    fontWeight: '700',
+    fontSize: 14,
+  },
+  cancelBtn: {
+    borderColor: colors.mutedText,
+    backgroundColor: colors.white,
+  },
+  cancelBtnText: {
+    ...typography.bodyMedium,
+    color: colors.mutedText,
+    fontWeight: '700',
+    fontSize: 14,
+  },
+  applyBtn: {
+    alignItems: 'center',
+    justifyContent: 'center',
+    paddingVertical: 14,
+    borderRadius: 8,
+    backgroundColor: colors.navy,
+  },
+  applyBtnText: {
+    ...typography.bodyMedium,
+    color: colors.white,
+    fontWeight: '700',
+    fontSize: 15,
+  },
+});
 
 const modalStyles = StyleSheet.create({
   backdrop: {
@@ -1004,11 +1843,55 @@ const styles = StyleSheet.create({
     color: colors.mutedText,
     fontSize: 11,
   },
-  activityRow: {
+  activityHeaderRow: {
     flexDirection: 'row',
     alignItems: 'center',
+    justifyContent: 'space-between',
+    marginBottom: spacing.md,
+  },
+  activityHeaderTitle: {
+    ...typography.h2,
+    color: colors.bodyText,
+    fontSize: 17,
+  },
+  filterBtn: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: spacing.xs,
+  },
+  filterBtnText: {
+    ...typography.bodyMedium,
+    color: colors.midNavy,
+    fontSize: 13,
+    fontWeight: '600',
+  },
+  filterBadge: {
+    minWidth: 18,
+    height: 18,
+    paddingHorizontal: 5,
+    borderRadius: 9,
+    backgroundColor: colors.amber,
+    alignItems: 'center',
+    justifyContent: 'center',
+    marginLeft: 2,
+  },
+  filterBadgeText: {
+    color: colors.white,
+    fontSize: 11,
+    fontWeight: '700',
+  },
+  activityEmpty: {
+    ...typography.body,
+    color: colors.mutedText,
+    fontSize: 13,
+    textAlign: 'center',
     paddingVertical: spacing.md,
+  },
+  activityContent: {
     gap: spacing.md,
+  },
+  activityRow: {
+    paddingVertical: spacing.md,
   },
   activityRowDivider: {
     borderBottomWidth: StyleSheet.hairlineWidth,

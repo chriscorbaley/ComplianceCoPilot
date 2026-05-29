@@ -4,6 +4,7 @@ import { colors } from '../theme';
 import { BottomTabs } from './BottomTabs';
 import { DocumentDetailScreen } from '../screens/DocumentDetailScreen';
 import { StrategyDetailScreen } from '../screens/StrategyDetailScreen';
+import { RealEstateActivityLog } from '../screens/strategy/RealEstateActivityLog';
 import { AdminPanelScreen } from '../screens/admin/AdminPanelScreen';
 import { SettingsScreen } from '../screens/SettingsScreen';
 import { MinutesDocumentScreen } from '../screens/MinutesDocumentScreen';
@@ -45,6 +46,11 @@ export const RootStack: React.FC = () => {
         name="StrategyDetail"
         component={StrategyDetailScreen}
         options={{ title: 'Strategy' }}
+      />
+      <Stack.Screen
+        name="RealEstateActivityLog"
+        component={RealEstateActivityLog}
+        options={{ title: 'Activity Log' }}
       />
       <Stack.Screen
         name="AdminPanel"

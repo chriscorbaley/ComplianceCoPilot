@@ -4,7 +4,9 @@ import {
   Alert,
   Animated,
   Easing,
+  KeyboardAvoidingView,
   Modal,
+  Platform,
   Pressable,
   ScrollView,
   StyleSheet,
@@ -16,6 +18,8 @@ import {
 import { Ionicons } from '@expo/vector-icons';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
 import { Audio } from 'expo-av';
+import * as Sharing from 'expo-sharing';
+import * as Print from 'expo-print';
 import { useFocusEffect, useNavigation } from '@react-navigation/native';
 import type { NativeStackNavigationProp } from '@react-navigation/native-stack';
 import { colors, radius, shadow, spacing, typography } from '../theme';
@@ -63,6 +67,21 @@ const WHISPER_PROMPT =
 // Recordings shorter than this are almost always accidental taps and are the
 // single biggest source of hallucinated URLs/phrases, so we never send them.
 const MIN_RECORDING_MS = 2000;
+
+// Whisper has a 25MB upload cap (≈20 min of m4a audio), so a single recording
+// segment is hard-capped at 20 minutes. Longer meetings are captured as a
+// sequence of segments that each transcribe separately and then combine into
+// one running transcript.
+const MAX_RECORDING_MS = 20 * 60 * 1000; // 1200s — auto-stops here
+const WARNING_MS = 18 * 60 * 1000; // 1080s — 2-minute heads-up banner
+
+// Timer colours by elapsed time (per design): all-good → warning → at-limit.
+const TIMER_GOOD = '#0F6E56';
+const TIMER_WARN = '#BA7517';
+const TIMER_LIMIT = '#A32D2D';
+
+// Subtle marker between transcribed segments in the combined transcript.
+const SEGMENT_DIVIDER = '\n\n--- continued ---\n\n';
 
 type MeetingType =
   | 'Augusta Rule business meeting'
@@ -169,10 +188,26 @@ const MinutesScreenInner: React.FC = () => {
   const [recentMinutes, setRecentMinutes] = useState<RecentMinute[]>([]);
   const [saving, setSaving] = useState(false);
   const [generating, setGenerating] = useState(false);
+  // The Recent Minutes row currently open in the editable minutes view.
+  const [editingMinute, setEditingMinute] = useState<RecentMinute | null>(null);
 
   const [recording, setRecording] = useState(false);
   const [transcribing, setTranscribing] = useState(false);
-  useKeepAwakeWhile(recording, 'minutes-screen');
+
+  // Segmented-recording session state. A "session" spans every segment of one
+  // meeting: it begins when the first segment starts and ends when the user
+  // generates/saves the minutes (or leaves the screen).
+  const [sessionActive, setSessionActive] = useState(false);
+  const [segmentCount, setSegmentCount] = useState(0);
+  const [segmentNotice, setSegmentNotice] = useState<string | null>(null);
+  const [showSegmentWarning, setShowSegmentWarning] = useState(false);
+  const [transcribingSegmentNum, setTranscribingSegmentNum] = useState<number | null>(null);
+
+  // Keep the screen awake for the WHOLE multi-segment session — not just while
+  // a single segment is recording. `sessionActive` stays true between segments
+  // (after one transcribes, before the next starts) so auto-lock can never
+  // interrupt a long meeting; it is released on generate/save or on unmount.
+  useKeepAwakeWhile(sessionActive, 'minutes-screen');
   const activeRecRef = useRef<Audio.Recording | null>(null);
   const recordStartRef = useRef<number>(0);
   const typeBufferRef = useRef('');
@@ -287,10 +322,12 @@ const MinutesScreenInner: React.FC = () => {
     };
   }, []);
 
-  // Start a single, continuous recording. There is deliberately no automatic
-  // duration cutoff — the recording runs until the user taps stop, however long
-  // that takes. Keep-awake is engaged the moment `recording` flips true.
-  const beginRecording = async () => {
+  // Start a recording segment. Each segment auto-stops at MAX_RECORDING_MS (20
+  // min) to stay under Whisper's upload cap; the user can then start another
+  // segment that appends to the same running transcript. Keep-awake is held for
+  // the whole session via `sessionActive`.
+  const beginRecording = useCallback(async () => {
+    if (transcribing) return; // can't start a segment while one is transcribing
     try {
       const granted = await ensureMicPermission();
       if (!granted) {
@@ -306,27 +343,34 @@ const MinutesScreenInner: React.FC = () => {
       await rec.startAsync();
       activeRecRef.current = rec;
       recordStartRef.current = Date.now();
+      setSessionActive(true);
+      setSegmentNotice(null);
+      setShowSegmentWarning(false);
       setRecording(true);
       setElapsedMs(0);
       elapsedTimerRef.current = setInterval(() => {
-        setElapsedMs((m) => m + 1000);
+        setElapsedMs((m) => Math.min(m + 1000, MAX_RECORDING_MS));
       }, 1000);
     } catch (e) {
       activeRecRef.current = null;
       await releaseAudioMode().catch(() => undefined);
       Alert.alert('Could not start recording', e instanceof Error ? e.message : String(e));
     }
-  };
+  }, [transcribing]);
 
-  // Stop the recording, enforce the minimum length, then send the complete file
-  // to Whisper in one call.
-  const endRecording = async () => {
+  // Stop the current segment, enforce the minimum length, then send the file to
+  // Whisper. The transcribed text is appended to the running transcript (with a
+  // "--- continued ---" divider for the 2nd segment onward) so all segments
+  // combine into one transcript. `auto` is true when the 20-minute cap fired.
+  const endRecording = useCallback(async (auto = false) => {
     const rec = activeRecRef.current;
+    if (!rec && !recording) return; // re-entrancy guard (auto-stop + manual tap)
     const durationMs = recordStartRef.current ? Date.now() - recordStartRef.current : 0;
 
-    // Flip out of the recording state first — this stops the timer and releases
-    // the keep-awake lock via useKeepAwakeWhile.
+    // Flip out of the recording state first — this stops the timer. Keep-awake
+    // stays engaged because `sessionActive` remains true between segments.
     setRecording(false);
+    setShowSegmentWarning(false);
     if (elapsedTimerRef.current) {
       clearInterval(elapsedTimerRef.current);
       elapsedTimerRef.current = null;
@@ -366,6 +410,8 @@ const MinutesScreenInner: React.FC = () => {
       return;
     }
 
+    const segNum = segmentCount + 1;
+    setTranscribingSegmentNum(segNum);
     setTranscribing(true);
     try {
       const text = await transcribe(uri, {
@@ -376,11 +422,23 @@ const MinutesScreenInner: React.FC = () => {
       // never clears, check whether this logs — no log means the request never
       // resolved (proxy unreachable / wrong EXPO_PUBLIC_PROXY_URL).
       console.log('[minutes] whisper response received', {
+        segment: segNum,
         chars: text.length,
         preview: text.slice(0, 80),
       });
       if (text) {
-        appendTranscript(text);
+        // First transcribed segment of the session appends to whatever is
+        // already there; every later segment gets the divider so the user can
+        // see where each part begins.
+        setTranscript((prev) => {
+          if (!prev.trim()) return text;
+          if (segmentCount > 0) return prev + SEGMENT_DIVIDER + text;
+          return /\s$/.test(prev) ? prev + text : `${prev} ${text}`;
+        });
+        setSegmentCount(segNum);
+        setSegmentNotice(
+          `Segment ${segNum} transcribed. Tap the mic to continue recording the next part of your meeting.`,
+        );
       } else {
         Alert.alert(
           'Nothing transcribed',
@@ -401,8 +459,28 @@ const MinutesScreenInner: React.FC = () => {
       }
     } finally {
       setTranscribing(false);
+      setTranscribingSegmentNum(null);
     }
-  };
+  }, [recording, segmentCount]);
+
+  // Auto-stop the segment the instant it reaches the 20-minute Whisper cap.
+  useEffect(() => {
+    if (!recording) return;
+    if (elapsedMs >= MAX_RECORDING_MS) {
+      void endRecording(true);
+    } else if (elapsedMs >= WARNING_MS) {
+      setShowSegmentWarning(true);
+    }
+  }, [recording, elapsedMs, endRecording]);
+
+  // End the session once the minutes are produced/saved: this releases the
+  // keep-awake lock and resets the segment counter for the next meeting.
+  const endSession = useCallback(() => {
+    setSessionActive(false);
+    setSegmentCount(0);
+    setSegmentNotice(null);
+    setShowSegmentWarning(false);
+  }, []);
 
   const onMicPress = () => {
     if (recording) void endRecording();
@@ -476,6 +554,7 @@ const MinutesScreenInner: React.FC = () => {
       }
 
       await loadRecent();
+      endSession();
       if (vaultSaved) {
         Alert.alert('Saved', 'Minutes saved to your document vault');
       }
@@ -519,6 +598,7 @@ const MinutesScreenInner: React.FC = () => {
       });
       if (error) throw new Error(error.message);
       await loadRecent();
+      endSession();
       Alert.alert('Draft saved', 'Your meeting minutes draft was saved.');
     } catch (e) {
       Alert.alert('Could not save', e instanceof Error ? e.message : String(e));
@@ -590,12 +670,13 @@ const MinutesScreenInner: React.FC = () => {
   };
 
   const onRecentPress = (row: RecentMinute) => {
-    if (row.status === 'Complete' && row.document?.trim()) {
-      openDocument(row.document, row.type, row.rawDate, row.location);
+    if (row.document?.trim()) {
+      // Generated minutes open in the editable minutes view.
+      setEditingMinute(row);
       return;
     }
-    // Draft (or a complete row missing its document) — show transcript with
-    // the option to generate the full document.
+    // Draft with no document yet — show transcript with the option to generate
+    // the full document.
     Alert.alert(
       'Draft Minutes',
       row.transcript?.trim()
@@ -616,6 +697,12 @@ const MinutesScreenInner: React.FC = () => {
   };
 
   const elapsedLabel = formatElapsed(elapsedMs);
+  const timerColor =
+    elapsedMs >= MAX_RECORDING_MS
+      ? TIMER_LIMIT
+      : elapsedMs >= WARNING_MS
+      ? TIMER_WARN
+      : TIMER_GOOD;
 
   const pulseScale = pulse.interpolate({
     inputRange: [0, 1],
@@ -695,23 +782,34 @@ const MinutesScreenInner: React.FC = () => {
 
         <Card padded style={styles.recordCard}>
           <View style={styles.recordHeader}>
-            <Text style={styles.recordTitle}>
-              {recording
-                ? 'Recording…'
-                : transcribing
-                ? 'Transcribing…'
-                : 'Voice Recording'}
-            </Text>
+            <View style={styles.recordTitleWrap}>
+              <Text style={styles.recordTitle}>
+                {recording
+                  ? 'Recording…'
+                  : transcribing
+                  ? 'Transcribing…'
+                  : 'Voice Recording'}
+              </Text>
+              {(recording || segmentCount > 0) && !transcribing ? (
+                <View style={styles.segmentChip}>
+                  <Text style={styles.segmentChipText}>
+                    Segment {recording ? segmentCount + 1 : segmentCount}
+                  </Text>
+                </View>
+              ) : null}
+            </View>
             <View style={styles.timerWrap}>
               {transcribing ? (
                 <ActivityIndicator size="small" color={colors.midNavy} />
               ) : (
                 <>
-                  {recording ? <View style={styles.recordDot} /> : null}
+                  {recording ? (
+                    <View style={[styles.recordDot, { backgroundColor: timerColor }]} />
+                  ) : null}
                   <Text
                     style={[
                       styles.timerText,
-                      recording && { color: '#E0352B' },
+                      recording && { color: timerColor, fontSize: 15 },
                     ]}
                   >
                     {elapsedLabel}
@@ -723,13 +821,39 @@ const MinutesScreenInner: React.FC = () => {
 
           <AnimatedWaveform active={recording} style={styles.waveform} />
 
+          {recording && showSegmentWarning ? (
+            <View style={styles.warningBanner}>
+              <Ionicons name="time-outline" size={18} color={TIMER_WARN} />
+              <Text style={styles.warningText}>
+                2 minutes remaining in this recording segment. Tap the mic to
+                pause and continue in a new segment.
+              </Text>
+            </View>
+          ) : null}
+
           {transcribing ? (
             <View style={styles.transcribingBanner}>
               <ActivityIndicator size="small" color={colors.midNavy} />
-              <Text style={styles.transcribingText}>
-                Transcribing your recording… this may take a moment for longer
-                recordings
-              </Text>
+              <View style={styles.transcribingTextWrap}>
+                <Text style={styles.transcribingText}>
+                  Transcribing segment {transcribingSegmentNum ?? ''}… please
+                  wait
+                </Text>
+                <Text style={styles.transcribingSubText}>
+                  Usually takes 30-60 seconds per 10 minutes of audio
+                </Text>
+              </View>
+            </View>
+          ) : null}
+
+          {!recording && !transcribing && segmentNotice ? (
+            <View style={styles.segmentNoticeBanner}>
+              <Ionicons
+                name="checkmark-circle"
+                size={18}
+                color={TIMER_GOOD}
+              />
+              <Text style={styles.segmentNoticeText}>{segmentNotice}</Text>
             </View>
           ) : null}
 
@@ -772,11 +896,18 @@ const MinutesScreenInner: React.FC = () => {
                 ? 'Recording — tap to stop when finished'
                 : transcribing
                 ? 'Transcribing your recording…'
+                : segmentCount > 0
+                ? 'Tap the mic to record the next segment'
                 : 'Tap the mic to begin recording'}
             </Text>
-            <KeepAwakeIndicator visible={recording} style={styles.keepAwakeBadge} />
+            <KeepAwakeIndicator visible={sessionActive} style={styles.keepAwakeBadge} />
           </View>
         </Card>
+
+        <Text style={styles.usageNote}>
+          Each recording segment captures up to 20 minutes. For longer meetings
+          tap the mic again to add another segment.
+        </Text>
 
         <View>
           <Text style={styles.label}>Transcript</Text>
@@ -921,6 +1052,13 @@ const MinutesScreenInner: React.FC = () => {
           </Pressable>
         </Pressable>
       </Modal>
+
+      <MinutesEditModal
+        minute={editingMinute}
+        businessId={activeBusinessId}
+        onClose={() => setEditingMinute(null)}
+        onSaved={loadRecent}
+      />
     </View>
   );
 };
@@ -931,6 +1069,596 @@ const formatElapsed = (ms: number) => {
   const s = (total % 60).toString().padStart(2, '0');
   return `${m}:${s}`;
 };
+
+// ── Editable minutes view (Fix 4) ────────────────────────────────────────────
+
+const DELETE_RED = '#B33A3A';
+
+const escapeHtmlMinutes = (s: string): string =>
+  s
+    .replace(/&/g, '&amp;')
+    .replace(/</g, '&lt;')
+    .replace(/>/g, '&gt;')
+    .replace(/"/g, '&quot;')
+    .replace(/'/g, '&#39;');
+
+// Compact markdown-ish → HTML conversion so the shared PDF keeps headings and
+// bullets from the minutes text.
+const buildMinutesHtml = (
+  doc: string,
+  meetingType: string,
+  meetingDate: string,
+  location: string,
+): string => {
+  const body = doc
+    .split(/\r?\n/)
+    .map((raw) => {
+      const line = raw.replace(/\s+$/, '');
+      if (!line.trim()) return '<div style="height:8px"></div>';
+      const heading = /^(#{1,3})\s+(.*)$/.exec(line);
+      if (heading) {
+        const level = heading[1].length;
+        return `<h${level}>${escapeHtmlMinutes(heading[2].replace(/\*\*/g, ''))}</h${level}>`;
+      }
+      const bullet = /^\s*[-*•]\s+(.*)$/.exec(line);
+      if (bullet) return `<li>${escapeHtmlMinutes(bullet[1].replace(/\*\*/g, ''))}</li>`;
+      return `<p>${escapeHtmlMinutes(line.replace(/\*\*/g, ''))}</p>`;
+    })
+    .join('\n');
+  return `<!doctype html><html><head><meta charset="utf-8" />
+<style>
+  @page { margin: 48px; }
+  body { font-family: -apple-system, Helvetica, Arial, sans-serif; color: #1A1A2E; font-size: 12pt; line-height: 1.5; }
+  .hdr { border-bottom: 2px solid #042C53; padding-bottom: 12px; margin-bottom: 20px; }
+  .hdr h1 { color: #042C53; margin: 0 0 6px 0; font-size: 20pt; }
+  .hdr .meta { color: #6B7280; font-size: 10.5pt; }
+  h1 { color: #042C53; font-size: 16pt; } h2 { color: #042C53; font-size: 14pt; }
+  h3 { color: #1A1A2E; font-size: 12pt; } p { margin: 4px 0 8px 0; } li { margin: 2px 0; }
+</style></head><body>
+  <div class="hdr"><h1>Meeting Minutes</h1>
+  <div class="meta">${escapeHtmlMinutes(meetingType)} · ${escapeHtmlMinutes(meetingDate)} · ${escapeHtmlMinutes(location || '—')}</div></div>
+  ${body}
+</body></html>`;
+};
+
+const shareMinutesAsPdf = async (
+  doc: string,
+  meetingType: string,
+  meetingDate: string,
+  location: string,
+): Promise<void> => {
+  const available = await Sharing.isAvailableAsync();
+  if (!available) throw new Error('Sharing is not available on this device.');
+  const html = buildMinutesHtml(doc, meetingType, meetingDate, location);
+  const { uri } = await Print.printToFileAsync({ html, base64: false });
+  await Sharing.shareAsync(uri, {
+    mimeType: 'application/pdf',
+    UTI: 'com.adobe.pdf',
+    dialogTitle: 'Share Meeting Minutes',
+  });
+};
+
+interface MinutesEditModalProps {
+  minute: RecentMinute | null;
+  businessId: string | null;
+  onClose: () => void;
+  onSaved: () => Promise<void> | void;
+}
+
+const MinutesEditModal: React.FC<MinutesEditModalProps> = ({
+  minute,
+  businessId,
+  onClose,
+  onSaved,
+}) => {
+  const insets = useSafeAreaInsets();
+  const [text, setText] = useState('');
+  const [meetingType, setMeetingType] = useState<MeetingType>(MEETING_TYPES[0]);
+  const [meetingDate, setMeetingDate] = useState('');
+  const [location, setLocation] = useState('');
+  const [editMeta, setEditMeta] = useState(false);
+  const [typeDropdownOpen, setTypeDropdownOpen] = useState(false);
+  const [saving, setSaving] = useState(false);
+  const [regenerating, setRegenerating] = useState(false);
+  const [sharing, setSharing] = useState(false);
+  // The document text we currently match the documents-vault row on. Updated
+  // after every successful save so the next save still finds the row.
+  const originalDocRef = useRef('');
+
+  useEffect(() => {
+    if (!minute) return;
+    setText(minute.document ?? '');
+    const mt = (MEETING_TYPES as string[]).includes(minute.type)
+      ? (minute.type as MeetingType)
+      : MEETING_TYPES[0];
+    setMeetingType(mt);
+    setMeetingDate(minute.date || formatDateLong(minute.rawDate));
+    setLocation(minute.location ?? '');
+    setEditMeta(false);
+    originalDocRef.current = minute.document ?? '';
+  }, [minute]);
+
+  // Updates meeting_minutes and the mirrored documents row with the given text
+  // plus the current metadata.
+  const persistMinutes = async (docText: string): Promise<void> => {
+    if (!minute) return;
+    const userId = await requireUserId();
+    const dateIso = parseDateInput(meetingDate);
+    const { error } = await supabase
+      .from('meeting_minutes')
+      .update({
+        meeting_type: meetingType,
+        location,
+        meeting_date: dateIso,
+        minutes_document: docText,
+      })
+      .eq('id', minute.id)
+      .eq('user_id', userId);
+    if (error) throw new Error(error.message);
+
+    if (originalDocRef.current) {
+      const { error: docErr } = await supabase
+        .from('documents')
+        .update({ file_url: docText, name: buildMinutesDocName(meetingType, dateIso) })
+        .eq('user_id', userId)
+        .eq('file_type', 'minutes')
+        .eq('file_url', originalDocRef.current);
+      if (docErr) console.warn('[minutes] vault update failed', docErr);
+    }
+    originalDocRef.current = docText;
+  };
+
+  const handleSave = async () => {
+    setSaving(true);
+    try {
+      await persistMinutes(text);
+      await onSaved();
+      onClose();
+    } catch (e) {
+      Alert.alert('Could not save', e instanceof Error ? e.message : String(e));
+    } finally {
+      setSaving(false);
+    }
+  };
+
+  const handleRegenerate = () => {
+    if (!minute?.transcript?.trim()) {
+      Alert.alert('No transcript', 'This meeting has no transcript to regenerate from.');
+      return;
+    }
+    Alert.alert(
+      'Regenerate minutes',
+      'This will replace your current minutes with a newly generated version. Continue?',
+      [
+        { text: 'Cancel', style: 'cancel' },
+        {
+          text: 'Regenerate',
+          style: 'destructive',
+          onPress: async () => {
+            setRegenerating(true);
+            try {
+              const dateIso = parseDateInput(meetingDate);
+              const doc = await generateMinutesDocument({
+                transcript: minute.transcript ?? '',
+                meeting_type: meetingType,
+                meeting_date: dateIso,
+                location,
+                attendee_count: null,
+              });
+              setText(doc);
+              await persistMinutes(doc);
+              await onSaved();
+            } catch (e) {
+              if (e instanceof MissingProxyError) {
+                Alert.alert('Proxy not configured', e.message);
+              } else if (e instanceof ProxyUnreachableError) {
+                Alert.alert('Proxy unreachable', e.message);
+              } else {
+                Alert.alert(
+                  'Could not regenerate',
+                  e instanceof Error ? e.message : String(e),
+                );
+              }
+            } finally {
+              setRegenerating(false);
+            }
+          },
+        },
+      ],
+    );
+  };
+
+  const handleShare = async () => {
+    setSharing(true);
+    try {
+      await shareMinutesAsPdf(text, meetingType, meetingDate, location);
+    } catch (e) {
+      Alert.alert('Could not share', e instanceof Error ? e.message : String(e));
+    } finally {
+      setSharing(false);
+    }
+  };
+
+  const handleDelete = () => {
+    if (!minute) return;
+    Alert.alert(
+      'Delete these minutes?',
+      'This removes the minutes and its document. This cannot be undone.',
+      [
+        { text: 'Cancel', style: 'cancel' },
+        {
+          text: 'Delete',
+          style: 'destructive',
+          onPress: async () => {
+            setSaving(true);
+            try {
+              const userId = await requireUserId();
+              const { error } = await supabase
+                .from('meeting_minutes')
+                .delete()
+                .eq('id', minute.id)
+                .eq('user_id', userId);
+              if (error) throw new Error(error.message);
+              if (originalDocRef.current) {
+                await supabase
+                  .from('documents')
+                  .delete()
+                  .eq('user_id', userId)
+                  .eq('file_type', 'minutes')
+                  .eq('file_url', originalDocRef.current);
+              }
+              await onSaved();
+              onClose();
+            } catch (e) {
+              Alert.alert('Could not delete', e instanceof Error ? e.message : String(e));
+            } finally {
+              setSaving(false);
+            }
+          },
+        },
+      ],
+    );
+  };
+
+  const busy = saving || regenerating || sharing;
+
+  return (
+    <Modal visible={!!minute} animationType="slide" onRequestClose={onClose}>
+      <View style={[editStyles.root, { paddingTop: insets.top }]}>
+        <View style={editStyles.topBar}>
+          <TouchableOpacity onPress={onClose} hitSlop={12} style={editStyles.topBtn}>
+            <Ionicons name="close" size={26} color={colors.bodyText} />
+          </TouchableOpacity>
+          <Text style={editStyles.topTitle} numberOfLines={1}>
+            Edit Minutes
+          </Text>
+          <TouchableOpacity
+            onPress={handleSave}
+            disabled={busy}
+            hitSlop={12}
+            style={editStyles.topBtn}
+          >
+            {saving ? (
+              <ActivityIndicator size="small" color={colors.navy} />
+            ) : (
+              <Ionicons name="checkmark" size={26} color={colors.navy} />
+            )}
+          </TouchableOpacity>
+        </View>
+
+        <KeyboardAvoidingView
+          style={editStyles.flex}
+          behavior={Platform.OS === 'ios' ? 'padding' : undefined}
+        >
+          <ScrollView
+            contentContainerStyle={[
+              editStyles.content,
+              { paddingBottom: 32 + insets.bottom },
+            ]}
+            keyboardShouldPersistTaps="handled"
+            showsVerticalScrollIndicator={false}
+          >
+            <View style={editStyles.metaCard}>
+              <View style={editStyles.metaHeader}>
+                <Text style={editStyles.metaCardTitle}>Meeting details</Text>
+                <TouchableOpacity onPress={() => setEditMeta((v) => !v)} hitSlop={8}>
+                  <Text style={editStyles.editDetailsLink}>
+                    {editMeta ? 'Done' : 'Edit Details'}
+                  </Text>
+                </TouchableOpacity>
+              </View>
+              {editMeta ? (
+                <View style={editStyles.metaFields}>
+                  <View>
+                    <Text style={styles.label}>Meeting Type</Text>
+                    <TouchableOpacity
+                      activeOpacity={0.8}
+                      onPress={() => setTypeDropdownOpen(true)}
+                      style={styles.dropdown}
+                    >
+                      <Text style={styles.dropdownText} numberOfLines={1}>
+                        {meetingType}
+                      </Text>
+                      <Ionicons name="chevron-down" size={18} color={colors.mutedText} />
+                    </TouchableOpacity>
+                  </View>
+                  <View>
+                    <Text style={styles.label}>Date</Text>
+                    <TextInput
+                      style={styles.input}
+                      value={meetingDate}
+                      onChangeText={setMeetingDate}
+                      placeholder="May 13, 2026"
+                      placeholderTextColor={colors.subtleText}
+                    />
+                  </View>
+                  <View>
+                    <Text style={styles.label}>Location</Text>
+                    <TextInput
+                      style={styles.input}
+                      value={location}
+                      onChangeText={setLocation}
+                      placeholder="Scottsdale, AZ"
+                      placeholderTextColor={colors.subtleText}
+                    />
+                  </View>
+                </View>
+              ) : (
+                <>
+                  <Text style={editStyles.metaLine}>{meetingType}</Text>
+                  <Text style={editStyles.metaSub}>
+                    {meetingDate}
+                    {location ? ` · ${location}` : ''}
+                  </Text>
+                </>
+              )}
+            </View>
+
+            <Text style={styles.label}>Minutes</Text>
+            <TextInput
+              style={editStyles.docArea}
+              value={text}
+              onChangeText={setText}
+              multiline
+              textAlignVertical="top"
+              placeholder="Minutes document"
+              placeholderTextColor={colors.subtleText}
+            />
+
+            <View style={editStyles.actionRow}>
+              <TouchableOpacity
+                activeOpacity={0.85}
+                onPress={handleRegenerate}
+                disabled={busy}
+                style={[editStyles.actionBtn, editStyles.actionOutline, busy && editStyles.dim]}
+              >
+                {regenerating ? (
+                  <ActivityIndicator size="small" color={colors.navy} />
+                ) : (
+                  <Ionicons name="refresh" size={16} color={colors.navy} />
+                )}
+                <Text style={editStyles.actionOutlineText}>Regenerate</Text>
+              </TouchableOpacity>
+              <TouchableOpacity
+                activeOpacity={0.85}
+                onPress={handleShare}
+                disabled={busy}
+                style={[editStyles.actionBtn, editStyles.actionOutline, busy && editStyles.dim]}
+              >
+                {sharing ? (
+                  <ActivityIndicator size="small" color={colors.navy} />
+                ) : (
+                  <Ionicons name="share-outline" size={16} color={colors.navy} />
+                )}
+                <Text style={editStyles.actionOutlineText}>Share</Text>
+              </TouchableOpacity>
+            </View>
+
+            <TouchableOpacity
+              activeOpacity={0.85}
+              onPress={handleSave}
+              disabled={busy}
+              style={[editStyles.saveBtn, busy && editStyles.dim]}
+            >
+              <Ionicons name="save-outline" size={18} color={colors.white} />
+              <Text style={editStyles.saveBtnText}>Save Changes</Text>
+            </TouchableOpacity>
+            <TouchableOpacity
+              activeOpacity={0.85}
+              onPress={handleDelete}
+              disabled={busy}
+              style={[editStyles.deleteBtn, busy && editStyles.dim]}
+            >
+              <Ionicons name="trash-outline" size={18} color={DELETE_RED} />
+              <Text style={editStyles.deleteBtnText}>Delete</Text>
+            </TouchableOpacity>
+          </ScrollView>
+        </KeyboardAvoidingView>
+
+        <Modal
+          visible={typeDropdownOpen}
+          transparent
+          animationType="fade"
+          onRequestClose={() => setTypeDropdownOpen(false)}
+        >
+          <Pressable style={styles.modalBackdrop} onPress={() => setTypeDropdownOpen(false)}>
+            <Pressable style={styles.modalSheet} onPress={() => undefined}>
+              <Text style={styles.modalTitle}>Meeting Type</Text>
+              {MEETING_TYPES.map((opt) => {
+                const selected = opt === meetingType;
+                return (
+                  <TouchableOpacity
+                    key={opt}
+                    activeOpacity={0.7}
+                    onPress={() => {
+                      setMeetingType(opt);
+                      setTypeDropdownOpen(false);
+                    }}
+                    style={[styles.option, selected && styles.optionSelected]}
+                  >
+                    <Text
+                      style={[styles.optionText, selected && styles.optionTextSelected]}
+                    >
+                      {opt}
+                    </Text>
+                    {selected ? (
+                      <Ionicons name="checkmark" size={18} color={colors.navy} />
+                    ) : null}
+                  </TouchableOpacity>
+                );
+              })}
+            </Pressable>
+          </Pressable>
+        </Modal>
+      </View>
+    </Modal>
+  );
+};
+
+const editStyles = StyleSheet.create({
+  flex: { flex: 1 },
+  root: {
+    flex: 1,
+    backgroundColor: colors.white,
+  },
+  topBar: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    justifyContent: 'space-between',
+    paddingHorizontal: spacing.lg,
+    paddingVertical: spacing.md,
+    borderBottomWidth: StyleSheet.hairlineWidth,
+    borderBottomColor: colors.divider,
+  },
+  topBtn: {
+    minWidth: 40,
+    alignItems: 'center',
+    justifyContent: 'center',
+  },
+  topTitle: {
+    ...typography.h3,
+    color: colors.bodyText,
+    flex: 1,
+    textAlign: 'center',
+    marginHorizontal: spacing.sm,
+  },
+  content: {
+    padding: spacing.lg,
+    gap: spacing.md,
+  },
+  metaCard: {
+    backgroundColor: colors.background,
+    borderRadius: radius.card,
+    borderWidth: StyleSheet.hairlineWidth,
+    borderColor: colors.cardBorder,
+    padding: spacing.md,
+    gap: spacing.xs,
+  },
+  metaHeader: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    justifyContent: 'space-between',
+  },
+  metaCardTitle: {
+    ...typography.caption,
+    color: colors.mutedText,
+    fontSize: 11,
+    fontWeight: '700',
+    textTransform: 'uppercase',
+    letterSpacing: 0.5,
+  },
+  editDetailsLink: {
+    ...typography.bodyMedium,
+    color: colors.midNavy,
+    fontSize: 13,
+    fontWeight: '700',
+  },
+  metaFields: {
+    gap: spacing.sm,
+    marginTop: spacing.xs,
+  },
+  metaLine: {
+    ...typography.bodyMedium,
+    color: colors.bodyText,
+    fontWeight: '700',
+    fontSize: 15,
+  },
+  metaSub: {
+    ...typography.body,
+    color: colors.mutedText,
+    fontSize: 13,
+  },
+  docArea: {
+    backgroundColor: colors.white,
+    borderRadius: radius.card,
+    borderWidth: 0.5,
+    borderColor: colors.cardBorder,
+    paddingHorizontal: spacing.md,
+    paddingVertical: spacing.md,
+    minHeight: 280,
+    ...typography.body,
+    color: colors.bodyText,
+    fontSize: 14,
+    lineHeight: 21,
+  },
+  actionRow: {
+    flexDirection: 'row',
+    gap: spacing.md,
+  },
+  actionBtn: {
+    flex: 1,
+    flexDirection: 'row',
+    alignItems: 'center',
+    justifyContent: 'center',
+    gap: spacing.xs + 2,
+    borderRadius: radius.card,
+    paddingVertical: 12,
+  },
+  actionOutline: {
+    backgroundColor: colors.white,
+    borderWidth: 1.5,
+    borderColor: colors.navy,
+  },
+  actionOutlineText: {
+    ...typography.bodyMedium,
+    color: colors.navy,
+    fontWeight: '700',
+    fontSize: 14,
+  },
+  saveBtn: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    justifyContent: 'center',
+    gap: spacing.xs + 2,
+    backgroundColor: colors.navy,
+    borderRadius: radius.card,
+    paddingVertical: 14,
+  },
+  saveBtnText: {
+    ...typography.bodyMedium,
+    color: colors.white,
+    fontWeight: '700',
+    fontSize: 15,
+  },
+  deleteBtn: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    justifyContent: 'center',
+    gap: spacing.xs + 2,
+    backgroundColor: colors.white,
+    borderRadius: radius.card,
+    borderWidth: 1.5,
+    borderColor: DELETE_RED,
+    paddingVertical: 12,
+  },
+  deleteBtnText: {
+    ...typography.bodyMedium,
+    color: DELETE_RED,
+    fontWeight: '700',
+    fontSize: 14,
+  },
+  dim: { opacity: 0.6 },
+});
 
 const styles = StyleSheet.create({
   root: {
@@ -1003,9 +1731,27 @@ const styles = StyleSheet.create({
     alignItems: 'center',
     justifyContent: 'space-between',
   },
+  recordTitleWrap: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: spacing.sm,
+    flexShrink: 1,
+  },
   recordTitle: {
     ...typography.h3,
     color: colors.bodyText,
+  },
+  segmentChip: {
+    backgroundColor: colors.lightBlue,
+    borderRadius: 999,
+    paddingHorizontal: spacing.sm,
+    paddingVertical: 2,
+  },
+  segmentChipText: {
+    ...typography.caption,
+    color: colors.midNavy,
+    fontSize: 11,
+    fontWeight: '700',
   },
   timerWrap: {
     flexDirection: 'row',
@@ -1037,12 +1783,58 @@ const styles = StyleSheet.create({
     paddingHorizontal: spacing.md,
     paddingVertical: spacing.sm,
   },
+  transcribingTextWrap: {
+    flex: 1,
+    gap: 2,
+  },
   transcribingText: {
     ...typography.body,
     color: colors.midNavy,
     fontSize: 13,
     fontWeight: '600',
+  },
+  transcribingSubText: {
+    ...typography.caption,
+    color: colors.mutedText,
+    fontSize: 11,
+  },
+  warningBanner: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: spacing.sm,
+    backgroundColor: '#FBF1DF',
+    borderRadius: radius.card,
+    paddingHorizontal: spacing.md,
+    paddingVertical: spacing.sm,
+  },
+  warningText: {
+    ...typography.body,
+    color: TIMER_WARN,
+    fontSize: 13,
+    fontWeight: '600',
     flex: 1,
+  },
+  segmentNoticeBanner: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: spacing.sm,
+    backgroundColor: '#E7F3EE',
+    borderRadius: radius.card,
+    paddingHorizontal: spacing.md,
+    paddingVertical: spacing.sm,
+  },
+  segmentNoticeText: {
+    ...typography.body,
+    color: TIMER_GOOD,
+    fontSize: 13,
+    fontWeight: '600',
+    flex: 1,
+  },
+  usageNote: {
+    color: '#888888',
+    fontSize: 11,
+    lineHeight: 15,
+    marginTop: -spacing.sm,
   },
   micRow: {
     flexDirection: 'row',

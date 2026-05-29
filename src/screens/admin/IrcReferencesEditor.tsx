@@ -63,7 +63,7 @@ export const IrcReferencesEditor: React.FC = () => {
   useEffect(() => {
     load();
     const channel = supabase
-      .channel('admin-irc-stream')
+      .channel('admin-irc-stream-' + Date.now())
       .on(
         'postgres_changes',
         { event: '*', schema: 'public', table: 'irc_references' },

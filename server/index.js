@@ -43,6 +43,23 @@ const CLASSIFY_SYSTEM_PROMPT = `You are a tax compliance assistant. The user has
 
 const MEETING_MINUTES_SYSTEM_PROMPT = `You are a tax compliance document generator. Format the following meeting transcript into a professional compliance-ready meeting minutes document with these sections: Meeting Details (type, date, location, attendees), Agenda Items Discussed, Key Decisions Made, Action Items, Compliance Notes relevant to the strategy. Format it cleanly with clear headings. This document will be used as IRS audit documentation.`;
 
+// Augusta Rule (IRC §280A(g)) minutes use the same GPT-4 pipeline as every
+// other meeting, but with a strategy-specific prompt that adds the RENTAL
+// ARRANGEMENT and 280A(g) compliance sections an Augusta audit file needs. The
+// meeting details themselves are supplied in the user message below.
+const AUGUSTA_MINUTES_SYSTEM_PROMPT = `You are a tax compliance document generator. Format the following Augusta Rule meeting information into professional compliance-ready meeting minutes using the exact same format as the company standard minutes template.
+
+Generate formatted meeting minutes with these sections:
+1. MEETING DETAILS — date, location, type, attendees present
+2. CALL TO ORDER — formal opening statement
+3. BUSINESS DISCUSSED — detailed summary of the meeting purpose and discussions
+4. RENTAL ARRANGEMENT — document the rental rate agreed upon and basis for the rate referencing comparable venue pricing
+5. DECISIONS MADE — key decisions and agreements reached
+6. COMPLIANCE NOTES — note that this meeting satisfies Augusta Rule IRC 280A(g) documentation requirements
+7. ADJOURNMENT — formal closing statement
+
+Format exactly as professional corporate minutes. This document will be used as IRS audit documentation for the Augusta Rule strategy.`;
+
 const ITINERARY_SYSTEM_PROMPT = `You parse a spoken description of a business trip into a strict JSON object. Output JSON only — no prose, no markdown.
 
 Schema:
@@ -154,13 +171,48 @@ app.post('/generate-minutes', async (req, res) => {
   const location = String(req.body?.location ?? '').trim() || 'Not specified';
   const attendeeCount = req.body?.attendee_count != null ? String(req.body.attendee_count) : 'Not specified';
 
-  const userContent = `Meeting Type: ${meetingType}
+  // The Augusta Rule Log Activity form sends meeting_type 'augusta_rule' plus a
+  // few structured fields (rental rate, duration, attendees, purpose). Route
+  // those through the Augusta prompt with a Meeting Details block; everything
+  // else (including Augusta meetings recorded via the Minutes screen) keeps the
+  // standard prompt.
+  const isAugusta = meetingType.toLowerCase() === 'augusta_rule';
+
+  let systemPrompt = MEETING_MINUTES_SYSTEM_PROMPT;
+  let userContent;
+  if (isAugusta) {
+    const rentalRate =
+      req.body?.rental_rate != null && req.body.rental_rate !== ''
+        ? String(req.body.rental_rate)
+        : 'Not specified';
+    const durationHours =
+      req.body?.duration_hours != null && req.body.duration_hours !== ''
+        ? String(req.body.duration_hours)
+        : 'Not specified';
+    const attendees = String(req.body?.attendees ?? '').trim() || 'Not specified';
+    const meetingPurpose =
+      String(req.body?.meeting_purpose ?? '').trim() || transcript;
+    const augustaMeetingType =
+      String(req.body?.augusta_meeting_type ?? '').trim() || 'Business meeting';
+
+    systemPrompt = AUGUSTA_MINUTES_SYSTEM_PROMPT;
+    userContent = `Meeting Details:
+Date: ${meetingDate}
+Location: ${location}
+Meeting Type: ${augustaMeetingType}
+Attendees: ${attendees}
+Duration: ${durationHours} hours
+Rental Rate: $${rentalRate} per day
+Business Purpose: ${meetingPurpose}`;
+  } else {
+    userContent = `Meeting Type: ${meetingType}
 Date: ${meetingDate}
 Location: ${location}
 Attendee Count: ${attendeeCount}
 
 Transcript:
 ${transcript}`;
+  }
 
   try {
     const r = await fetch('https://api.openai.com/v1/chat/completions', {
@@ -173,7 +225,7 @@ ${transcript}`;
         model: 'gpt-4o',
         temperature: 0.2,
         messages: [
-          { role: 'system', content: MEETING_MINUTES_SYSTEM_PROMPT },
+          { role: 'system', content: systemPrompt },
           { role: 'user', content: userContent },
         ],
       }),

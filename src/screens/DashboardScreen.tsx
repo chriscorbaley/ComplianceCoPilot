@@ -130,7 +130,7 @@ export const DashboardScreen: React.FC = () => {
   useEffect(() => {
     loadLatestAnnouncement().catch(() => undefined);
     const channel = supabase
-      .channel('client-announcements')
+      .channel('client-announcements-' + Date.now())
       .on(
         'postgres_changes',
         { event: '*', schema: 'public', table: 'announcements' },
@@ -142,14 +142,17 @@ export const DashboardScreen: React.FC = () => {
     return () => {
       supabase.removeChannel(channel);
     };
-  }, [loadLatestAnnouncement]);
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, []);
 
   const visibleAnnouncement =
     announcement && !dismissedIds.has(announcement.id) ? announcement : null;
 
   const refresh = useCallback(async () => {
-    const yearStart = `${new Date().getFullYear()}-01-01`;
-    const yearEnd = `${new Date().getFullYear()}-12-31`;
+    const currentYear = new Date().getFullYear();
+    const yearStart = `${currentYear}-01-01`;
+    const yearEnd = `${currentYear}-12-31`;
+    const nextYearStart = `${currentYear + 1}-01-01`;
     const scope = activeBusinessId;
 
     let hoursQ = supabase
@@ -162,19 +165,36 @@ export const DashboardScreen: React.FC = () => {
     let propertiesQ = supabase.from('properties').select('*');
     if (scope) propertiesQ = propertiesQ.eq('business_id', scope);
 
+    // Unified Augusta-day count: every completed Augusta meeting in this tax
+    // year, no matter whether it was logged via the Minutes screen
+    // ('Augusta Rule business meeting') or the Log Activity form ('augusta_rule')
+    // — the case-insensitive 'Augusta%' prefix matches both.
     let augustaQ = supabase
       .from('meeting_minutes')
       .select('id, meeting_date', { count: 'exact' })
       .ilike('meeting_type', 'Augusta%')
+      .eq('status', 'complete')
       .gte('meeting_date', yearStart)
       .lte('meeting_date', yearEnd);
     if (scope) augustaQ = augustaQ.eq('business_id', scope);
 
+    // Count a trip toward this tax year if EITHER its departure_date falls in
+    // the year OR it was created this year. The created_at fallback catches
+    // trips logged from the AI Analyzer without a departure date, which a
+    // departure_date-only filter would silently drop (they show in Trip
+    // History but never increment this counter). created_at is a timestamp, so
+    // its upper bound is the start of next year rather than Dec 31.
     let tripsQ = supabase
       .from('business_trips')
       .select('id', { count: 'exact', head: true })
-      .gte('departure_date', yearStart)
-      .lte('departure_date', yearEnd);
+      // Drafts are future-dated trips not yet finalized — they don't count.
+      // `status.is.null` keeps legacy rows (null status) counting, since a
+      // bare `neq` would drop them (NULL <> 'draft' is NULL, not true).
+      .or('status.is.null,status.neq.draft')
+      .or(
+        `and(departure_date.gte.${yearStart},departure_date.lte.${yearEnd}),` +
+          `and(created_at.gte.${yearStart},created_at.lt.${nextYearStart})`,
+      );
     if (scope) tripsQ = tripsQ.eq('business_id', scope);
 
     let docsCountQ = supabase.from('documents').select('id', { count: 'exact', head: true });
@@ -225,6 +245,26 @@ export const DashboardScreen: React.FC = () => {
     }, [refresh]),
   );
 
+  // Live-update the metric cards (notably Business Trips) when a trip is saved
+  // from the AI Analyzer / Log Trip form while the Dashboard is already mounted
+  // — useFocusEffect above only refires on navigation, not on a background
+  // insert. Mirrors the announcements real-time subscription pattern.
+  useEffect(() => {
+    const channel = supabase
+      .channel('business-trips-count-' + Date.now())
+      .on(
+        'postgres_changes',
+        { event: 'INSERT', schema: 'public', table: 'business_trips' },
+        () => {
+          refresh().catch(() => undefined);
+        },
+      )
+      .subscribe();
+    return () => {
+      supabase.removeChannel(channel);
+    };
+  }, [refresh]);
+
   useEffect(() => {
     loadComplianceRules().then(setRules).catch(() => undefined);
     return subscribeToRules(setRules);
@@ -264,8 +304,11 @@ export const DashboardScreen: React.FC = () => {
       description: 'Documented business trips',
       icon: 'airplane-outline',
       progress: data.tripsThisYear,
-      total: Math.max(data.tripsThisYear, 6),
+      // No required target/maximum for business trips — the card shows a plain
+      // "X trips this year" count via hideTarget rather than an X/6 ratio.
+      total: Math.max(data.tripsThisYear, 1),
       unit: 'trips',
+      hideTarget: true,
       status: 'On Track',
       statusVariant: 'success',
       accentColor: colors.midNavy,
@@ -398,7 +441,8 @@ export const DashboardScreen: React.FC = () => {
             <MetricCard
               label="Business Trips"
               value={data.tripsThisYear.toString()}
-              sublabel="this year"
+              sublabel="This year"
+              sublabelStyle={{ color: '#AAAAAA', fontSize: 10 }}
               icon="airplane-outline"
               variant="navy"
             />
@@ -414,7 +458,15 @@ export const DashboardScreen: React.FC = () => {
         </View>
 
         <View style={styles.section}>
-          <SectionHeader title="Strategies" action="View all" />
+          <SectionHeader
+            title="Strategies"
+            action="View all"
+            onAction={() =>
+              navigation.dispatch(
+                CommonActions.navigate({ name: 'Tabs', params: { screen: 'Docs' } }),
+              )
+            }
+          />
           <View style={styles.strategyList}>
             {strategies.map((s) => {
               const stratKey = DASHBOARD_STRATEGY_KEYS[s.id];

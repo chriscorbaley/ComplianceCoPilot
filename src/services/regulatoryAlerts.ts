@@ -25,7 +25,7 @@ function ensureStarted(): void {
   started = true;
   void refreshCount();
   supabase
-    .channel('regulatory_alerts-stream')
+    .channel('regulatory_alerts-stream-' + Date.now())
     .on(
       'postgres_changes',
       { event: '*', schema: 'public', table: 'regulatory_alerts' },

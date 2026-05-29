@@ -508,6 +508,14 @@ export interface GenerateMinutesInput {
   meeting_date: string; // YYYY-MM-DD
   location: string;
   attendee_count: number | null;
+  // Optional Augusta Rule fields. When meeting_type is 'augusta_rule' the proxy
+  // uses these to build the Augusta minutes (rental arrangement + 280A(g)
+  // compliance sections). Other callers (the Minutes screen) omit them.
+  rental_rate?: number | null;
+  duration_hours?: number | null;
+  attendees?: string;
+  meeting_purpose?: string;
+  augusta_meeting_type?: string;
 }
 
 export async function generateMinutesDocument(

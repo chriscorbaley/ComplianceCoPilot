@@ -35,7 +35,7 @@ export const TemplatesEditor: React.FC = () => {
   useEffect(() => {
     load();
     const channel = supabase
-      .channel('admin-templates-stream')
+      .channel('admin-templates-stream-' + Date.now())
       .on(
         'postgres_changes',
         { event: '*', schema: 'public', table: 'document_templates' },

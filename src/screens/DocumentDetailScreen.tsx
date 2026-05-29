@@ -1,5 +1,5 @@
 import React from 'react';
-import { Alert, ScrollView, StyleSheet, Text, TouchableOpacity, View } from 'react-native';
+import { Alert, Platform, ScrollView, StyleSheet, Text, TouchableOpacity, View } from 'react-native';
 import { Ionicons } from '@expo/vector-icons';
 import { useRoute, RouteProp } from '@react-navigation/native';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
@@ -20,7 +20,7 @@ const STRATEGY_BADGE_COLORS: Record<string, { bg: string; fg: string }> = {
 export const DocumentDetailScreen: React.FC = () => {
   const insets = useSafeAreaInsets();
   const { params } = useRoute<RouteProps>();
-  const { title, meta, strategy, status, statusVariant } = params;
+  const { title, meta, strategy, status, statusVariant, body } = params;
   const badge = strategy ? STRATEGY_BADGE_COLORS[strategy] : undefined;
 
   return (
@@ -32,7 +32,11 @@ export const DocumentDetailScreen: React.FC = () => {
       <View style={styles.card}>
         <View style={styles.header}>
           <View style={styles.pdfIcon}>
-            <Ionicons name="document-text" size={26} color={colors.midNavy} />
+            <Ionicons
+              name={body ? 'time-outline' : 'document-text'}
+              size={26}
+              color={colors.midNavy}
+            />
           </View>
           <View style={styles.headerText}>
             <Text style={styles.title}>{title}</Text>
@@ -55,41 +59,52 @@ export const DocumentDetailScreen: React.FC = () => {
 
         <View style={styles.divider} />
 
-        <Text style={styles.sectionLabel}>About</Text>
-        <Text style={styles.body}>
-          This document is stored privately in your compliance vault. It serves
-          as substantiation for the linked tax strategy. Share with your CPA to
-          attach it to your filing record, or open the file to review the full
-          contents.
-        </Text>
+        {body ? (
+          <>
+            <Text style={styles.sectionLabel}>Activity details</Text>
+            <Text style={styles.bodyMono}>{body}</Text>
+          </>
+        ) : (
+          <>
+            <Text style={styles.sectionLabel}>About</Text>
+            <Text style={styles.body}>
+              This document is stored privately in your compliance vault. It
+              serves as substantiation for the linked tax strategy. Share with
+              your CPA to attach it to your filing record, or open the file to
+              review the full contents.
+            </Text>
 
-        <Text style={styles.sectionLabel}>Substantiates</Text>
-        <View style={styles.linkedRow}>
-          <Ionicons name="link-outline" size={16} color={colors.midNavy} />
-          <Text style={styles.linkedText}>
-            {strategy ? `${strategy} strategy` : 'Compliance vault'}
-          </Text>
+            <Text style={styles.sectionLabel}>Substantiates</Text>
+            <View style={styles.linkedRow}>
+              <Ionicons name="link-outline" size={16} color={colors.midNavy} />
+              <Text style={styles.linkedText}>
+                {strategy ? `${strategy} strategy` : 'Compliance vault'}
+              </Text>
+            </View>
+          </>
+        )}
+      </View>
+
+      {body ? null : (
+        <View style={styles.actions}>
+          <TouchableOpacity
+            activeOpacity={0.85}
+            onPress={() => Alert.alert('Open document', `Opening ${title}…`)}
+            style={[styles.btn, styles.btnPrimary]}
+          >
+            <Ionicons name="open-outline" size={18} color={colors.white} />
+            <Text style={styles.btnPrimaryText}>Open document</Text>
+          </TouchableOpacity>
+          <TouchableOpacity
+            activeOpacity={0.85}
+            onPress={() => Alert.alert('Share', `Sharing ${title} with your CPA…`)}
+            style={[styles.btn, styles.btnOutline]}
+          >
+            <Ionicons name="share-outline" size={18} color={colors.navy} />
+            <Text style={styles.btnOutlineText}>Share with CPA</Text>
+          </TouchableOpacity>
         </View>
-      </View>
-
-      <View style={styles.actions}>
-        <TouchableOpacity
-          activeOpacity={0.85}
-          onPress={() => Alert.alert('Open document', `Opening ${title}…`)}
-          style={[styles.btn, styles.btnPrimary]}
-        >
-          <Ionicons name="open-outline" size={18} color={colors.white} />
-          <Text style={styles.btnPrimaryText}>Open document</Text>
-        </TouchableOpacity>
-        <TouchableOpacity
-          activeOpacity={0.85}
-          onPress={() => Alert.alert('Share', `Sharing ${title} with your CPA…`)}
-          style={[styles.btn, styles.btnOutline]}
-        >
-          <Ionicons name="share-outline" size={18} color={colors.navy} />
-          <Text style={styles.btnOutlineText}>Share with CPA</Text>
-        </TouchableOpacity>
-      </View>
+      )}
     </ScrollView>
   );
 };
@@ -173,6 +188,12 @@ const styles = StyleSheet.create({
     ...typography.body,
     color: colors.bodyText,
     fontSize: 14,
+    lineHeight: 20,
+  },
+  bodyMono: {
+    fontFamily: Platform.OS === 'ios' ? 'Menlo' : 'monospace',
+    color: colors.bodyText,
+    fontSize: 13,
     lineHeight: 20,
   },
   linkedRow: {

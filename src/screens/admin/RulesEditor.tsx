@@ -37,7 +37,7 @@ export const RulesEditor: React.FC<RulesEditorProps> = ({ prefill }) => {
   useEffect(() => {
     load();
     const channel = supabase
-      .channel('admin-rules-stream')
+      .channel('admin-rules-stream-' + Date.now())
       .on(
         'postgres_changes',
         { event: '*', schema: 'public', table: 'compliance_rules' },

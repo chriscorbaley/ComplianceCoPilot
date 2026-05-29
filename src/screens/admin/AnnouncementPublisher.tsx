@@ -33,7 +33,7 @@ export const AnnouncementPublisher: React.FC = () => {
   useEffect(() => {
     load();
     const channel = supabase
-      .channel('admin-announce-stream')
+      .channel('admin-announce-stream-' + Date.now())
       .on(
         'postgres_changes',
         { event: '*', schema: 'public', table: 'announcements' },

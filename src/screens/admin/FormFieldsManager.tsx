@@ -70,7 +70,7 @@ export const FormFieldsManager: React.FC = () => {
   useEffect(() => {
     load();
     const channel = supabase
-      .channel('admin-fields-stream')
+      .channel('admin-fields-stream-' + Date.now())
       .on(
         'postgres_changes',
         { event: '*', schema: 'public', table: 'form_fields' },

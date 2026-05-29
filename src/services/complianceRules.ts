@@ -184,7 +184,7 @@ function ensureChannel(): void {
   if (channelStarted) return;
   channelStarted = true;
   supabase
-    .channel('compliance_rules-stream')
+    .channel('compliance_rules-stream-' + Date.now())
     .on(
       'postgres_changes',
       { event: '*', schema: 'public', table: 'compliance_rules' },

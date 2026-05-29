@@ -29,7 +29,7 @@ export const StrategiesToggle: React.FC = () => {
   useEffect(() => {
     load();
     const channel = supabase
-      .channel('admin-strategies-stream')
+      .channel('admin-strategies-stream-' + Date.now())
       .on(
         'postgres_changes',
         { event: '*', schema: 'public', table: 'strategies' },

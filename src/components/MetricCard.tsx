@@ -1,5 +1,5 @@
 import React from 'react';
-import { View, Text, StyleSheet, TouchableOpacity, ViewStyle } from 'react-native';
+import { View, Text, StyleSheet, TouchableOpacity, ViewStyle, TextStyle } from 'react-native';
 import { Ionicons } from '@expo/vector-icons';
 import { colors, radius, spacing, shadow, typography } from '../theme';
 
@@ -14,6 +14,7 @@ interface MetricCardProps {
   progress?: number;
   onPress?: () => void;
   style?: ViewStyle;
+  sublabelStyle?: TextStyle;
 }
 
 const variantStyles: Record<
@@ -55,6 +56,7 @@ export const MetricCard: React.FC<MetricCardProps> = ({
   progress,
   onPress,
   style,
+  sublabelStyle,
 }) => {
   const v = variantStyles[variant];
   const isAccentBg = variant === 'amber' || variant === 'teal';
@@ -100,6 +102,7 @@ export const MetricCard: React.FC<MetricCardProps> = ({
           style={[
             styles.sublabel,
             { color: isAccentBg ? v.fg : colors.subtleText },
+            sublabelStyle,
           ]}
           numberOfLines={1}
         >

@@ -16,6 +16,10 @@ export interface Strategy {
   status: string;
   statusVariant: StatusVariant;
   accentColor?: string;
+  // When true the card shows a plain "{progress} {unit} this year" count with a
+  // full bar and no percentage — for strategies with no required target/maximum
+  // (e.g. Business Travel, where any number of documented trips is fine).
+  hideTarget?: boolean;
 }
 
 interface StrategyCardProps {
@@ -24,7 +28,8 @@ interface StrategyCardProps {
 }
 
 export const StrategyCard: React.FC<StrategyCardProps> = ({ strategy, onPress }) => {
-  const pct = Math.round((strategy.progress / strategy.total) * 100);
+  const hideTarget = strategy.hideTarget ?? false;
+  const pct = hideTarget ? 100 : Math.round((strategy.progress / strategy.total) * 100);
   const accent = strategy.accentColor ?? colors.midNavy;
 
   return (
@@ -48,16 +53,17 @@ export const StrategyCard: React.FC<StrategyCardProps> = ({ strategy, onPress })
         <Text style={styles.progressValue}>
           {strategy.progress}
           <Text style={styles.progressTotal}>
-            {' / '}
-            {strategy.total} {strategy.unit}
+            {hideTarget
+              ? ` ${strategy.unit} this year`
+              : ` / ${strategy.total} ${strategy.unit}`}
           </Text>
         </Text>
-        <Text style={styles.pctText}>{pct}%</Text>
+        {hideTarget ? null : <Text style={styles.pctText}>{pct}%</Text>}
       </View>
 
       <ProgressBar
-        value={strategy.progress}
-        total={strategy.total}
+        value={hideTarget ? 1 : strategy.progress}
+        total={hideTarget ? 1 : strategy.total}
         color={accent}
         trackColor={colors.lightBlue}
         height={8}

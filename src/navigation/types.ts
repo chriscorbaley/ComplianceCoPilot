@@ -20,10 +20,14 @@ export type RootStackParamList = {
     strategy?: string;
     status?: string;
     statusVariant?: StatusVariant;
+    // When present, the detail screen renders this raw text (e.g. an
+    // activity-log document's formatted body) instead of the generic blurb.
+    body?: string;
   };
   StrategyDetail: {
     strategy: Strategy;
   };
+  RealEstateActivityLog: undefined;
   AdminPanel: { initialTab?: AdminTabName; prefillRuleKeys?: string[]; prefillValues?: Record<string, string> } | undefined;
   Settings: undefined;
   MinutesDocument: {
