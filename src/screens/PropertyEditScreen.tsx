@@ -19,8 +19,8 @@ import { useBusiness } from '../business/BusinessContext';
 import {
   PROPERTY_TYPES,
   PROPERTY_TYPE_LABEL,
-  MP_TEST_LABEL,
-  MP_TEST_ORDER,
+  MP_TEST_SETUP_ORDER,
+  mpTestSetupLabel,
   MP_TEST_INT,
   MP_TEST_FROM_INT,
   createProperty,
@@ -28,7 +28,20 @@ import {
   updateProperty,
   type PropertyFormInput,
 } from '../services/properties';
-import type { PropertyRow, PropertyType, MpTestKey } from '../services/supabase';
+import {
+  loadComplianceRules,
+  ruleNumber,
+  subscribeToRules,
+  type ComplianceRules,
+} from '../services/complianceRules';
+import {
+  supabase,
+  requireUserId,
+  type PropertyRow,
+  type PropertyType,
+  type MpTestKey,
+  type RePropertyType,
+} from '../services/supabase';
 import type { RootStackParamList } from '../navigation/types';
 
 type Route = RouteProp<RootStackParamList, 'PropertyEdit'>;
@@ -49,10 +62,41 @@ export const PropertyEditScreen: React.FC = () => {
   const [mpTest, setMpTest] = useState<MpTestKey | null>(null);
   const [saving, setSaving] = useState(false);
   const [existingGroupNames, setExistingGroupNames] = useState<string[]>([]);
+  const [rules, setRules] = useState<ComplianceRules | null>(null);
+  // The user-level portfolio shape. Drives which property-type options appear
+  // (a long_term-only or short_term-only client never sees the other toggle).
+  const [rePropertyType, setRePropertyType] = useState<RePropertyType | null>(null);
 
   useEffect(() => {
     navigation.setOptions({ title: editingId ? 'Edit Property' : 'Add Property' });
   }, [editingId, navigation]);
+
+  useEffect(() => {
+    loadComplianceRules().then(setRules).catch(() => undefined);
+    return subscribeToRules(setRules);
+  }, []);
+
+  // Property-type options allowed for this client. 'both' (or no preference)
+  // shows the full toggle; a single-class portfolio shows only its own option.
+  const allowedTypes: PropertyType[] =
+    rePropertyType === 'long_term'
+      ? ['long_term']
+      : rePropertyType === 'short_term'
+        ? ['short_term']
+        : PROPERTY_TYPES;
+
+  // The three setup tests with thresholds sourced from compliance_rules.
+  const mpOptions = useMemo(() => {
+    const nums = {
+      mp1: ruleNumber(rules, 'real_estate', 'mp_test_1_hours', 500),
+      mp3: ruleNumber(rules, 'real_estate', 'mp_test_3_hours', 100),
+      mp5: ruleNumber(rules, 'real_estate', 'mp_test_5_prior_years', 5),
+    };
+    return MP_TEST_SETUP_ORDER.map((key) => ({
+      key,
+      label: mpTestSetupLabel(key, nums),
+    }));
+  }, [rules]);
 
   // Load existing property + the list of group names already in use so the
   // user can either pick one or type a new one.
@@ -61,7 +105,22 @@ export const PropertyEditScreen: React.FC = () => {
     (async () => {
       try {
         const props = await listProperties(activeBusinessId);
+        // Read the user-level portfolio shape + default MP test so a new
+        // property pre-selects the test chosen during onboarding and only
+        // offers the property types the client actually holds.
+        const uid = await requireUserId();
+        const { data: userRow } = await supabase
+          .from('users')
+          .select('re_property_type, default_mp_test')
+          .eq('id', uid)
+          .maybeSingle();
         if (cancelled) return;
+        const row = (userRow ?? {}) as {
+          re_property_type?: RePropertyType | null;
+          default_mp_test?: number | null;
+        };
+        const portfolio = row.re_property_type ?? null;
+        setRePropertyType(portfolio);
         const names = Array.from(
           new Set(
             props
@@ -82,6 +141,17 @@ export const PropertyEditScreen: React.FC = () => {
             // it back to the string key the selector renders against.
             setMpTest(e.mp_test_selected != null ? MP_TEST_FROM_INT[e.mp_test_selected] ?? null : null);
           }
+        } else {
+          // New property: pre-select the default MP test from the users table
+          // (restricted to the three valid setup tests) and lock the type to
+          // the single class when the client isn't tracking both.
+          const dflt =
+            row.default_mp_test != null ? MP_TEST_FROM_INT[row.default_mp_test] ?? null : null;
+          if (dflt === 'test_1' || dflt === 'test_3' || dflt === 'test_5') {
+            setMpTest(dflt);
+          }
+          if (portfolio === 'long_term') setPropertyType('long_term');
+          else if (portfolio === 'short_term') setPropertyType('short_term');
         }
       } catch (err) {
         Alert.alert('Could not load', err instanceof Error ? err.message : String(err));
@@ -158,7 +228,7 @@ export const PropertyEditScreen: React.FC = () => {
 
         <Text style={styles.label}>Property Type</Text>
         <View style={styles.chipRow}>
-          {PROPERTY_TYPES.map((t) => {
+          {allowedTypes.map((t) => {
             const active = propertyType === t;
             return (
               <TouchableOpacity
@@ -177,13 +247,13 @@ export const PropertyEditScreen: React.FC = () => {
 
         <Text style={styles.label}>Material Participation Test</Text>
         <View style={styles.mpTestList}>
-          {MP_TEST_ORDER.map((t) => {
-            const active = mpTest === t;
+          {mpOptions.map((opt) => {
+            const active = mpTest === opt.key;
             return (
               <TouchableOpacity
-                key={t}
+                key={opt.key}
                 style={[styles.mpTestRow, active && styles.mpTestRowActive]}
-                onPress={() => setMpTest(active ? null : t)}
+                onPress={() => setMpTest(active ? null : opt.key)}
                 activeOpacity={0.85}
               >
                 <View
@@ -192,7 +262,7 @@ export const PropertyEditScreen: React.FC = () => {
                 <Text
                   style={[styles.mpTestText, active && styles.mpTestTextActive]}
                 >
-                  {MP_TEST_LABEL[t]}
+                  {opt.label}
                 </Text>
               </TouchableOpacity>
             );

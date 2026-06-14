@@ -69,7 +69,7 @@ function buildEmailHtml(args: {
 <!doctype html><html><body style="font-family: -apple-system, system-ui, sans-serif; color: #1a1a2e; max-width: 560px; margin: 0 auto; padding: 24px;">
   <h1 style="color: #042C53; margin-bottom: 8px;">Welcome to Compliance Co-Pilot</h1>
   <p>Hi ${args.name},</p>
-  <p>Your account is ready. Your 7-day free trial of <strong>${args.planName}</strong> has begun.</p>
+  <p>Your account is ready. Your 3-day free trial of <strong>${args.planName}</strong> has begun.</p>
   <div style="background:#F5F7FA;border-left:4px solid #185FA5;padding:16px;border-radius:8px;margin:24px 0;">
     <p style="margin:0;"><strong>Plan:</strong> ${args.planName}</p>
     <p style="margin:6px 0 0;"><strong>Price:</strong> $${args.planPrice}/month after trial</p>
@@ -113,7 +113,7 @@ Deno.serve(async (req) => {
 
   const subscriptionStart = (userRow as any).subscription_start as string | null;
   const start = subscriptionStart ? new Date(subscriptionStart) : new Date();
-  const nextBilling = new Date(start.getTime() + 7 * 24 * 60 * 60 * 1000);
+  const nextBilling = new Date(start.getTime() + 3 * 24 * 60 * 60 * 1000);
 
   const html = buildEmailHtml({
     name,

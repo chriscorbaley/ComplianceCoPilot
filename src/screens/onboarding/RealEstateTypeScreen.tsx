@@ -1,4 +1,4 @@
-import React, { useState } from 'react';
+import React, { useMemo, useState } from 'react';
 import {
   Pressable,
   ScrollView,
@@ -29,18 +29,18 @@ interface TypeOption {
 const OPTIONS: TypeOption[] = [
   {
     key: 'long_term',
-    title: 'Long-term rentals only',
+    title: 'Long-Term Rental',
     sub: 'Average stay longer than 7 days',
   },
   {
     key: 'short_term',
-    title: 'Short-term rentals only',
+    title: 'Short-Term Rental',
     sub: 'Average stay 7 days or fewer',
   },
   {
     key: 'both',
-    title: 'Both long-term and short-term',
-    sub: 'Mixed portfolio',
+    title: 'My portfolio contains both',
+    sub: 'I have both long-term and short-term rental properties',
   },
 ];
 
@@ -49,41 +49,27 @@ export const RealEstateTypeScreen: React.FC = () => {
   const nav = useNavigation<Nav>();
   const route = useRoute<Route>();
   const selectedStrategies = route.params.selectedStrategies;
-  // Spec calls these options multi-select. In practice they're three mutually
-  // exclusive labels (long-only, short-only, both), so we treat them as
-  // single-select but store the "both" case as the union of the two tracks
-  // when persisting later.
   const [pick, setPick] = useState<RePropertyTypeKey | null>(null);
 
-  const expanded: RePropertyTypeKey[] = (() => {
-    if (pick === 'both') return ['long_term', 'short_term'];
-    if (pick) return [pick];
-    return [];
-  })();
+  // The portfolio type selection is carried through the flow and persisted
+  // (as users.re_property_type) on the final completion screen, alongside the
+  // other RE onboarding flags.
+  const portfolioType = useMemo(() => pick, [pick]);
 
   const handleContinue = () => {
-    if (!pick) return;
-    const includesLongTerm = expanded.includes('long_term');
-    if (includesLongTerm) {
-      nav.navigate('RealEstateReps', {
-        selectedStrategies,
-        propertyTypes: expanded,
-      });
-    } else {
-      // STR-only: skip REPS question, go straight to property setup.
-      nav.navigate('RealEstateProperties', {
-        selectedStrategies,
-        propertyTypes: expanded,
-        repsPursuit: null,
-        totalWorkHours: null,
-      });
-    }
+    if (!portfolioType) return;
+    nav.navigate('RealEstateMpTest', {
+      selectedStrategies,
+      portfolioType,
+    });
   };
 
   return (
     <View style={[styles.root, { paddingTop: insets.top + 24 }]}>
       <ScrollView contentContainerStyle={[styles.content, { paddingBottom: insets.bottom + 120 }]}>
-        <Text style={styles.title}>What type of rental properties do you have?</Text>
+        <Text style={styles.title}>
+          What is your Real Estate portfolio property type?
+        </Text>
 
         {OPTIONS.map((o) => {
           const active = pick === o.key;
@@ -91,32 +77,19 @@ export const RealEstateTypeScreen: React.FC = () => {
             <Pressable
               key={o.key}
               onPress={() => setPick(o.key)}
-              style={[styles.card, active && styles.cardActive]}
+              style={[styles.toggle, active && styles.toggleActive]}
             >
-              <View style={[styles.iconWrap, active && styles.iconWrapActive]}>
-                <Ionicons
-                  name={
-                    o.key === 'short_term'
-                      ? 'bed-outline'
-                      : o.key === 'long_term'
-                        ? 'home-outline'
-                        : 'business-outline'
-                  }
-                  size={22}
-                  color={active ? colors.white : colors.midNavy}
-                />
+              <View style={styles.toggleText}>
+                <Text style={[styles.toggleTitle, active && styles.toggleTitleActive]}>
+                  {o.title}
+                </Text>
+                <Text style={[styles.toggleSub, active && styles.toggleSubActive]}>
+                  {o.sub}
+                </Text>
               </View>
-              <View style={styles.textWrap}>
-                <Text style={styles.cardTitle}>{o.title}</Text>
-                <Text style={styles.cardSub}>{o.sub}</Text>
-              </View>
-              <View
-                style={[styles.radio, active && styles.radioActive]}
-              >
-                {active ? (
-                  <Ionicons name="checkmark" size={16} color={colors.white} />
-                ) : null}
-              </View>
+              {active ? (
+                <Ionicons name="checkmark-circle" size={22} color={colors.white} />
+              ) : null}
             </Pressable>
           );
         })}
@@ -145,52 +118,38 @@ const styles = StyleSheet.create({
     fontWeight: '700',
     marginBottom: 12,
   },
-  card: {
+  // App toggle style (matches the Domestic/International segments): navy fill +
+  // white text when selected, white fill + navy border + navy text otherwise.
+  toggle: {
     flexDirection: 'row',
     alignItems: 'center',
+    justifyContent: 'space-between',
+    gap: 12,
     backgroundColor: colors.white,
     borderRadius: 12,
-    borderWidth: 0.5,
-    borderColor: colors.cardBorder,
-    padding: 16,
-    gap: 14,
+    borderWidth: 1.5,
+    borderColor: colors.navy,
+    paddingVertical: 16,
+    paddingHorizontal: 16,
   },
-  cardActive: {
-    borderColor: colors.teal,
-    borderWidth: 2,
-    backgroundColor: colors.tealLight,
+  toggleActive: {
+    backgroundColor: colors.navy,
+    borderColor: colors.navy,
   },
-  iconWrap: {
-    width: 44,
-    height: 44,
-    borderRadius: 22,
-    backgroundColor: colors.lightBlue,
-    alignItems: 'center',
-    justifyContent: 'center',
-  },
-  iconWrapActive: {
-    backgroundColor: colors.teal,
-  },
-  textWrap: { flex: 1, gap: 2 },
-  cardTitle: {
-    color: colors.bodyText,
+  toggleText: { flex: 1, gap: 3 },
+  toggleTitle: {
+    color: colors.navy,
     fontSize: 15,
     fontWeight: '700',
   },
-  cardSub: { color: '#888888', fontSize: 12 },
-  radio: {
-    width: 24,
-    height: 24,
-    borderRadius: 12,
-    borderWidth: 1.5,
-    borderColor: colors.divider,
-    alignItems: 'center',
-    justifyContent: 'center',
+  toggleTitleActive: { color: colors.white },
+  toggleSub: {
+    color: colors.navy,
+    fontSize: 12,
+    lineHeight: 16,
+    opacity: 0.7,
   },
-  radioActive: {
-    backgroundColor: colors.teal,
-    borderColor: colors.teal,
-  },
+  toggleSubActive: { color: colors.white, opacity: 0.85 },
   footer: {
     position: 'absolute',
     left: 0,

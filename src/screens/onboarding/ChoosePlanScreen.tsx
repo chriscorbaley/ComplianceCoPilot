@@ -64,6 +64,26 @@ const StarterCard: React.FC<Omit<PlanCardProps, 'tier'>> = ({ name, price, featu
 );
 
 const CoreCard: React.FC<Omit<PlanCardProps, 'tier'>> = ({ name, price, features, highlighted, busy, onSelect }) => (
+  <View style={[styles.cardWhite, styles.cardCoreBorder, highlighted && styles.cardHighlighted]}>
+    <Text style={styles.planNameNavy}>{name}</Text>
+    <View style={styles.priceRow}>
+      <Text style={styles.priceLargeNavy}>${price}</Text>
+      <Text style={styles.priceMuted}>/month</Text>
+    </View>
+    <View style={styles.divider} />
+    {features.map((f, i) => (
+      <View key={i} style={styles.featureRow}>
+        <Ionicons name="checkmark-circle" size={16} color={colors.teal} />
+        <Text style={styles.featureText}>{f.text}</Text>
+      </View>
+    ))}
+    <TouchableOpacity activeOpacity={0.85} disabled={busy} onPress={onSelect} style={styles.selectBtnOutline}>
+      {busy ? <ActivityIndicator color={colors.navy} /> : <Text style={styles.selectBtnOutlineText}>Select Plan</Text>}
+    </TouchableOpacity>
+  </View>
+);
+
+const ProCard: React.FC<Omit<PlanCardProps, 'tier'>> = ({ name, price, features, highlighted, busy, onSelect }) => (
   <View style={[styles.cardNavy, highlighted && styles.cardNavyHighlighted]}>
     <View style={styles.badge}>
       <Text style={styles.badgeText}>MOST POPULAR</Text>
@@ -82,26 +102,6 @@ const CoreCard: React.FC<Omit<PlanCardProps, 'tier'>> = ({ name, price, features
     ))}
     <TouchableOpacity activeOpacity={0.85} disabled={busy} onPress={onSelect} style={styles.selectBtnGold}>
       {busy ? <ActivityIndicator color={colors.white} /> : <Text style={styles.selectBtnGoldText}>Select Plan</Text>}
-    </TouchableOpacity>
-  </View>
-);
-
-const ProCard: React.FC<Omit<PlanCardProps, 'tier'>> = ({ name, price, features, highlighted, busy, onSelect }) => (
-  <View style={[styles.cardWhite, styles.cardProBorder, highlighted && styles.cardProHighlighted]}>
-    <Text style={styles.planNameNavy}>{name}</Text>
-    <View style={styles.priceRow}>
-      <Text style={styles.priceLargeNavy}>${price}</Text>
-      <Text style={styles.priceMuted}>/month</Text>
-    </View>
-    <View style={styles.divider} />
-    {features.map((f, i) => (
-      <View key={i} style={styles.featureRow}>
-        <Ionicons name="checkmark-circle" size={16} color="#BA7517" />
-        <Text style={styles.featureText}>{f.text}</Text>
-      </View>
-    ))}
-    <TouchableOpacity activeOpacity={0.85} disabled={busy} onPress={onSelect} style={styles.selectBtnNavy}>
-      {busy ? <ActivityIndicator color={colors.white} /> : <Text style={styles.selectBtnNavyText}>Select Plan</Text>}
     </TouchableOpacity>
   </View>
 );
@@ -211,7 +211,7 @@ export const ChoosePlanScreen: React.FC = () => {
           />
         </View>
 
-        <Text style={styles.trialNote}>All plans include a 7-day free trial. Cancel anytime.</Text>
+        <Text style={styles.trialNote}>All plans include a 3-day free trial. Cancel anytime.</Text>
 
         <TouchableOpacity onPress={() => setCodeOpen(true)} style={styles.codeWrap}>
           <Text style={styles.codeText}>
@@ -312,13 +312,9 @@ const styles = StyleSheet.create({
     borderColor: '#BA7517',
     borderWidth: 2,
   },
-  cardProBorder: {
-    borderColor: '#BA7517',
+  cardCoreBorder: {
+    borderColor: '#042C53',
     borderWidth: 2,
-  },
-  cardProHighlighted: {
-    borderColor: '#BA7517',
-    borderWidth: 3,
   },
   badge: {
     position: 'absolute',

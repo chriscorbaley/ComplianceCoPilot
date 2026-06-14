@@ -28,13 +28,12 @@ interface StrategyDef {
 }
 
 const STRATEGIES: StrategyDef[] = [
-  { key: 'real_estate',       name: 'Real Estate / REPS',        description: 'Material participation hours toward real estate professional status (IRC §469).' },
+  { key: 'real_estate',       name: 'Real Estate / REPS',        description: 'Material Participation hours for short-term rental tracking, and or Real Estate Professional status.' },
   { key: 'augusta_rule',      name: 'Augusta Rule',              description: '14-day tax-free rental of your home to your business (IRC §280A(g)).' },
-  { key: 's_corp',            name: 'S-Corp / Payroll',          description: 'Reasonable compensation analysis and payroll records for S-Corp shareholders.' },
+  { key: 's_corp',            name: 'S-Corp',                    description: 'Your S-Corp compliance, organized and export-ready. Templates, records, and documents — all in one place when your CPA needs them.' },
   { key: 'business_travel',   name: 'Business Travel and Meals', description: 'Trip deductibility, day-by-day allocation, and IRC §274 meals (50%).' },
   { key: 'home_office',       name: 'Home Office',               description: 'Exclusive-use attestation and home-office deduction tracking (IRC §280A).' },
-  { key: 'family_management', name: 'Family Management Company', description: 'Employment agreements and payroll for family management company wages.' },
-  { key: 'str',               name: 'Short Term Rental (STR)',   description: 'STR hours tracking and material participation under non-passive rules.' },
+  { key: 'family_management', name: 'Family Management Company', description: 'Turn your family into a tax-efficient team. Track the documents and activity that keep your family management company strategy working.' },
 ];
 
 const TIER_LIMITS: Record<SubscriptionTier, number> = {
@@ -91,6 +90,13 @@ export const StrategySelectionScreen: React.FC = () => {
 
   const onFinish = async () => {
     if (!session?.user.id || selected.length === 0) return;
+    // Real estate has its own multi-step onboarding flow that finishes by
+    // setting active_strategies + onboarding_completed itself. Route into it
+    // instead of completing here.
+    if (selected.includes('real_estate')) {
+      nav.navigate('RealEstateType', { selectedStrategies: selected });
+      return;
+    }
     setBusy(true);
     try {
       const { error } = await supabase
@@ -144,7 +150,7 @@ export const StrategySelectionScreen: React.FC = () => {
                 <Text style={[styles.cardName, locked && styles.cardNameDim]} numberOfLines={1}>
                   {s.name}
                 </Text>
-                <Text style={[styles.cardDesc, locked && styles.cardDescDim]} numberOfLines={2}>
+                <Text style={[styles.cardDesc, locked && styles.cardDescDim]}>
                   {s.description}
                 </Text>
                 {locked ? <Text style={styles.upgradeHint}>Upgrade to unlock</Text> : null}
@@ -280,7 +286,9 @@ const styles = StyleSheet.create({
   cardDesc: {
     color: '#888888',
     fontSize: 12,
-    lineHeight: 16,
+    lineHeight: 20,
+    flexWrap: 'wrap',
+    flexShrink: 1,
   },
   cardDescDim: {
     color: colors.subtleText,

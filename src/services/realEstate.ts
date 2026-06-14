@@ -9,6 +9,7 @@ import type {
   MpTestKey,
   PropertyRow,
 } from './supabase';
+import { MP_TEST_FROM_INT } from './properties';
 
 export interface ThresholdMap {
   reps_gate1_hours: number;
@@ -56,6 +57,10 @@ export function readThresholds(rawDb: ComplianceRuleRow[]): ThresholdMap {
   re('str_avg_period_max_days', 'str', 'avg_period_max_days');
   return out;
 }
+
+// REPS effective-minimum math lives in ../utils/repsCalculations
+// (calculateEffectiveMinHours) so the Dashboard and Hours screen share a single
+// source of truth.
 
 // Per-test hour requirement. Tests 2 and 5 are qualitative — return null so
 // callers can render a note instead of a progress bar.
@@ -124,7 +129,8 @@ export function aggregateHours(
     const hrs = Number(r.hours) || 0;
     if (hrs === 0) continue;
     const property = r.property_id ? propertyMap.get(r.property_id) ?? null : null;
-    const ht: HoursType = r.hours_type ?? deriveHoursType(property);
+    const ht: HoursType =
+      (r.hours_type as HoursType | null) ?? deriveHoursType(property);
     totals[ht] += hrs;
     if (r.property_id) {
       perProperty.set(r.property_id, (perProperty.get(r.property_id) ?? 0) + hrs);
@@ -196,7 +202,8 @@ export function weakestLinkStatus(input: WeakestLinkInput): {
     }
   }
   for (const p of [...tracks.longTerm, ...tracks.shortTerm]) {
-    const test = p.mp_test_selected;
+    const test: MpTestKey | null =
+      p.mp_test_selected != null ? MP_TEST_FROM_INT[p.mp_test_selected] ?? null : null;
     const t = test ? mpHourThreshold(test, thresholds) : null;
     if (!t) continue;
     const hrs = aggregates.perProperty.get(p.id) ?? 0;

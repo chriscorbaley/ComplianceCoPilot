@@ -23,6 +23,27 @@ export type DayLogJson = Array<{
 export type SubscriptionTier = 'starter' | 'core' | 'pro';
 export type SubscriptionStatus = 'trial' | 'active' | 'cancelled';
 
+// Real estate v2 portfolio + material-participation enums. re_property_type
+// is the user-level portfolio shape captured in onboarding; default_mp_test is
+// the integer MP-test code (1, 3, or 5) applied to new properties by default.
+export type RePropertyType = 'long_term' | 'short_term' | 'both';
+
+// Material-participation test key used throughout the app. Persisted to
+// properties.mp_test_selected as an integer code (see properties.MP_TEST_INT).
+export type MpTestKey =
+  | 'test_1'
+  | 'test_2'
+  | 'test_3'
+  | 'test_4'
+  | 'test_5'
+  | 'test_7';
+
+// Participation bucket recorded on each hours_log row.
+export type HoursType =
+  | 'reps_general'
+  | 'material_participation'
+  | 'str_participation';
+
 export interface UserRow {
   id: string;
   email: string | null;
@@ -35,6 +56,12 @@ export interface UserRow {
   subscription_start: string | null;
   onboarding_completed: boolean;
   re_grouping_election: boolean | null;
+  // Real estate v2 onboarding state.
+  re_has_properties: boolean | null;
+  re_property_type: RePropertyType | null;
+  default_mp_test: number | null;
+  reps_pursuit_active: boolean | null;
+  total_work_hours_this_year: number | null;
 }
 
 export interface TosAcceptanceRow {
@@ -87,6 +114,9 @@ export interface PropertyRow {
   // the legacy v1 column still read by computeParticipation.
   grouping_election: boolean;
   grouping_group_name: string | null;
+  // Integer MP-test code (1–5, 7) selected for this property. Mapped to/from
+  // the MpTestKey string form at the boundary via properties.MP_TEST_INT.
+  mp_test_selected: number | null;
   created_at: string;
 }
 

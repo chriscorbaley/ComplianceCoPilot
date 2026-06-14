@@ -42,7 +42,7 @@ export const StrategyCard: React.FC<StrategyCardProps> = ({ strategy, onPress })
           <Text style={styles.name} numberOfLines={1}>
             {strategy.name}
           </Text>
-          <Text style={styles.description} numberOfLines={1}>
+          <Text style={styles.description}>
             {strategy.description}
           </Text>
         </View>
@@ -106,7 +106,10 @@ const styles = StyleSheet.create({
     ...typography.body,
     color: colors.mutedText,
     fontSize: 12,
+    lineHeight: 20,
     marginTop: 1,
+    flexWrap: 'wrap',
+    flexShrink: 1,
   },
   progressRow: {
     flexDirection: 'row',

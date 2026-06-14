@@ -1,4 +1,4 @@
-import React, { useMemo, useState } from 'react';
+import React, { useEffect, useMemo, useState } from 'react';
 import {
   ActivityIndicator,
   Alert,
@@ -18,7 +18,13 @@ import type { NativeStackNavigationProp } from '@react-navigation/native-stack';
 import { Ionicons } from '@expo/vector-icons';
 import { colors } from '../../theme';
 import { useAuth } from '../../auth/AuthContext';
-import { MP_TEST_LABEL, MP_TEST_ORDER } from '../../services/properties';
+import { MP_TEST_SETUP_ORDER, mpTestSetupLabel } from '../../services/properties';
+import {
+  loadComplianceRules,
+  ruleNumber,
+  subscribeToRules,
+  type ComplianceRules,
+} from '../../services/complianceRules';
 import type { OnboardingStackParamList } from '../../navigation/types';
 import { supabase, type MpTestKey, type PropertyType } from '../../services/supabase';
 
@@ -46,11 +52,15 @@ interface DraftProperty {
   mpTest: MpTestKey | null;
 }
 
-const newDraft = (defaultType: PropertyType): DraftProperty => ({
+const newDraft = (
+  defaultType: PropertyType,
+  defaultMpTest: MpTestKey | null,
+): DraftProperty => ({
   localId: Math.random().toString(36).slice(2),
   nickname: '',
   type: defaultType,
-  mpTest: null,
+  // Pre-fill the MP test chosen during onboarding; still overridable per card.
+  mpTest: defaultMpTest,
 });
 
 export const RealEstatePropertiesScreen: React.FC = () => {
@@ -58,16 +68,43 @@ export const RealEstatePropertiesScreen: React.FC = () => {
   const nav = useNavigation<Nav>();
   const route = useRoute<Route>();
   const { session } = useAuth();
-  const { selectedStrategies, propertyTypes, repsPursuit, totalWorkHours } =
-    route.params;
+  const {
+    selectedStrategies,
+    portfolioType,
+    defaultMpTest,
+    propertyTypes,
+    repsPursuit,
+    totalWorkHours,
+  } = route.params;
 
   const defaultType: PropertyType = propertyTypes.includes('long_term')
     ? 'long_term'
     : 'short_term';
   const allowToggle = propertyTypes.length > 1; // "both" case
 
-  const [drafts, setDrafts] = useState<DraftProperty[]>([newDraft(defaultType)]);
+  const [drafts, setDrafts] = useState<DraftProperty[]>([
+    newDraft(defaultType, defaultMpTest),
+  ]);
   const [saving, setSaving] = useState(false);
+  const [rules, setRules] = useState<ComplianceRules | null>(null);
+
+  useEffect(() => {
+    loadComplianceRules().then(setRules).catch(() => undefined);
+    return subscribeToRules(setRules);
+  }, []);
+
+  // The three setup tests with thresholds sourced from compliance_rules.
+  const mpOptions = useMemo(() => {
+    const nums = {
+      mp1: ruleNumber(rules, 'real_estate', 'mp_test_1_hours', 500),
+      mp3: ruleNumber(rules, 'real_estate', 'mp_test_3_hours', 100),
+      mp5: ruleNumber(rules, 'real_estate', 'mp_test_5_prior_years', 5),
+    };
+    return MP_TEST_SETUP_ORDER.map((key) => ({
+      key,
+      label: mpTestSetupLabel(key, nums),
+    }));
+  }, [rules]);
 
   const valid = useMemo(
     () =>
@@ -76,7 +113,8 @@ export const RealEstatePropertiesScreen: React.FC = () => {
     [drafts],
   );
 
-  const addDraft = () => setDrafts((p) => [...p, newDraft(defaultType)]);
+  const addDraft = () =>
+    setDrafts((p) => [...p, newDraft(defaultType, defaultMpTest)]);
 
   const removeDraft = (id: string) =>
     setDrafts((p) => (p.length === 1 ? p : p.filter((d) => d.localId !== id)));
@@ -128,6 +166,8 @@ export const RealEstatePropertiesScreen: React.FC = () => {
       if (longTermCount >= 2) {
         nav.navigate('RealEstateGrouping', {
           selectedStrategies,
+          portfolioType,
+          defaultMpTest,
           propertyTypes,
           repsPursuit,
           totalWorkHours,
@@ -136,6 +176,8 @@ export const RealEstatePropertiesScreen: React.FC = () => {
       } else {
         nav.navigate('RealEstateComplete', {
           selectedStrategies,
+          portfolioType,
+          defaultMpTest,
           propertyTypes,
           repsPursuit,
           totalWorkHours,
@@ -191,6 +233,7 @@ export const RealEstatePropertiesScreen: React.FC = () => {
             draft={d}
             allowToggle={allowToggle}
             allowRemove={drafts.length > 1}
+            mpOptions={mpOptions}
             onPatch={(patch) => patchDraft(d.localId, patch)}
             onRemove={() => removeDraft(d.localId)}
           />
@@ -229,6 +272,7 @@ interface DraftCardProps {
   draft: DraftProperty;
   allowToggle: boolean;
   allowRemove: boolean;
+  mpOptions: Array<{ key: MpTestKey; label: string }>;
   onPatch: (patch: Partial<DraftProperty>) => void;
   onRemove: () => void;
 }
@@ -238,6 +282,7 @@ const PropertyDraftCard: React.FC<DraftCardProps> = ({
   draft,
   allowToggle,
   allowRemove,
+  mpOptions,
   onPatch,
   onRemove,
 }) => {
@@ -296,17 +341,17 @@ const PropertyDraftCard: React.FC<DraftCardProps> = ({
 
       <Text style={styles.fieldLabel}>Material Participation Test</Text>
       <View style={styles.mpList}>
-        {MP_TEST_ORDER.map((t) => {
-          const active = draft.mpTest === t;
+        {mpOptions.map((opt) => {
+          const active = draft.mpTest === opt.key;
           return (
             <TouchableOpacity
-              key={t}
+              key={opt.key}
               activeOpacity={0.85}
               style={[styles.mpRow, active && styles.mpRowActive]}
-              onPress={() => onPatch({ mpTest: t })}
+              onPress={() => onPatch({ mpTest: opt.key })}
             >
               <View style={[styles.mpDot, active && styles.mpDotActive]} />
-              <Text style={styles.mpText}>{MP_TEST_LABEL[t]}</Text>
+              <Text style={styles.mpText}>{opt.label}</Text>
             </TouchableOpacity>
           );
         })}

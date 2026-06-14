@@ -40,14 +40,44 @@ export const EmailVerifyScreen: React.FC = () => {
   }, []);
 
   useEffect(() => {
-    if (emailVerified) {
+    let cancelled = false;
+
+    const advance = () => {
+      if (cancelled) return;
+      if (pollRef.current) {
+        clearInterval(pollRef.current);
+        pollRef.current = null;
+      }
       nav.replace('Terms');
-      return;
+    };
+
+    // The context flag is already true (email confirmed) — skip immediately.
+    if (emailVerified) {
+      advance();
+      return () => {
+        cancelled = true;
+      };
     }
-    pollRef.current = setInterval(() => {
-      void checkVerified();
-    }, POLL_INTERVAL_MS);
+
+    // A session existing this early means either the email is already
+    // confirmed OR Supabase email confirmation is disabled (signUp returns a
+    // session immediately). In both cases there's nothing to wait for, so we
+    // skip the verification screen and go straight to Terms. Only when there
+    // is no session yet do we fall back to polling for confirmation.
+    supabase.auth.getSession().then(({ data }) => {
+      if (cancelled) return;
+      if (data.session) {
+        advance();
+        return;
+      }
+      pollRef.current = setInterval(async () => {
+        const ok = await checkVerified();
+        if (ok) advance();
+      }, POLL_INTERVAL_MS);
+    });
+
     return () => {
+      cancelled = true;
       if (pollRef.current) clearInterval(pollRef.current);
     };
   }, [emailVerified, nav, checkVerified]);

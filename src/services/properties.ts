@@ -53,6 +53,30 @@ export const MP_TEST_ORDER: MpTestKey[] = [
   'test_7',
 ];
 
+// The three material-participation tests offered when setting up a property
+// (v2 spec). Tests 2, 4, and 7 are intentionally excluded from the picker on
+// the Add Property screens — only 1, 3, and 5 are valid selections.
+export const MP_TEST_SETUP_ORDER: MpTestKey[] = ['test_1', 'test_3', 'test_5'];
+
+// Plain-language label for the three setup tests. Hour thresholds and the
+// prior-year count are sourced from compliance_rules (never hardcoded) so admin
+// edits flow through; callers pass the resolved numbers.
+export function mpTestSetupLabel(
+  test: MpTestKey,
+  nums: { mp1: number; mp3: number; mp5: number },
+): string {
+  switch (test) {
+    case 'test_1':
+      return `I spend more than ${nums.mp1} hours managing this property each year`;
+    case 'test_3':
+      return `I spend more than ${nums.mp3} hours and no one else spends more time on it than I do`;
+    case 'test_5':
+      return `I materially participated in this property in at least ${nums.mp5} of the last 10 years`;
+    default:
+      return MP_TEST_LABEL[test];
+  }
+}
+
 // properties.mp_test_selected is an integer column in Postgres, while the app
 // models the choice as a string key for readability. Map at the boundary.
 export const MP_TEST_INT: Record<MpTestKey, number> = {

@@ -19,10 +19,12 @@ import { useStrategyAccess, DASHBOARD_STRATEGY_KEYS } from '../hooks/useStrategy
 import type { RootStackParamList } from '../navigation/types';
 import {
   supabase,
+  requireUserId,
   type AnnouncementRow,
   type DocumentRow as DbDocumentRow,
   type HoursLogRow,
   type PropertyRow,
+  type RePropertyType,
 } from '../services/supabase';
 import { useBusiness } from '../business/BusinessContext';
 import {
@@ -30,7 +32,22 @@ import {
   subscribeToRules,
   type ComplianceRules,
 } from '../services/complianceRules';
-import { findShortfalls, type PropertyShortfall } from '../services/properties';
+import {
+  findShortfalls,
+  MP_TEST_FROM_INT,
+  type PropertyShortfall,
+} from '../services/properties';
+import {
+  aggregateHours,
+  readThresholds,
+  mpHourThreshold,
+  paceFor,
+  type Pace,
+} from '../services/realEstate';
+import {
+  calculateEffectiveMinHours,
+  buildRepsRulesRecord,
+} from '../utils/repsCalculations';
 import {
   listAllStrategyDocuments,
   type StrategyDocumentRow,
@@ -67,10 +84,14 @@ interface DashboardData {
   docsCount: number;
   recentDocs: DocumentRow[];
   augustaMax: number;
-  hoursRequired: number;
   properties: PropertyRow[];
   yearHours: HoursLogRow[];
   complianceDocs: StrategyDocumentRow[];
+  // REPS Gate 1 inputs for the effective-target alert + weakest-link status.
+  repsPursuitActive: boolean | null;
+  totalWorkHours: number | null;
+  rePropertyType: RePropertyType | null;
+  reGroupingElection: boolean | null;
 }
 
 const EMPTY_DATA: DashboardData = {
@@ -80,10 +101,13 @@ const EMPTY_DATA: DashboardData = {
   docsCount: 0,
   recentDocs: [],
   augustaMax: 14,
-  hoursRequired: 750,
   properties: [],
   yearHours: [],
   complianceDocs: [],
+  repsPursuitActive: null,
+  totalWorkHours: null,
+  rePropertyType: null,
+  reGroupingElection: null,
 };
 
 interface ComplianceCard {
@@ -207,7 +231,17 @@ export const DashboardScreen: React.FC = () => {
       .limit(3);
     if (scope) recentDocsQ = recentDocsQ.eq('business_id', scope);
 
-    const [hoursRes, augustaRes, tripsRes, docsCountRes, recentDocsRes, propertiesRes, complianceDocs] =
+    // User-level REPS settings (not business-scoped).
+    const uid = await requireUserId();
+    const userQ = supabase
+      .from('users')
+      .select(
+        'reps_pursuit_active, total_work_hours_this_year, re_property_type, re_grouping_election',
+      )
+      .eq('id', uid)
+      .maybeSingle();
+
+    const [hoursRes, augustaRes, tripsRes, docsCountRes, recentDocsRes, propertiesRes, complianceDocs, userRes] =
       await Promise.all([
         hoursQ,
         augustaQ,
@@ -216,7 +250,15 @@ export const DashboardScreen: React.FC = () => {
         recentDocsQ,
         propertiesQ,
         listAllStrategyDocuments(scope).catch(() => [] as StrategyDocumentRow[]),
+        userQ,
       ]);
+
+    const userRow = (userRes.data ?? {}) as {
+      reps_pursuit_active?: boolean | null;
+      total_work_hours_this_year?: number | null;
+      re_property_type?: RePropertyType | null;
+      re_grouping_election?: boolean | null;
+    };
 
     const yearHours = (hoursRes.data ?? []) as HoursLogRow[];
     const hoursYTD = yearHours.reduce((sum, r) => sum + (Number(r.hours) || 0), 0);
@@ -236,6 +278,13 @@ export const DashboardScreen: React.FC = () => {
       properties,
       yearHours,
       complianceDocs,
+      repsPursuitActive: userRow.reps_pursuit_active ?? null,
+      totalWorkHours:
+        userRow.total_work_hours_this_year != null
+          ? Number(userRow.total_work_hours_this_year)
+          : null,
+      rePropertyType: userRow.re_property_type ?? null,
+      reGroupingElection: userRow.re_grouping_election ?? null,
     }));
   }, [activeBusinessId]);
 
@@ -270,21 +319,112 @@ export const DashboardScreen: React.FC = () => {
     return subscribeToRules(setRules);
   }, []);
 
-  const hoursRequired = ruleNumber(rules, 'real_estate', 'hours_required', 750);
   const augustaMax = ruleNumber(rules, 'augusta_rule', 'max_days', 14);
+
+  // Effective REPS target: when the client is pursuing REPS and works enough
+  // total hours that "more than 50%" exceeds the 750-hour test, the binding
+  // target rises above 750. Thresholds come from compliance_rules.
+  const reps750 = ruleNumber(rules, 'real_estate', 'reps_gate1_hours', 750);
+  const repsActive = data.repsPursuitActive === true;
+  // Shared single source of truth with the Hours screen — both feed the same
+  // compliance_rules map + total work hours into calculateEffectiveMinHours,
+  // unconditionally (the Hours screen computes its target the same way), so the
+  // two screens can never show different targets for the same user data. With no
+  // total-work-hours on file this floors at the 750-hour Gate 1 test.
+  const effectiveTarget = calculateEffectiveMinHours(
+    data.totalWorkHours ?? 0,
+    buildRepsRulesRecord(rules?.rawDb ?? []),
+  );
+  // The 50% rule raises the bar above the 750-hour test only when it yields a
+  // higher minimum.
+  const fiftyBinds = effectiveTarget > reps750;
+
+  // Weakest-link status for the Real Estate strategy card: the worst pace
+  // across the combined REPS tracker (if active), each long-term property or
+  // MP-test group, and each short-term property. Needs Attention overrides In
+  // Progress overrides On Track.
+  const realEstateStatus = (() => {
+    const thresholds = readThresholds(rules?.rawDb ?? []);
+    const agg = aggregateHours(data.yearHours, data.properties);
+    const reHours =
+      agg.totals.reps_general +
+      agg.totals.material_participation +
+      agg.totals.str_participation;
+    const paces: Pace[] = [];
+
+    if (repsActive) {
+      paces.push(paceFor(effectiveTarget > 0 ? reHours / effectiveTarget : 0).label);
+    }
+
+    const longTerm = data.properties.filter((p) => p.property_type === 'long_term');
+    const shortTerm = data.properties.filter((p) => p.property_type === 'short_term');
+    const grouping = data.reGroupingElection === true;
+
+    const testThreshold = (p: PropertyRow): number | null => {
+      const test =
+        p.mp_test_selected != null ? MP_TEST_FROM_INT[p.mp_test_selected] ?? null : null;
+      return test ? mpHourThreshold(test, thresholds) : null;
+    };
+
+    if (grouping) {
+      // Combine long-term properties by their selected MP test.
+      const byTest = new Map<number, { hours: number; threshold: number | null }>();
+      for (const p of longTerm) {
+        if (p.mp_test_selected == null) continue;
+        const entry = byTest.get(p.mp_test_selected) ?? {
+          hours: 0,
+          threshold: testThreshold(p),
+        };
+        entry.hours += agg.perProperty.get(p.id) ?? 0;
+        byTest.set(p.mp_test_selected, entry);
+      }
+      for (const { hours, threshold } of byTest.values()) {
+        if (threshold != null) paces.push(paceFor(hours / threshold).label);
+      }
+    } else {
+      for (const p of longTerm) {
+        const t = testThreshold(p);
+        if (t != null) paces.push(paceFor((agg.perProperty.get(p.id) ?? 0) / t).label);
+      }
+    }
+
+    for (const p of shortTerm) {
+      const t = testThreshold(p);
+      if (t != null) paces.push(paceFor((agg.perProperty.get(p.id) ?? 0) / t).label);
+    }
+
+    // No real-estate signals (no properties, REPS off) — fall back to the
+    // generic material-participation pace so the card still reflects progress.
+    if (paces.length === 0) {
+      paces.push(paceFor(effectiveTarget > 0 ? data.hoursYTD / effectiveTarget : 0).label);
+    }
+
+    const rank: Record<Pace, number> = {
+      'At Risk': 0,
+      'In Progress': 1,
+      'On Track': 2,
+    };
+    const worst = paces.reduce((acc, p) => (rank[p] < rank[acc] ? p : acc), 'On Track' as Pace);
+    if (worst === 'On Track') return { status: 'On Track', variant: 'success' as const };
+    if (worst === 'In Progress') return { status: 'In Progress', variant: 'info' as const };
+    return { status: 'Needs Attention', variant: 'warning' as const };
+  })();
 
   const strategies: Strategy[] = [
     {
       id: 's1',
       name: 'Material Participation',
-      description: `${hoursRequired}-hour test for active losses`,
+      description: `${effectiveTarget}-hour test for active losses`,
       icon: 'time-outline',
       progress: Math.round(data.hoursYTD),
-      total: hoursRequired,
+      // Effective REPS target (rises above 750 when the 50% rule binds) so the
+      // progress bar + "X / Y hrs" meta match the Hours screen, not a flat 750.
+      total: effectiveTarget,
       unit: 'hrs',
-      status: data.hoursYTD >= hoursRequired ? 'On Track' : 'Behind',
-      statusVariant: data.hoursYTD >= hoursRequired ? 'success' : 'warning',
-      accentColor: data.hoursYTD >= hoursRequired ? colors.teal : colors.amber,
+      status: realEstateStatus.status,
+      statusVariant: realEstateStatus.variant,
+      accentColor:
+        realEstateStatus.variant === 'warning' ? colors.amber : colors.teal,
     },
     {
       id: 's2',
@@ -334,40 +474,46 @@ export const DashboardScreen: React.FC = () => {
     return { ...c, completed, total: slots.length };
   });
 
-  const hoursPct = Math.min(100, Math.round((data.hoursYTD / Math.max(1, hoursRequired)) * 100));
+  const hoursPct = Math.min(100, Math.round((data.hoursYTD / Math.max(1, effectiveTarget)) * 100));
   const augustaPct = Math.min(100, Math.round((data.augustaDays / Math.max(1, augustaMax)) * 100));
-  const hoursRemaining = Math.max(0, hoursRequired - Math.round(data.hoursYTD));
+  const hoursRemaining = Math.max(0, effectiveTarget - Math.round(data.hoursYTD));
 
   // Per-property warnings: any ungrouped property (or grouping-election group)
   // that is behind on the material participation threshold. This fires
   // independently of the overall hoursYTD-vs-threshold check so a user with
-  // many small properties cannot hide one that is way behind.
+  // many small properties cannot hide one that is way behind. The threshold and
+  // the displayed minimum both come from the shared effective REPS target
+  // (calculateEffectiveMinHours) — never a hardcoded 750 — so when the 50% rule
+  // binds the warning reflects the higher calculated number.
   const propertyShortfalls: PropertyShortfall[] = findShortfalls(
     data.properties,
     data.yearHours,
-    hoursRequired,
+    effectiveTarget,
   );
   const worstShortfall: PropertyShortfall | null =
     propertyShortfalls.length > 0
       ? propertyShortfalls.reduce((worst, s) => (s.hours < worst.hours ? s : worst))
       : null;
+  // Show the full property_name straight from the properties table — no
+  // truncation, no string concatenation — so the banner names the real property.
   const propertyAlertTitle = worstShortfall
-    ? `Warning: ${
+    ? `${
         worstShortfall.groupName
           ? `${worstShortfall.groupName} group`
           : worstShortfall.property.property_name
       } has only ${worstShortfall.hours.toFixed(0)} hours`
     : null;
+  const otherBehindCount = worstShortfall ? propertyShortfalls.length - 1 : 0;
   const propertyAlertDetail = worstShortfall
-    ? `Needs ${hoursRequired} to meet material participation${
-        worstShortfall.groupName ? ' as a group' : ' individually'
-      }${
-        propertyShortfalls.length > 1
-          ? ` · ${propertyShortfalls.length - 1} more ${
-              propertyShortfalls.length - 1 === 1 ? 'property' : 'properties'
-            } behind`
+    ? `Needs ${effectiveTarget} hours to qualify for REPS${
+        worstShortfall.groupName ? ' as a group' : ''
+      }.${
+        otherBehindCount > 0
+          ? ` ${otherBehindCount} more ${
+              otherBehindCount === 1 ? 'property' : 'properties'
+            } behind pace.`
           : ''
-      }.`
+      }`
     : null;
 
   return (
@@ -407,12 +553,16 @@ export const DashboardScreen: React.FC = () => {
           title={
             hoursRemaining === 0
               ? 'Material participation goal hit'
-              : `${hoursRemaining} hours to material participation goal`
+              : `${hoursRemaining} more hours needed by Dec 31`
           }
           detail={
             hoursRemaining === 0
               ? 'You are at or past the threshold for this year.'
-              : `Log ${hoursRemaining} more hours by Dec 31 to hit the ${hoursRequired}-hour threshold.`
+              : `${hoursRemaining} more hours needed by Dec 31. Your minimum is ${effectiveTarget} hours${
+                  fiftyBinds
+                    ? ` because the 50% rule applies to your ${data.totalWorkHours} total annual work hours`
+                    : ''
+                }.`
           }
         />
 
@@ -421,9 +571,9 @@ export const DashboardScreen: React.FC = () => {
             <MetricCard
               label="Hours Logged"
               value={Math.round(data.hoursYTD).toString()}
-              sublabel={`of ${hoursRequired} goal`}
+              sublabel={`of ${effectiveTarget} goal`}
               icon="time-outline"
-              variant={data.hoursYTD >= hoursRequired ? 'teal' : 'amber'}
+              variant={data.hoursYTD >= effectiveTarget ? 'teal' : 'amber'}
               progress={hoursPct}
             />
             <View style={styles.gap} />

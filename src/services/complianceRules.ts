@@ -224,6 +224,22 @@ export function getCachedRules(): ComplianceRules | null {
   return cache;
 }
 
+// Generic numeric lookup against the raw (strategy_name, rule_key) rows. Used
+// by screens that read real-estate thresholds straight from compliance_rules.
+export function ruleNumber(
+  rules: ComplianceRules | null,
+  strategy: string,
+  key: string,
+  fallback: number,
+): number {
+  const row = rules?.rawDb.find(
+    (r) => r.strategy_name === strategy && r.rule_key === key,
+  );
+  if (!row) return fallback;
+  const n = parseFloat(row.rule_value);
+  return Number.isFinite(n) ? n : fallback;
+}
+
 export function subscribeToRules(
   fn: (rules: ComplianceRules) => void,
 ): () => void {

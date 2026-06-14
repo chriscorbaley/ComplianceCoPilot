@@ -1,6 +1,23 @@
 import type { Strategy } from '../components/StrategyCard';
 import type { StatusVariant } from '../components/StatusPill';
-import type { SubscriptionTier } from '../services/supabase';
+import type {
+  SubscriptionTier,
+  MpTestKey,
+  PropertyType,
+} from '../services/supabase';
+
+// Portfolio shape captured on the first real-estate onboarding screen.
+export type RePropertyTypeKey = 'long_term' | 'short_term' | 'both';
+
+// Params shared by every screen in the real-estate onboarding flow after the
+// portfolio-type question. propertyTypes is the expanded PropertyType[] form of
+// portfolioType ('both' → ['long_term','short_term']).
+interface RealEstateFlowBase {
+  selectedStrategies: string[];
+  portfolioType: RePropertyTypeKey;
+  defaultMpTest: MpTestKey;
+  propertyTypes: PropertyType[];
+}
 
 export type OnboardingStackParamList = {
   EmailVerify: undefined;
@@ -10,6 +27,24 @@ export type OnboardingStackParamList = {
   UpgradeTeaser: undefined;
   Payment: undefined;
   StrategySelection: undefined;
+  // Real estate v2 onboarding flow.
+  RealEstateType: { selectedStrategies: string[] };
+  RealEstateMpTest: { selectedStrategies: string[]; portfolioType: RePropertyTypeKey };
+  RealEstateReps: RealEstateFlowBase;
+  RealEstateProperties: RealEstateFlowBase & {
+    repsPursuit: boolean | null;
+    totalWorkHours: number | null;
+  };
+  RealEstateGrouping: RealEstateFlowBase & {
+    repsPursuit: boolean | null;
+    totalWorkHours: number | null;
+    propertyCount: number;
+  };
+  RealEstateComplete: RealEstateFlowBase & {
+    repsPursuit: boolean | null;
+    totalWorkHours: number | null;
+    grouping: boolean | null;
+  };
 };
 
 export type RootStackParamList = {

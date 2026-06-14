@@ -8,6 +8,12 @@ import { ChoosePlanScreen } from '../screens/onboarding/ChoosePlanScreen';
 import { UpgradeTeaserScreen } from '../screens/onboarding/UpgradeTeaserScreen';
 import { PaymentScreen } from '../screens/onboarding/PaymentScreen';
 import { StrategySelectionScreen } from '../screens/onboarding/StrategySelectionScreen';
+import { RealEstateTypeScreen } from '../screens/onboarding/RealEstateTypeScreen';
+import { RealEstateMpTestScreen } from '../screens/onboarding/RealEstateMpTestScreen';
+import { RealEstateRepsScreen } from '../screens/onboarding/RealEstateRepsScreen';
+import { RealEstatePropertiesScreen } from '../screens/onboarding/RealEstatePropertiesScreen';
+import { RealEstateGroupingScreen } from '../screens/onboarding/RealEstateGroupingScreen';
+import { RealEstateCompleteScreen } from '../screens/onboarding/RealEstateCompleteScreen';
 import type { OnboardingStackParamList } from './types';
 
 const Stack = createNativeStackNavigator<OnboardingStackParamList>();
@@ -29,6 +35,12 @@ export const OnboardingStack: React.FC = () => {
       <Stack.Screen name="UpgradeTeaser" component={UpgradeTeaserScreen} />
       <Stack.Screen name="Payment" component={PaymentScreen} />
       <Stack.Screen name="StrategySelection" component={StrategySelectionScreen} />
+      <Stack.Screen name="RealEstateType" component={RealEstateTypeScreen} />
+      <Stack.Screen name="RealEstateMpTest" component={RealEstateMpTestScreen} />
+      <Stack.Screen name="RealEstateReps" component={RealEstateRepsScreen} />
+      <Stack.Screen name="RealEstateProperties" component={RealEstatePropertiesScreen} />
+      <Stack.Screen name="RealEstateGrouping" component={RealEstateGroupingScreen} />
+      <Stack.Screen name="RealEstateComplete" component={RealEstateCompleteScreen} />
     </Stack.Navigator>
   );
 };

@@ -14,6 +14,7 @@ import { useRoute, type RouteProp } from '@react-navigation/native';
 import { Ionicons } from '@expo/vector-icons';
 import { colors } from '../../theme';
 import { supabase, type PropertyRow } from '../../services/supabase';
+import { MP_TEST_INT } from '../../services/properties';
 import { useAuth } from '../../auth/AuthContext';
 import type { OnboardingStackParamList } from '../../navigation/types';
 
@@ -54,6 +55,8 @@ export const RealEstateCompleteScreen: React.FC = () => {
         const userUpdate: Record<string, unknown> = {
           active_strategies: params.selectedStrategies,
           re_has_properties: true,
+          re_property_type: params.portfolioType,
+          default_mp_test: MP_TEST_INT[params.defaultMpTest],
           reps_pursuit_active: params.repsPursuit,
           total_work_hours_this_year: params.totalWorkHours,
           re_grouping_election: params.grouping,

@@ -47,9 +47,9 @@ export const PaymentScreen: React.FC = () => {
   const price = TIER_PRICES[tier];
 
   const nextBillingLabel = useMemo(() => {
-    const d = new Date();
-    d.setDate(d.getDate() + 7);
-    return d.toLocaleDateString('en-US', { month: 'long', day: 'numeric', year: 'numeric' });
+    const trialEnd = new Date();
+    trialEnd.setDate(trialEnd.getDate() + 3); // was + 7, now + 3
+    return trialEnd.toLocaleDateString('en-US', { month: 'long', day: 'numeric', year: 'numeric' });
   }, []);
 
   const formValid = cardNumber.replace(/\s/g, '').length >= 12 && expiry.length >= 4 && cvc.length >= 3 && zip.length >= 3;
@@ -124,7 +124,7 @@ export const PaymentScreen: React.FC = () => {
           <Text style={styles.summaryPrice}>${price}/month</Text>
           <View style={styles.trialPill}>
             <Ionicons name="time-outline" size={12} color="#85B7EB" />
-            <Text style={styles.trialPillText}>7-day free trial · first charge {nextBillingLabel}</Text>
+            <Text style={styles.trialPillText}>3-day free trial · first charge {nextBillingLabel}</Text>
           </View>
         </View>
 

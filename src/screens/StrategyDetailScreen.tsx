@@ -1,5 +1,13 @@
 import React, { useCallback, useState } from 'react';
-import { Alert, ScrollView, StyleSheet, Text, TouchableOpacity, View } from 'react-native';
+import {
+  ActivityIndicator,
+  Alert,
+  ScrollView,
+  StyleSheet,
+  Text,
+  TouchableOpacity,
+  View,
+} from 'react-native';
 import { Ionicons } from '@expo/vector-icons';
 import {
   useNavigation,
@@ -14,7 +22,10 @@ import { colors, radius, shadow, spacing, typography } from '../theme';
 import { ProgressBar } from '../components/ProgressBar';
 import { StatusPill } from '../components/StatusPill';
 import { AugustaActivityModal } from '../components/AugustaActivityModal';
+import { RealEstateSettingsSheet } from '../components/RealEstateSettingsSheet';
 import { supabase } from '../services/supabase';
+import { generateRealEstateReport } from '../services/realEstateReport';
+import { useAuth } from '../auth/AuthContext';
 import { useBusiness } from '../business/BusinessContext';
 import type { RootStackParamList } from '../navigation/types';
 
@@ -33,11 +44,38 @@ export const StrategyDetailScreen: React.FC = () => {
   const insets = useSafeAreaInsets();
   const navigation = useNavigation<Nav>();
   const { activeBusinessId } = useBusiness();
+  const { session, fullName } = useAuth();
   const { params } = useRoute<RouteProps>();
   const { strategy } = params;
   const showProperties = isRealEstateStrategy(strategy.id, strategy.name);
   const isAugusta = isAugustaStrategy(strategy.id, strategy.name);
   const [augustaFormOpen, setAugustaFormOpen] = useState(false);
+  const [settingsOpen, setSettingsOpen] = useState(false);
+  const [generating, setGenerating] = useState(false);
+
+  const onGenerateReport = useCallback(async () => {
+    if (generating) return;
+    const userId = session?.user?.id;
+    if (!userId) {
+      Alert.alert('Not signed in', 'Sign in to generate a compliance report.');
+      return;
+    }
+    setGenerating(true);
+    try {
+      await generateRealEstateReport({
+        userId,
+        businessId: activeBusinessId,
+        clientName: fullName ?? 'Client',
+      });
+    } catch (e) {
+      Alert.alert(
+        'Report failed',
+        e instanceof Error ? e.message : String(e),
+      );
+    } finally {
+      setGenerating(false);
+    }
+  }, [generating, session?.user?.id, activeBusinessId, fullName]);
 
   // For Augusta, show the same unified count the Dashboard uses: every
   // completed Augusta meeting this tax year, from either the Minutes screen or
@@ -75,6 +113,26 @@ export const StrategyDetailScreen: React.FC = () => {
       contentContainerStyle={[styles.content, { paddingBottom: 32 + insets.bottom }]}
       showsVerticalScrollIndicator={false}
     >
+      {showProperties ? (
+        <View style={styles.reportRow}>
+          <TouchableOpacity
+            activeOpacity={0.85}
+            onPress={onGenerateReport}
+            disabled={generating}
+            style={[styles.reportBtn, generating && styles.reportBtnDisabled]}
+          >
+            {generating ? (
+              <ActivityIndicator size="small" color={colors.white} />
+            ) : (
+              <Ionicons name="download-outline" size={18} color={colors.white} />
+            )}
+            <Text style={styles.reportBtnText}>
+              {generating ? 'Preparing your compliance report…' : 'Generate Report'}
+            </Text>
+          </TouchableOpacity>
+        </View>
+      ) : null}
+
       <View style={styles.card}>
         <View style={styles.header}>
           <View style={[styles.icon, { backgroundColor: colors.lightBlue }]}>
@@ -123,6 +181,24 @@ export const StrategyDetailScreen: React.FC = () => {
 
       {showProperties ? (
         <>
+          <TouchableOpacity
+            activeOpacity={0.85}
+            onPress={() => setSettingsOpen(true)}
+            style={styles.linkCard}
+          >
+            <View style={[styles.icon, styles.linkIcon]}>
+              <Ionicons name="settings-outline" size={20} color={colors.midNavy} />
+            </View>
+            <View style={styles.linkText}>
+              <Text style={styles.linkTitle}>Edit Tracker Settings</Text>
+              <Text style={styles.linkBody}>
+                Update your portfolio type, REPS pursuit, default material
+                participation test, and total annual work hours.
+              </Text>
+            </View>
+            <Ionicons name="chevron-forward" size={20} color={colors.mutedText} />
+          </TouchableOpacity>
+
           <TouchableOpacity
             activeOpacity={0.85}
             onPress={() => navigation.navigate('Properties')}
@@ -197,6 +273,13 @@ export const StrategyDetailScreen: React.FC = () => {
           onSaved={() => loadAugustaCount().catch(() => undefined)}
         />
       ) : null}
+
+      {showProperties ? (
+        <RealEstateSettingsSheet
+          visible={settingsOpen}
+          onClose={() => setSettingsOpen(false)}
+        />
+      ) : null}
     </ScrollView>
   );
 };
@@ -209,6 +292,30 @@ const styles = StyleSheet.create({
   content: {
     padding: spacing.lg,
     gap: spacing.lg,
+  },
+  reportRow: {
+    flexDirection: 'row',
+    justifyContent: 'flex-end',
+  },
+  reportBtn: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    justifyContent: 'center',
+    gap: spacing.xs + 2,
+    backgroundColor: colors.navy,
+    borderRadius: 10,
+    paddingVertical: spacing.sm + 2,
+    paddingHorizontal: spacing.md,
+    ...shadow.raised,
+  },
+  reportBtnDisabled: {
+    opacity: 0.7,
+  },
+  reportBtnText: {
+    ...typography.bodyMedium,
+    color: colors.white,
+    fontWeight: '700',
+    fontSize: 13,
   },
   card: {
     backgroundColor: colors.white,

@@ -31,6 +31,8 @@ export const RealEstateGroupingScreen: React.FC = () => {
     const grouping = pick === 'yes';
     nav.navigate('RealEstateComplete', {
       selectedStrategies: params.selectedStrategies,
+      portfolioType: params.portfolioType,
+      defaultMpTest: params.defaultMpTest,
       propertyTypes: params.propertyTypes,
       repsPursuit: params.repsPursuit,
       totalWorkHours: params.totalWorkHours,
