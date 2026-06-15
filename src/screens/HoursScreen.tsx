@@ -980,6 +980,22 @@ const HoursScreenInner: React.FC = () => {
         {reView.showShortTerm ? (
           <View style={styles.section}>
             <Text style={styles.reSectionHeader}>Short-Term Rental Properties</Text>
+            {reView.shortTerm.length > 0 ? (
+              <View style={styles.strTipCard}>
+                <Ionicons
+                  name="bulb-outline"
+                  size={16}
+                  color={colors.navy}
+                  style={styles.strTipIcon}
+                />
+                <Text style={styles.strTipText}>
+                  CCP Pro Tip: Short-term rentals are defined as properties where
+                  the average guest stay is 7 days or fewer. This threshold
+                  determines whether your property qualifies as STR for tax
+                  purposes.
+                </Text>
+              </View>
+            ) : null}
             <Card padded>
               {reView.shortTerm.length === 0 ? (
                 <Text style={styles.reEmpty}>No short-term properties yet.</Text>
@@ -2363,6 +2379,25 @@ const styles = StyleSheet.create({
     color: colors.navy,
     fontSize: 15,
     fontWeight: '700',
+  },
+  strTipCard: {
+    flexDirection: 'row',
+    alignItems: 'flex-start',
+    gap: spacing.xs,
+    backgroundColor: colors.lightBlue,
+    borderRadius: 8,
+    padding: 10,
+    marginTop: spacing.sm,
+    marginBottom: spacing.sm,
+  },
+  strTipIcon: {
+    marginTop: 1,
+  },
+  strTipText: {
+    flex: 1,
+    color: colors.navy,
+    fontSize: 12,
+    lineHeight: 17,
   },
   repsLabelRow: {
     flexDirection: 'row',

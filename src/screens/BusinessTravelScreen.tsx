@@ -17,6 +17,8 @@ import { Audio } from 'expo-av';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
 import { colors, radius, shadow, spacing, typography } from '../theme';
 import { DateInputField, DatePickerModal } from '../components/DateInputField';
+import { useStrategyAccess } from '../hooks/useStrategyAccess';
+import { BusinessTravelLockedScreen } from '../components/BusinessTravelLockedScreen';
 import { Header } from '../components/Header';
 import { Card } from '../components/Card';
 import { SectionHeader } from '../components/SectionHeader';
@@ -217,7 +219,20 @@ const NOT_DEDUCT_RED = '#B33A3A';
 const DRAFT_AMBER = '#BA7517';
 const DRAFT_BANNER_BG = '#FAEEDA';
 
+// Business Travel is a Core/Pro feature — it auto-activates for those tiers on
+// onboarding completion. Basic subscribers still see the Trips tab, but it
+// renders a locked upgrade teaser instead of the tracker.
 export const BusinessTravelScreen: React.FC = () => {
+  const access = useStrategyAccess();
+  const unlocked =
+    access.isAdmin || access.tier === 'core' || access.tier === 'pro';
+  if (!unlocked) {
+    return <BusinessTravelLockedScreen />;
+  }
+  return <BusinessTravelScreenInner />;
+};
+
+const BusinessTravelScreenInner: React.FC = () => {
   const insets = useSafeAreaInsets();
   const [tab, setTab] = useState<TabKey>('analyzer');
   const [rules, setRules] = useState<ComplianceRules | null>(null);

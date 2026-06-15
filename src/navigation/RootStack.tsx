@@ -7,6 +7,7 @@ import { StrategyDetailScreen } from '../screens/StrategyDetailScreen';
 import { RealEstateActivityLog } from '../screens/strategy/RealEstateActivityLog';
 import { AdminPanelScreen } from '../screens/admin/AdminPanelScreen';
 import { SettingsScreen } from '../screens/SettingsScreen';
+import { ChoosePlanScreen } from '../screens/onboarding/ChoosePlanScreen';
 import { MinutesDocumentScreen } from '../screens/MinutesDocumentScreen';
 import { CancelWarning1Screen } from '../screens/CancelWarning1Screen';
 import { CancelWarning2Screen } from '../screens/CancelWarning2Screen';
@@ -15,6 +16,7 @@ import { BusinessEditScreen } from '../screens/BusinessEditScreen';
 import { PropertiesScreen } from '../screens/PropertiesScreen';
 import { PropertyEditScreen } from '../screens/PropertyEditScreen';
 import { SCorpComplianceScreen } from '../screens/strategy/SCorpComplianceScreen';
+import { AugustaComplianceScreen } from '../screens/strategy/AugustaComplianceScreen';
 import { HomeOfficeComplianceScreen } from '../screens/strategy/HomeOfficeComplianceScreen';
 import { FamilyMgmtComplianceScreen } from '../screens/strategy/FamilyMgmtComplianceScreen';
 import type { RootStackParamList } from './types';
@@ -36,6 +38,11 @@ export const RootStack: React.FC = () => {
         name="Tabs"
         component={BottomTabs}
         options={{ headerShown: false }}
+      />
+      <Stack.Screen
+        name="ChoosePlan"
+        component={ChoosePlanScreen}
+        options={{ title: 'Upgrade' }}
       />
       <Stack.Screen
         name="DocumentDetail"
@@ -101,6 +108,11 @@ export const RootStack: React.FC = () => {
         name="SCorpCompliance"
         component={SCorpComplianceScreen}
         options={{ title: 'S-Corp Compliance' }}
+      />
+      <Stack.Screen
+        name="AugustaCompliance"
+        component={AugustaComplianceScreen}
+        options={{ title: 'Augusta Compliance' }}
       />
       <Stack.Screen
         name="HomeOfficeCompliance"

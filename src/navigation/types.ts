@@ -25,6 +25,7 @@ export type OnboardingStackParamList = {
   Privacy: undefined;
   ChoosePlan: { highlight?: SubscriptionTier } | undefined;
   UpgradeTeaser: undefined;
+  BusinessTravelIntro: undefined;
   Payment: undefined;
   StrategySelection: undefined;
   // Real estate v2 onboarding flow.
@@ -49,6 +50,9 @@ export type OnboardingStackParamList = {
 
 export type RootStackParamList = {
   Tabs: undefined;
+  // The onboarding plan-selection screen, also reachable post-onboarding so
+  // clients can upgrade from inside the app at any time.
+  ChoosePlan: { highlight?: SubscriptionTier } | undefined;
   DocumentDetail: {
     title: string;
     meta: string;
@@ -81,6 +85,7 @@ export type RootStackParamList = {
   Properties: undefined;
   PropertyEdit: { propertyId?: string } | undefined;
   SCorpCompliance: undefined;
+  AugustaCompliance: undefined;
   HomeOfficeCompliance: undefined;
   FamilyMgmtCompliance: undefined;
 };

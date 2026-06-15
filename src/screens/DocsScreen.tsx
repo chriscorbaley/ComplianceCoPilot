@@ -20,12 +20,15 @@ import * as Sharing from 'expo-sharing';
 import { colors, radius, shadow, spacing, typography } from '../theme';
 import type { RootStackParamList } from '../navigation/types';
 import { DocumentViewer } from '../components/DocumentViewer';
+import { HtmlDocViewer } from '../components/HtmlDocViewer';
 import {
   supabase,
   requireUserId,
   type DocumentRow,
 } from '../services/supabase';
 import { useBusiness } from '../business/BusinessContext';
+import { useStrategyAccess } from '../hooks/useStrategyAccess';
+import { LockedStrategySheet } from '../components/LockedStrategySheet';
 import {
   listAllStrategyDocuments,
   getStrategyDocumentSignedUrl,
@@ -209,6 +212,44 @@ const complianceRowToDoc = (row: StrategyDocumentRow): DocEntry => {
   };
 };
 
+interface ComparableRow {
+  id: string;
+  property_name: string | null;
+  tax_year: number | null;
+  comparable_1_url: string | null;
+  comparable_2_url: string | null;
+  comparable_3_url: string | null;
+  updated_at: string;
+  created_at: string;
+}
+
+// A comparable set shows as one grouped Documents entry that opens the Augusta
+// compliance screen (where each comparable can be viewed individually).
+const comparableRowToDoc = (row: ComparableRow): DocEntry => {
+  const property = row.property_name ?? 'Property';
+  const year = row.tax_year ?? new Date().getFullYear();
+  const created = row.updated_at ?? row.created_at;
+  const count = [row.comparable_1_url, row.comparable_2_url, row.comparable_3_url].filter(
+    Boolean,
+  ).length;
+  const name = `Rate Comparables — ${property} ${year}`;
+  const searchBlob = [name, 'Augusta', 'augusta_rule', 'rate_comparables', property, String(year)]
+    .join('\n')
+    .toLowerCase();
+  return {
+    id: `comparable:${row.id}`,
+    name,
+    meta: `${formatDocDate(created)} · ${count} of 3 uploaded`,
+    strategy: 'Augusta',
+    strategyKey: 'augusta_rule',
+    fileType: 'rate_comparables',
+    fileUrl: null,
+    createdAt: created,
+    isCompliance: false,
+    searchBlob,
+  };
+};
+
 // Which compliance slots are "satisfied" for a strategy given the uploaded
 // rows. The Home Office residence slot is satisfied by either a closing
 // disclosure or a lease agreement — encoded here so the missing list is
@@ -244,6 +285,12 @@ const ACTIVITY_BADGE = { bg: colors.tealLight, fg: colors.teal };
 const TEXT_DOC_TYPES = new Set(['minutes', 'activity_log', 'augusta_meeting']);
 // Of the text docs, these are user-editable in place.
 const EDITABLE_DOC_TYPES = new Set(['minutes', 'activity_log']);
+// file_type values whose file_url holds full branded HTML (generated signed
+// documents and invoices). These open in the WebView-based HtmlDocViewer.
+const HTML_DOC_TYPES = new Set(['signed_document', 'invoice']);
+
+// Augusta blue used by signed-doc and comparable badges.
+const AUGUSTA_BADGE = { bg: '#E6F1FB', fg: '#0C447C' };
 
 const escapeHtmlDoc = (s: string): string =>
   s
@@ -297,6 +344,10 @@ export const DocsScreen: React.FC = () => {
   const insets = useSafeAreaInsets();
   const navigation = useNavigation<DocsNavigationProp>();
   const { activeBusinessId } = useBusiness();
+  const access = useStrategyAccess();
+  // Non-selected strategy chips are locked: tapping shows the upgrade sheet
+  // instead of filtering. `lockedSheet` holds the tapped strategy's name.
+  const [lockedSheet, setLockedSheet] = useState<{ name: string } | null>(null);
   const [filter, setFilter] = useState<ChipFilter>('All');
   const [docs, setDocs] = useState<DocEntry[]>([]);
   const [complianceRows, setComplianceRows] = useState<StrategyDocumentRow[]>([]);
@@ -309,6 +360,10 @@ export const DocsScreen: React.FC = () => {
   const [searchFocused, setSearchFocused] = useState(false);
   // The document currently open in the in-app viewer (null when closed).
   const [viewerDoc, setViewerDoc] = useState<DocEntry | null>(null);
+  // The generated HTML document (signed doc / invoice) open in the WebView
+  // viewer, and the invoice→paid status map keyed by documents.id.
+  const [htmlDoc, setHtmlDoc] = useState<DocEntry | null>(null);
+  const [invoicePaidMap, setInvoicePaidMap] = useState<Record<string, boolean>>({});
 
   const loadDocs = useCallback(async () => {
     try {
@@ -317,15 +372,37 @@ export const DocsScreen: React.FC = () => {
         .select('*')
         .order('created_at', { ascending: false });
       if (activeBusinessId) query = query.eq('business_id', activeBusinessId);
-      const [docsRes, complianceRes] = await Promise.all([
+      let rentalsQuery = supabase
+        .from('augusta_rentals')
+        .select('invoice_url, invoice_paid');
+      let comparablesQuery = supabase
+        .from('augusta_comparables')
+        .select('*')
+        .order('updated_at', { ascending: false });
+      if (activeBusinessId) {
+        rentalsQuery = rentalsQuery.eq('business_id', activeBusinessId);
+        comparablesQuery = comparablesQuery.eq('business_id', activeBusinessId);
+      }
+      const [docsRes, complianceRes, rentalsRes, comparablesRes] = await Promise.all([
         query,
         listAllStrategyDocuments(activeBusinessId),
+        rentalsQuery,
+        comparablesQuery,
       ]);
       if (docsRes.error) throw docsRes.error;
       const regular = ((docsRes.data ?? []) as DocumentRow[]).map(rowToDoc);
       const compliance = complianceRes.filter((r) => r.file_url).map(complianceRowToDoc);
+      const comparableGroups = ((comparablesRes.data ?? []) as ComparableRow[])
+        .filter((r) => r.comparable_1_url || r.comparable_2_url || r.comparable_3_url)
+        .map(comparableRowToDoc);
+      // Build the invoice paid map (documents.id -> paid) from augusta_rentals.
+      const paidMap: Record<string, boolean> = {};
+      for (const r of (rentalsRes.data ?? []) as Array<{ invoice_url: string | null; invoice_paid: boolean | null }>) {
+        if (r.invoice_url) paidMap[r.invoice_url] = Boolean(r.invoice_paid);
+      }
+      setInvoicePaidMap(paidMap);
       // Merge and sort by created date, newest first.
-      const merged = [...regular, ...compliance].sort((a, b) =>
+      const merged = [...regular, ...compliance, ...comparableGroups].sort((a, b) =>
         b.createdAt.localeCompare(a.createdAt),
       );
       setDocs(merged);
@@ -426,6 +503,16 @@ export const DocsScreen: React.FC = () => {
   };
 
   const openDoc = (doc: DocEntry) => {
+    if (doc.fileType === 'rate_comparables') {
+      // Comparable sets are managed on the Augusta compliance screen.
+      navigation.navigate('AugustaCompliance');
+      return;
+    }
+    if (HTML_DOC_TYPES.has(doc.fileType ?? '')) {
+      // Generated signed documents and invoices render in the WebView viewer.
+      setHtmlDoc(doc);
+      return;
+    }
     if (doc.isCompliance) {
       // Compliance uploads live in Storage — open via their signed URL.
       openCompliance(doc);
@@ -561,16 +648,45 @@ export const DocsScreen: React.FC = () => {
       >
         {FILTERS.map((f) => {
           const active = f === filter;
+          const stratKey = f === 'All' ? null : STRATEGY_DB_KEY[f];
+          // Business Travel is unlocked by tier (Core/Pro), not an explicit
+          // active_strategies entry.
+          const locked = stratKey
+            ? stratKey === 'business_travel'
+              ? !(access.isAdmin || access.tier === 'core' || access.tier === 'pro')
+              : !access.hasStrategy(stratKey)
+            : false;
           return (
             <TouchableOpacity
               key={f}
               activeOpacity={0.8}
-              onPress={() => setFilter(f)}
-              style={[styles.chip, active ? styles.chipActive : styles.chipInactive]}
+              onPress={() => {
+                if (locked) {
+                  // Locked chips never filter — they only surface the upgrade prompt.
+                  setLockedSheet({ name: f });
+                  return;
+                }
+                setFilter(f);
+              }}
+              style={[
+                styles.chip,
+                active ? styles.chipActive : styles.chipInactive,
+                locked && styles.chipLocked,
+              ]}
             >
-              <Text style={active ? styles.chipTextActive : styles.chipTextInactive}>
-                {f}
-              </Text>
+              <View style={styles.chipInner}>
+                {locked ? (
+                  <Ionicons
+                    name="lock-closed"
+                    size={10}
+                    color="#888888"
+                    style={styles.chipLock}
+                  />
+                ) : null}
+                <Text style={active ? styles.chipTextActive : styles.chipTextInactive}>
+                  {f}
+                </Text>
+              </View>
             </TouchableOpacity>
           );
         })}
@@ -607,16 +723,41 @@ export const DocsScreen: React.FC = () => {
           {filtered.map((doc, i) => {
             const isMinutes = doc.fileType === 'minutes';
             const isActivity = doc.fileType === 'activity_log';
+            const isSigned = doc.fileType === 'signed_document';
+            const isInvoice = doc.fileType === 'invoice';
+            const isComparable = doc.fileType === 'rate_comparables';
+            const invoicePaid = isInvoice && invoicePaidMap[doc.id];
             const badge = isActivity
               ? ACTIVITY_BADGE
               : isMinutes
                 ? MINUTES_BADGE
-                : BADGE_COLORS[doc.strategy];
+                : isInvoice
+                  ? invoicePaid
+                    ? { bg: colors.tealLight, fg: colors.teal }
+                    : { bg: colors.amberLight, fg: colors.amber }
+                  : isComparable
+                    ? AUGUSTA_BADGE
+                    : BADGE_COLORS[doc.strategy];
             const badgeLabel = isActivity
               ? 'Real Estate'
               : isMinutes
                 ? 'Minutes'
-                : doc.strategy;
+                : isInvoice
+                  ? invoicePaid
+                    ? 'Invoice · Paid'
+                    : 'Invoice · Unpaid'
+                  : doc.strategy;
+            // Pen icon for signed docs, receipt for invoices, images for
+            // comparable sets, clock for activity, document otherwise.
+            const iconName = isActivity
+              ? 'time-outline'
+              : isSigned
+                ? 'create-outline'
+                : isInvoice
+                  ? 'receipt-outline'
+                  : isComparable
+                    ? 'images-outline'
+                    : 'document-text';
             const isLast = i === filtered.length - 1 && missingSlots.length === 0;
             return (
               <TouchableOpacity
@@ -627,7 +768,7 @@ export const DocsScreen: React.FC = () => {
               >
                 <View style={[styles.pdfIcon, isActivity && styles.activityIcon]}>
                   <Ionicons
-                    name={isActivity ? 'time-outline' : 'document-text'}
+                    name={iconName}
                     size={15}
                     color={isActivity ? colors.teal : colors.midNavy}
                   />
@@ -712,6 +853,25 @@ export const DocsScreen: React.FC = () => {
           onClose={() => setViewerDoc(null)}
         />
       ) : null}
+
+      {htmlDoc ? (
+        <HtmlDocViewer
+          visible
+          name={htmlDoc.name}
+          html={htmlDoc.fileUrl ?? ''}
+          docId={htmlDoc.id}
+          isInvoice={htmlDoc.fileType === 'invoice'}
+          initialPaid={invoicePaidMap[htmlDoc.id]}
+          onClose={() => setHtmlDoc(null)}
+          onChanged={() => loadDocs()}
+        />
+      ) : null}
+
+      <LockedStrategySheet
+        visible={lockedSheet !== null}
+        strategyName={lockedSheet?.name ?? ''}
+        onClose={() => setLockedSheet(null)}
+      />
     </View>
   );
 };
@@ -826,6 +986,17 @@ const styles = StyleSheet.create({
     backgroundColor: 'transparent',
     borderWidth: 0.5,
     borderColor: '#CCCCCC',
+  },
+  chipLocked: {
+    opacity: 0.5,
+  },
+  chipInner: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: 3,
+  },
+  chipLock: {
+    marginRight: 1,
   },
   chipTextActive: {
     color: colors.white,

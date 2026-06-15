@@ -24,7 +24,9 @@ import {
 import { publish } from '../services/voiceInbox';
 import { routeFromClassification } from '../services/openai';
 import { useKeepAwakeWhile } from '../hooks/useKeepAwakeWhile';
+import { useStrategyAccess } from '../hooks/useStrategyAccess';
 import { KeepAwakeIndicator } from './KeepAwakeIndicator';
+import { VoiceUpgradeSheet } from './VoiceUpgradeSheet';
 
 type Phase = 'idle' | 'recording' | 'processing';
 
@@ -37,7 +39,11 @@ export const VoiceLogStrip: React.FC<VoiceLogStripProps> = ({
 }) => {
   const insets = useSafeAreaInsets();
   const navigation = useNavigation();
+  // Voice logging is a Core/Pro feature. Basic subscribers keep the mic button
+  // in place but it turns amber and opens the upgrade sheet instead of recording.
+  const { canUseVoice } = useStrategyAccess();
   const [phase, setPhase] = useState<Phase>('idle');
+  const [showUpgrade, setShowUpgrade] = useState(false);
   const recRef = useRef<Audio.Recording | null>(null);
   const pulse = useRef(new Animated.Value(0)).current;
 
@@ -78,6 +84,10 @@ export const VoiceLogStrip: React.FC<VoiceLogStripProps> = ({
 
   const onPress = async () => {
     if (phase === 'processing') return;
+    if (!canUseVoice) {
+      setShowUpgrade(true);
+      return;
+    }
     if (phase === 'recording') {
       const rec = recRef.current;
       recRef.current = null;
@@ -141,7 +151,12 @@ export const VoiceLogStrip: React.FC<VoiceLogStripProps> = ({
           style={[
             styles.micButton,
             {
-              backgroundColor: phase === 'recording' ? '#E0352B' : colors.navy,
+              backgroundColor:
+                phase === 'recording'
+                  ? '#E0352B'
+                  : canUseVoice
+                    ? colors.navy
+                    : colors.amber,
               transform: [{ scale: phase === 'recording' ? pulseScale : 1 }],
             },
           ]}
@@ -181,6 +196,10 @@ export const VoiceLogStrip: React.FC<VoiceLogStripProps> = ({
           color={phase === 'recording' ? '#E0352B' : colors.mutedText}
         />
       </TouchableOpacity>
+      <VoiceUpgradeSheet
+        visible={showUpgrade}
+        onClose={() => setShowUpgrade(false)}
+      />
     </View>
   );
 };

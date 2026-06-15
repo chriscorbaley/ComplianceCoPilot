@@ -29,7 +29,10 @@ import * as Sharing from 'expo-sharing';
 import { colors, radius, shadow, spacing, typography } from '../../theme';
 import { ProgressBar } from '../../components/ProgressBar';
 import { DocumentUploadRow } from '../../components/DocumentUploadRow';
+import { ComplianceReportButton } from '../../components/ComplianceReportButton';
+import { generateHomeOfficeReport } from '../../services/complianceReports';
 import { useBusiness } from '../../business/BusinessContext';
+import { useAuth } from '../../auth/AuthContext';
 import {
   listStrategyDocuments,
   uploadStrategyDocument,
@@ -101,6 +104,7 @@ const buildUtilityTemplateHtml = (): string => `
 export const HomeOfficeComplianceScreen: React.FC = () => {
   const insets = useSafeAreaInsets();
   const { activeBusinessId } = useBusiness();
+  const { fullName } = useAuth();
 
   const [rows, setRows] = useState<StrategyDocumentRow[]>([]);
   const [totalSqft, setTotalSqft] = useState('');
@@ -342,6 +346,16 @@ export const HomeOfficeComplianceScreen: React.FC = () => {
           trackColor={colors.tealLight}
           height={10}
         />
+        <View style={styles.reportRow}>
+          <ComplianceReportButton
+            onGenerate={() =>
+              generateHomeOfficeReport({
+                businessId: activeBusinessId,
+                clientName: fullName ?? 'Client',
+              })
+            }
+          />
+        </View>
       </View>
 
       {/* ─── Section 1: Square footage calculator ─────────────────────── */}
@@ -684,6 +698,9 @@ const styles = StyleSheet.create({
     color: colors.teal,
     fontSize: 14,
     fontWeight: '700',
+  },
+  reportRow: {
+    marginTop: spacing.md,
   },
   sectionCard: {
     backgroundColor: colors.white,

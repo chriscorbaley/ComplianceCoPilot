@@ -110,7 +110,7 @@ export const ChoosePlanScreen: React.FC = () => {
   const insets = useSafeAreaInsets();
   const nav = useNavigation<Nav>();
   const route = useRoute<Route>();
-  const { session, refreshProfile } = useAuth();
+  const { session, refreshProfile, onboardingCompleted } = useAuth();
   const highlight = route.params?.highlight ?? null;
   const [busyTier, setBusyTier] = useState<SubscriptionTier | null>(null);
   const [codeOpen, setCodeOpen] = useState(false);
@@ -127,8 +127,19 @@ export const ChoosePlanScreen: React.FC = () => {
         .eq('id', session.user.id);
       if (error) throw error;
       await refreshProfile();
+      // Post-onboarding (this screen is also mounted in RootStack so clients can
+      // upgrade any time): the new tier takes effect immediately — gating reads
+      // subscription_tier at render — so just confirm and return.
+      if (onboardingCompleted) {
+        const label = tier === 'pro' ? 'Pro' : tier === 'core' ? 'Core' : 'Starter';
+        Alert.alert('Plan updated', `You're now on the ${label} plan.`);
+        if (nav.canGoBack()) nav.goBack();
+        return;
+      }
       if (tier === 'pro') {
-        nav.replace('Payment');
+        // Pro skips the upgrade teaser but still sees the Business Travel value
+        // screen before payment.
+        nav.replace('BusinessTravelIntro');
       } else {
         nav.replace('UpgradeTeaser');
       }
@@ -153,7 +164,12 @@ export const ChoosePlanScreen: React.FC = () => {
       <ScrollView
         contentContainerStyle={[
           styles.scrollContent,
-          { paddingTop: insets.top + 16, paddingBottom: insets.bottom + 32 },
+          {
+            // Post-onboarding this screen sits under the RootStack navy header,
+            // which already clears the safe area — so don't double-pad the top.
+            paddingTop: onboardingCompleted ? 16 : insets.top + 16,
+            paddingBottom: insets.bottom + 32,
+          },
         ]}
       >
         <View style={styles.brand}>

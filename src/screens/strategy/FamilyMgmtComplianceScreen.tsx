@@ -18,15 +18,21 @@ import {
   StyleSheet,
   Switch,
   Text,
+  TouchableOpacity,
   View,
 } from 'react-native';
+import { Ionicons } from '@expo/vector-icons';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
 import { useFocusEffect } from '@react-navigation/native';
 import * as DocumentPicker from 'expo-document-picker';
 import { colors, radius, shadow, spacing, typography } from '../../theme';
 import { ProgressBar } from '../../components/ProgressBar';
 import { DocumentUploadRow } from '../../components/DocumentUploadRow';
+import { ManualMinutesModal } from '../../components/ManualMinutesModal';
+import { ComplianceReportButton } from '../../components/ComplianceReportButton';
+import { generateFamilyMgmtReport } from '../../services/complianceReports';
 import { useBusiness } from '../../business/BusinessContext';
+import { useAuth } from '../../auth/AuthContext';
 import {
   listStrategyDocuments,
   uploadStrategyDocument,
@@ -114,9 +120,12 @@ const formatConfirmedDate = (iso: string | null): string | null => {
 
 export const FamilyMgmtComplianceScreen: React.FC = () => {
   const insets = useSafeAreaInsets();
-  const { activeBusinessId } = useBusiness();
+  const { activeBusinessId, activeBusiness } = useBusiness();
+  const { fullName } = useAuth();
   const [docs, setDocs] = useState<StrategyDocumentRow[]>([]);
   const [checklist, setChecklist] = useState<ComplianceChecklistRow[]>([]);
+  const [manualOpen, setManualOpen] = useState(false);
+  const businessName = activeBusiness?.business_name ?? null;
 
   const refresh = useCallback(async () => {
     try {
@@ -262,6 +271,27 @@ export const FamilyMgmtComplianceScreen: React.FC = () => {
         </View>
       </View>
 
+      <View style={styles.actionCard}>
+        <TouchableOpacity
+          activeOpacity={0.85}
+          style={styles.actionBtn}
+          onPress={() => setManualOpen(true)}
+        >
+          <Ionicons name="clipboard-outline" size={18} color={colors.white} />
+          <Text style={styles.actionBtnText}>Create Manual Minutes</Text>
+        </TouchableOpacity>
+        <View style={styles.actionSpace}>
+          <ComplianceReportButton
+            onGenerate={() =>
+              generateFamilyMgmtReport({
+                businessId: activeBusinessId,
+                clientName: businessName ?? fullName ?? 'Client',
+              })
+            }
+          />
+        </View>
+      </View>
+
       {/* ─── Part A: Document uploads ─────────────────────────────────── */}
       <View style={styles.partCard}>
         <Text style={styles.partTitle}>Required Documents</Text>
@@ -326,6 +356,16 @@ export const FamilyMgmtComplianceScreen: React.FC = () => {
           );
         })}
       </View>
+
+      <ManualMinutesModal
+        visible={manualOpen}
+        strategy="family_management"
+        businessId={activeBusinessId}
+        businessName={businessName}
+        clientName={fullName ?? null}
+        onClose={() => setManualOpen(false)}
+        onSaved={refresh}
+      />
     </ScrollView>
   );
 };
@@ -398,6 +438,32 @@ const styles = StyleSheet.create({
     borderColor: colors.cardBorder,
     padding: spacing.lg,
     ...shadow.card,
+  },
+  actionCard: {
+    backgroundColor: colors.white,
+    borderRadius: radius.card,
+    borderWidth: 0.5,
+    borderColor: colors.cardBorder,
+    padding: spacing.lg,
+    ...shadow.card,
+  },
+  actionBtn: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    justifyContent: 'center',
+    gap: spacing.sm,
+    backgroundColor: colors.navy,
+    borderRadius: 10,
+    paddingVertical: 13,
+  },
+  actionBtnText: {
+    ...typography.bodyMedium,
+    color: colors.white,
+    fontWeight: '700',
+    fontSize: 14,
+  },
+  actionSpace: {
+    marginTop: spacing.sm,
   },
   partTitle: {
     ...typography.h2,

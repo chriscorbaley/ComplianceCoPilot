@@ -6,24 +6,24 @@ import type { NativeStackNavigationProp } from '@react-navigation/native-stack';
 import { colors } from '../theme';
 import type { RootStackParamList } from '../navigation/types';
 
-interface LockedStrategySheetProps {
+interface VoiceUpgradeSheetProps {
   visible: boolean;
-  // Display name of the strategy the user tapped (e.g. "Augusta Rule").
-  strategyName: string;
   onClose: () => void;
 }
 
-export const LockedStrategySheet: React.FC<LockedStrategySheetProps> = ({
+// Bottom sheet shown when a Basic subscriber taps the (amber) microphone button.
+// AI voice logging is a Core/Pro feature; this explains the value and routes to
+// the in-app Upgrade screen.
+export const VoiceUpgradeSheet: React.FC<VoiceUpgradeSheetProps> = ({
   visible,
-  strategyName,
   onClose,
 }) => {
   const navigation =
     useNavigation<NativeStackNavigationProp<RootStackParamList>>();
 
-  const onUpgrade = () => {
+  const goUpgrade = (tier: 'core' | 'pro') => {
     onClose();
-    navigation.navigate('ChoosePlan');
+    navigation.navigate('ChoosePlan', { highlight: tier });
   };
 
   return (
@@ -32,17 +32,36 @@ export const LockedStrategySheet: React.FC<LockedStrategySheetProps> = ({
         <Pressable style={styles.sheet} onPress={() => undefined}>
           <View style={styles.handle} />
           <View style={styles.header}>
-            <View style={styles.lock}>
-              <Ionicons name="lock-closed" size={20} color={colors.amber} />
+            <View style={styles.iconWrap}>
+              <Ionicons name="mic" size={20} color={colors.amber} />
             </View>
-            <Text style={styles.title}>{strategyName}</Text>
+            <Text style={styles.title}>Upgrade to unlock AI Voice</Text>
           </View>
           <Text style={styles.desc}>
-            This strategy is not included in your current plan. Upgrade to access{' '}
-            {strategyName} compliance tracking.
+            AI voice-to-doc fill automatically transcribes your speech and fills
+            the correct compliance fields — no typing required. Available on Core
+            and Pro.
           </Text>
-          <TouchableOpacity activeOpacity={0.85} style={styles.upgrade} onPress={onUpgrade}>
-            <Text style={styles.upgradeText}>Upgrade Now</Text>
+          <View style={styles.statRow}>
+            <Ionicons name="time-outline" size={16} color={colors.teal} />
+            <Text style={styles.statText}>
+              Core members save an average of 2+ hours per week on compliance
+              logging
+            </Text>
+          </View>
+          <TouchableOpacity
+            activeOpacity={0.85}
+            style={[styles.cta, styles.ctaCore]}
+            onPress={() => goUpgrade('core')}
+          >
+            <Text style={styles.ctaText}>Upgrade to Core — $99/mo</Text>
+          </TouchableOpacity>
+          <TouchableOpacity
+            activeOpacity={0.85}
+            style={[styles.cta, styles.ctaPro]}
+            onPress={() => goUpgrade('pro')}
+          >
+            <Text style={styles.ctaText}>Upgrade to Pro — $199/mo</Text>
           </TouchableOpacity>
           <TouchableOpacity activeOpacity={0.7} onPress={onClose} style={styles.dismiss}>
             <Text style={styles.dismissText}>Not now</Text>
@@ -80,7 +99,7 @@ const styles = StyleSheet.create({
     alignItems: 'center',
     gap: 10,
   },
-  lock: {
+  iconWrap: {
     width: 32,
     height: 32,
     borderRadius: 16,
@@ -99,14 +118,34 @@ const styles = StyleSheet.create({
     fontSize: 14,
     lineHeight: 20,
   },
-  upgrade: {
-    marginTop: 8,
-    backgroundColor: colors.navy,
+  statRow: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: 8,
+    backgroundColor: colors.tealLight,
+    borderRadius: 10,
+    padding: 12,
+  },
+  statText: {
+    flex: 1,
+    color: colors.teal,
+    fontSize: 12,
+    fontWeight: '600',
+    lineHeight: 17,
+  },
+  cta: {
     borderRadius: 10,
     paddingVertical: 14,
     alignItems: 'center',
   },
-  upgradeText: {
+  ctaCore: {
+    marginTop: 4,
+    backgroundColor: colors.navy,
+  },
+  ctaPro: {
+    backgroundColor: colors.amber,
+  },
+  ctaText: {
     color: colors.white,
     fontSize: 15,
     fontWeight: '700',

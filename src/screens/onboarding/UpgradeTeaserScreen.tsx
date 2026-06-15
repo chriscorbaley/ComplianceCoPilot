@@ -43,10 +43,11 @@ export const UpgradeTeaserScreen: React.FC = () => {
   const nav = useNavigation<Nav>();
   const { subscriptionTier } = useAuth();
 
-  // Defensive: Pro shouldn't see this; skip straight to payment.
+  // Defensive: Pro shouldn't see this; skip straight to the Business Travel
+  // value screen (which then continues to payment).
   useEffect(() => {
     if (subscriptionTier === 'pro') {
-      nav.replace('Payment');
+      nav.replace('BusinessTravelIntro');
     }
   }, [subscriptionTier, nav]);
 
@@ -88,7 +89,7 @@ export const UpgradeTeaserScreen: React.FC = () => {
           <Text style={styles.upgradeText}>{content.upgradeLabel}</Text>
         </TouchableOpacity>
 
-        <TouchableOpacity activeOpacity={0.7} style={styles.skipWrap} onPress={() => nav.replace('Payment')}>
+        <TouchableOpacity activeOpacity={0.7} style={styles.skipWrap} onPress={() => nav.replace('BusinessTravelIntro')}>
           <Text style={styles.skipText}>{content.skipLabel}</Text>
         </TouchableOpacity>
       </View>

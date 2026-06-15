@@ -27,14 +27,26 @@ interface StrategyDef {
   description: string;
 }
 
+// Business Travel is no longer a user-selectable strategy. It activates
+// automatically for Core and Pro subscribers on onboarding completion (see
+// onFinish), and is locked behind an upgrade screen for Basic.
 const STRATEGIES: StrategyDef[] = [
   { key: 'real_estate',       name: 'Real Estate / REPS',        description: 'Material Participation hours for short-term rental tracking, and or Real Estate Professional status.' },
   { key: 'augusta_rule',      name: 'Augusta Rule',              description: '14-day tax-free rental of your home to your business (IRC §280A(g)).' },
   { key: 's_corp',            name: 'S-Corp',                    description: 'Your S-Corp compliance, organized and export-ready. Templates, records, and documents — all in one place when your CPA needs them.' },
-  { key: 'business_travel',   name: 'Business Travel and Meals', description: 'Trip deductibility, day-by-day allocation, and IRC §274 meals (50%).' },
   { key: 'home_office',       name: 'Home Office',               description: 'Exclusive-use attestation and home-office deduction tracking (IRC §280A).' },
   { key: 'family_management', name: 'Family Management Company', description: 'Turn your family into a tax-efficient team. Track the documents and activity that keep your family management company strategy working.' },
 ];
+
+// Core and Pro subscribers get Business Travel compliance for free. Append it to
+// whatever strategies the user picked so it's active from day one.
+const withBusinessTravel = (
+  strategies: string[],
+  tier: SubscriptionTier,
+): string[] =>
+  tier === 'core' || tier === 'pro'
+    ? Array.from(new Set([...strategies, 'business_travel']))
+    : strategies;
 
 const TIER_LIMITS: Record<SubscriptionTier, number> = {
   starter: 1,
@@ -90,11 +102,13 @@ export const StrategySelectionScreen: React.FC = () => {
 
   const onFinish = async () => {
     if (!session?.user.id || selected.length === 0) return;
+    // Auto-activate Business Travel for Core/Pro before persisting.
+    const finalStrategies = withBusinessTravel(selected, tier);
     // Real estate has its own multi-step onboarding flow that finishes by
     // setting active_strategies + onboarding_completed itself. Route into it
-    // instead of completing here.
+    // instead of completing here, carrying the (Business Travel-augmented) list.
     if (selected.includes('real_estate')) {
-      nav.navigate('RealEstateType', { selectedStrategies: selected });
+      nav.navigate('RealEstateType', { selectedStrategies: finalStrategies });
       return;
     }
     setBusy(true);
@@ -102,7 +116,7 @@ export const StrategySelectionScreen: React.FC = () => {
       const { error } = await supabase
         .from('users')
         .update({
-          active_strategies: selected,
+          active_strategies: finalStrategies,
           onboarding_completed: true,
         })
         .eq('id', session.user.id);

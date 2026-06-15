@@ -237,6 +237,26 @@ export const StrategyDetailScreen: React.FC = () => {
         </>
       ) : null}
 
+      {isAugusta ? (
+        <TouchableOpacity
+          activeOpacity={0.85}
+          onPress={() => navigation.navigate('AugustaCompliance')}
+          style={styles.linkCard}
+        >
+          <View style={[styles.icon, styles.linkIcon]}>
+            <Ionicons name="images-outline" size={20} color={colors.midNavy} />
+          </View>
+          <View style={styles.linkText}>
+            <Text style={styles.linkTitle}>Comparable Rentals</Text>
+            <Text style={styles.linkBody}>
+              Upload comparable venue rates to justify your Augusta rental rates
+              for each property.
+            </Text>
+          </View>
+          <Ionicons name="chevron-forward" size={20} color={colors.mutedText} />
+        </TouchableOpacity>
+      ) : null}
+
       <View style={styles.actions}>
         <TouchableOpacity
           activeOpacity={0.85}

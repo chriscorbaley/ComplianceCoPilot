@@ -139,7 +139,7 @@ export const DashboardScreen: React.FC = () => {
   const [announcement, setAnnouncement] = useState<AnnouncementRow | null>(null);
   const [dismissedIds, setDismissedIds] = useState<Set<string>>(() => new Set());
   const access = useStrategyAccess();
-  const [lockedSheet, setLockedSheet] = useState<{ key: string; name: string; description: string } | null>(null);
+  const [lockedSheet, setLockedSheet] = useState<{ name: string } | null>(null);
 
   const loadLatestAnnouncement = useCallback(async () => {
     const { data: rows } = await supabase
@@ -620,10 +620,16 @@ export const DashboardScreen: React.FC = () => {
           <View style={styles.strategyList}>
             {strategies.map((s) => {
               const stratKey = DASHBOARD_STRATEGY_KEYS[s.id];
-              const locked = stratKey ? !access.hasStrategy(stratKey) : false;
+              // Business Travel is unlocked by tier (Core/Pro), not by an
+              // explicit active_strategies entry — it activates automatically.
+              const locked = stratKey
+                ? stratKey === 'business_travel'
+                  ? !(access.isAdmin || access.tier === 'core' || access.tier === 'pro')
+                  : !access.hasStrategy(stratKey)
+                : false;
               const onCardPress = () => {
                 if (locked && stratKey) {
-                  setLockedSheet({ key: stratKey, name: s.name, description: s.description });
+                  setLockedSheet({ name: s.name });
                   return;
                 }
                 if (s.id === BUSINESS_TRAVEL_STRATEGY_ID) {
@@ -644,7 +650,7 @@ export const DashboardScreen: React.FC = () => {
                       <StrategyCard strategy={s} />
                     </View>
                     <View style={styles.lockedBadge}>
-                      <Ionicons name="lock-closed" size={16} color={colors.amber} />
+                      <Ionicons name="lock-closed" size={20} color={colors.amber} />
                     </View>
                   </Pressable>
                 );
@@ -724,9 +730,7 @@ export const DashboardScreen: React.FC = () => {
 
       <LockedStrategySheet
         visible={lockedSheet !== null}
-        title={lockedSheet?.name ?? ''}
-        description={lockedSheet?.description ?? ''}
-        requiredTier={access.requiredTierFor(lockedSheet?.key ?? '')}
+        strategyName={lockedSheet?.name ?? ''}
         onClose={() => setLockedSheet(null)}
       />
     </View>

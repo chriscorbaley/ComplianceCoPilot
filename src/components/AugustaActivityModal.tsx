@@ -33,6 +33,9 @@ import {
 } from '../services/openai';
 import { useStrategyAccess } from '../hooks/useStrategyAccess';
 import { useBusiness } from '../business/BusinessContext';
+import { useAuth } from '../auth/AuthContext';
+import { AugustaDocsModal, type AugustaDocsContext } from './AugustaDocsModal';
+import { VoiceUpgradeSheet } from './VoiceUpgradeSheet';
 
 const MONTHS = [
   'January', 'February', 'March', 'April', 'May', 'June',
@@ -66,8 +69,17 @@ export const AugustaActivityModal: React.FC<AugustaActivityModalProps> = ({
   onClose,
   onSaved,
 }) => {
-  const { activeBusinessId } = useBusiness();
+  const { activeBusinessId, activeBusiness } = useBusiness();
   const { canUseVoice } = useStrategyAccess();
+  const { fullName } = useAuth();
+
+  // After minutes are saved we offer to generate the lease + invoice. The
+  // captured rental context is held here and passed to the docs modal.
+  const [docsContext, setDocsContext] = useState<AugustaDocsContext | null>(null);
+  const [docsModalOpen, setDocsModalOpen] = useState(false);
+  // Basic subscribers see the mic button in place but amber; tapping it opens
+  // the voice-upgrade sheet rather than recording.
+  const [showVoiceUpgrade, setShowVoiceUpgrade] = useState(false);
 
   const [meetingDate, setMeetingDate] = useState<Date>(new Date());
   const [location, setLocation] = useState('');
@@ -173,9 +185,10 @@ export const AugustaActivityModal: React.FC<AugustaActivityModalProps> = ({
     }
     setSaving(true);
     try {
+      const rentalDate = toIsoDate(meetingDate);
       await saveAugustaActivity({
         businessId: activeBusinessId,
-        meetingDate: toIsoDate(meetingDate),
+        meetingDate: rentalDate,
         location: location.trim(),
         meetingType,
         attendees: attendees.trim(),
@@ -183,12 +196,27 @@ export const AugustaActivityModal: React.FC<AugustaActivityModalProps> = ({
         rentalRate: parseNum(rentalRate),
         meetingPurpose: purpose.trim(),
       });
-      Alert.alert(
-        'Minutes saved successfully',
-        'Your Augusta Rule meeting minutes were generated and saved to your Documents.',
-      );
       onSaved();
-      onClose();
+      // Stage the rental context, then offer to also generate the lease +
+      // invoice for this rental.
+      const ctx: AugustaDocsContext = {
+        businessId: activeBusinessId,
+        businessEntityName: activeBusiness?.business_name ?? '',
+        location: location.trim(),
+        rentalDate,
+        durationHours: parseNum(duration),
+        rentalRate: parseNum(rentalRate),
+        meetingPurpose: purpose.trim(),
+      };
+      setDocsContext(ctx);
+      Alert.alert(
+        'Minutes saved',
+        'Your meeting minutes are saved. Would you also like to generate the required lease agreement and invoice for this rental?',
+        [
+          { text: 'Skip', style: 'cancel', onPress: onClose },
+          { text: 'Generate Both', onPress: () => setDocsModalOpen(true) },
+        ],
+      );
     } catch (e) {
       Alert.alert('Could not save meeting', e instanceof Error ? e.message : String(e));
     } finally {
@@ -204,6 +232,7 @@ export const AugustaActivityModal: React.FC<AugustaActivityModalProps> = ({
         : 'Fill from voice';
 
   return (
+    <>
     <Modal visible={visible} animationType="slide" transparent onRequestClose={onClose}>
       <View style={styles.backdrop}>
         <View style={styles.sheet}>
@@ -220,28 +249,29 @@ export const AugustaActivityModal: React.FC<AugustaActivityModalProps> = ({
             showsVerticalScrollIndicator={false}
             keyboardShouldPersistTaps="handled"
           >
-            {canUseVoice ? (
-              <TouchableOpacity
-                activeOpacity={0.85}
-                onPress={onVoicePress}
-                disabled={voicePhase === 'processing'}
-                style={[
-                  styles.voiceBtn,
-                  voicePhase === 'recording' && styles.voiceBtnRecording,
-                ]}
-              >
-                {voicePhase === 'processing' ? (
-                  <ActivityIndicator size="small" color={colors.white} />
-                ) : (
-                  <Ionicons
-                    name={voicePhase === 'recording' ? 'stop' : 'mic'}
-                    size={18}
-                    color={colors.white}
-                  />
-                )}
-                <Text style={styles.voiceBtnText}>{voiceLabel}</Text>
-              </TouchableOpacity>
-            ) : null}
+            <TouchableOpacity
+              activeOpacity={0.85}
+              onPress={canUseVoice ? onVoicePress : () => setShowVoiceUpgrade(true)}
+              disabled={canUseVoice && voicePhase === 'processing'}
+              style={[
+                styles.voiceBtn,
+                !canUseVoice && styles.voiceBtnLocked,
+                canUseVoice && voicePhase === 'recording' && styles.voiceBtnRecording,
+              ]}
+            >
+              {canUseVoice && voicePhase === 'processing' ? (
+                <ActivityIndicator size="small" color={colors.white} />
+              ) : (
+                <Ionicons
+                  name={canUseVoice && voicePhase === 'recording' ? 'stop' : 'mic'}
+                  size={18}
+                  color={colors.white}
+                />
+              )}
+              <Text style={styles.voiceBtnText}>
+                {canUseVoice ? voiceLabel : 'Fill from voice'}
+              </Text>
+            </TouchableOpacity>
 
             {/* Meeting date */}
             <Text style={styles.label}>Meeting date</Text>
@@ -359,6 +389,23 @@ export const AugustaActivityModal: React.FC<AugustaActivityModalProps> = ({
         onClose={() => setTypePickerOpen(false)}
       />
     </Modal>
+
+    <AugustaDocsModal
+      visible={docsModalOpen}
+      context={docsContext}
+      defaultOwnerName={fullName ?? ''}
+      onClose={() => {
+        setDocsModalOpen(false);
+        onClose();
+      }}
+      onGenerated={onSaved}
+    />
+
+    <VoiceUpgradeSheet
+      visible={showVoiceUpgrade}
+      onClose={() => setShowVoiceUpgrade(false)}
+    />
+    </>
   );
 };
 
@@ -561,6 +608,9 @@ const styles = StyleSheet.create({
   },
   voiceBtnRecording: {
     backgroundColor: '#E0352B',
+  },
+  voiceBtnLocked: {
+    backgroundColor: colors.amber,
   },
   voiceBtnText: {
     ...typography.bodyMedium,
