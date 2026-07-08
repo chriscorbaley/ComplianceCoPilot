@@ -23,8 +23,11 @@ import { ProgressBar } from '../components/ProgressBar';
 import { StatusPill } from '../components/StatusPill';
 import { AugustaActivityModal } from '../components/AugustaActivityModal';
 import { RealEstateSettingsSheet } from '../components/RealEstateSettingsSheet';
+import { ManualMinutesModal } from '../components/ManualMinutesModal';
+import { ComplianceReportButton } from '../components/ComplianceReportButton';
 import { supabase } from '../services/supabase';
 import { generateRealEstateReport } from '../services/realEstateReport';
+import { generateAugustaReport } from '../services/complianceReports';
 import { useAuth } from '../auth/AuthContext';
 import { useBusiness } from '../business/BusinessContext';
 import type { RootStackParamList } from '../navigation/types';
@@ -43,15 +46,17 @@ const isAugustaStrategy = (id: string, name: string): boolean =>
 export const StrategyDetailScreen: React.FC = () => {
   const insets = useSafeAreaInsets();
   const navigation = useNavigation<Nav>();
-  const { activeBusinessId } = useBusiness();
+  const { activeBusinessId, activeBusiness } = useBusiness();
   const { session, fullName } = useAuth();
   const { params } = useRoute<RouteProps>();
   const { strategy } = params;
   const showProperties = isRealEstateStrategy(strategy.id, strategy.name);
   const isAugusta = isAugustaStrategy(strategy.id, strategy.name);
   const [augustaFormOpen, setAugustaFormOpen] = useState(false);
+  const [manualOpen, setManualOpen] = useState(false);
   const [settingsOpen, setSettingsOpen] = useState(false);
   const [generating, setGenerating] = useState(false);
+  const businessName = activeBusiness?.business_name ?? null;
 
   const onGenerateReport = useCallback(async () => {
     if (generating) return;
@@ -257,6 +262,35 @@ export const StrategyDetailScreen: React.FC = () => {
         </TouchableOpacity>
       ) : null}
 
+      {isAugusta ? (
+        <View style={styles.card}>
+          <Text style={styles.sectionLabel}>Augusta documents</Text>
+          <Text style={[styles.body, { marginBottom: spacing.sm }]}>
+            Fill a template meeting-minutes record by hand, or export a full
+            Augusta Rule compliance report for your tax advisor.
+          </Text>
+          <TouchableOpacity
+            activeOpacity={0.85}
+            onPress={() => setManualOpen(true)}
+            style={[styles.btn, styles.btnPrimary, styles.fullBtn]}
+          >
+            <Ionicons name="clipboard-outline" size={18} color={colors.white} />
+            <Text style={styles.btnPrimaryText}>Create Manual Minutes</Text>
+          </TouchableOpacity>
+          <View style={{ marginTop: spacing.sm }}>
+            <ComplianceReportButton
+              onGenerate={() =>
+                generateAugustaReport({
+                  businessId: activeBusinessId,
+                  clientName: businessName ?? fullName ?? 'Client',
+                  taxYear: new Date().getFullYear(),
+                })
+              }
+            />
+          </View>
+        </View>
+      ) : null}
+
       <View style={styles.actions}>
         <TouchableOpacity
           activeOpacity={0.85}
@@ -290,6 +324,18 @@ export const StrategyDetailScreen: React.FC = () => {
         <AugustaActivityModal
           visible={augustaFormOpen}
           onClose={() => setAugustaFormOpen(false)}
+          onSaved={() => loadAugustaCount().catch(() => undefined)}
+        />
+      ) : null}
+
+      {isAugusta ? (
+        <ManualMinutesModal
+          visible={manualOpen}
+          strategy="augusta_rule"
+          businessId={activeBusinessId}
+          businessName={businessName}
+          clientName={fullName ?? null}
+          onClose={() => setManualOpen(false)}
           onSaved={() => loadAugustaCount().catch(() => undefined)}
         />
       ) : null}
@@ -435,6 +481,10 @@ const styles = StyleSheet.create({
     gap: spacing.xs + 2,
     borderRadius: radius.card,
     paddingVertical: 14,
+  },
+  fullBtn: {
+    flex: 0,
+    width: '100%',
   },
   btnPrimary: {
     backgroundColor: colors.navy,

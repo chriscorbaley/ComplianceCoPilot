@@ -10,7 +10,12 @@ import {
   View,
 } from 'react-native';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
-import { useRoute, type RouteProp } from '@react-navigation/native';
+import {
+  useNavigation,
+  useRoute,
+  CommonActions,
+  type RouteProp,
+} from '@react-navigation/native';
 import { Ionicons } from '@expo/vector-icons';
 import { colors } from '../../theme';
 import { supabase, type PropertyRow } from '../../services/supabase';
@@ -38,11 +43,16 @@ const trackLabel = (
 export const RealEstateCompleteScreen: React.FC = () => {
   const insets = useSafeAreaInsets();
   const route = useRoute<Route>();
-  const { session, refreshProfile } = useAuth();
+  const nav = useNavigation();
+  const { session, refreshProfile, onboardingCompleted } = useAuth();
   const params = route.params;
   const [savedProperties, setSavedProperties] = useState<PropertyRow[] | null>(null);
   const [persisting, setPersisting] = useState(true);
   const [navigating, setNavigating] = useState(false);
+  // Captured once at mount: if onboarding was already complete, this flow was
+  // entered from an in-app upgrade (RootStack) rather than initial onboarding,
+  // so we navigate to the Dashboard directly instead of relying on the Gate.
+  const [isUpgradeFlow] = useState(onboardingCompleted);
 
   useEffect(() => {
     let cancelled = false;
@@ -105,7 +115,14 @@ export const RealEstateCompleteScreen: React.FC = () => {
     setNavigating(true);
     try {
       await refreshProfile();
-      // Gate in App.tsx swaps to RootStack once onboarding_completed=true.
+      // Onboarding: the Gate in App.tsx swaps to RootStack once
+      // onboarding_completed=true. Upgrade: we're already in RootStack, so jump
+      // straight to the Dashboard (the Gate won't re-render).
+      if (isUpgradeFlow) {
+        nav.dispatch(
+          CommonActions.navigate({ name: 'Tabs', params: { screen: 'Dashboard' } }),
+        );
+      }
     } catch (err) {
       Alert.alert('Could not enter app', err instanceof Error ? err.message : String(err));
       setNavigating(false);

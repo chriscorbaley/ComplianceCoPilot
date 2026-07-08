@@ -95,6 +95,9 @@ export const HtmlDocViewer: React.FC<Props> = ({
       setCurrentHtml(newHtml);
       setPaid(nextPaid);
       onChanged?.(newHtml, nextPaid);
+      if (nextPaid) {
+        Alert.alert('Invoice marked as paid — document updated');
+      }
     } catch (e) {
       Alert.alert('Could not update invoice', e instanceof Error ? e.message : String(e));
       setPaid(!nextPaid); // revert the switch
@@ -143,7 +146,7 @@ export const HtmlDocViewer: React.FC<Props> = ({
         {isInvoice ? (
           <View style={[styles.paidBar, { paddingBottom: spacing.md + insets.bottom }]}>
             <View style={styles.paidText}>
-              <Text style={styles.paidTitle}>Mark as Paid</Text>
+              <Text style={styles.paidTitle}>Mark Invoice as Paid</Text>
               <Text style={styles.paidSub}>
                 {paid ? 'Invoice shows a PAID watermark' : 'Toggle when payment is received'}
               </Text>
@@ -164,7 +167,7 @@ export const HtmlDocViewer: React.FC<Props> = ({
 
       <DatePickerModal
         visible={datePickerOpen}
-        title="Date paid"
+        title="Date payment received"
         value={new Date()}
         onCancel={() => {
           setDatePickerOpen(false);

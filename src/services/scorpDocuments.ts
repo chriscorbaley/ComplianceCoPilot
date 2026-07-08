@@ -36,8 +36,9 @@ function toIsoDate(d: Date): string {
   return `${y}-${mo}-${day}`;
 }
 
-// Uploads the captured signature PNG to the private scorp-signatures bucket and
-// returns the storage path.
+// Uploads the captured signature PNG to the private 'scorp-signatures' bucket
+// and returns the storage path. The stored object lives at
+// scorp-signatures/<user_id>/<filename>, matching the bucket + RLS policy.
 async function uploadSignature(
   userId: string,
   documentType: string,
@@ -49,7 +50,12 @@ async function uploadSignature(
   const { error } = await supabase.storage
     .from(SIGNATURE_BUCKET)
     .upload(path, bytes, { contentType: 'image/png', upsert: false });
-  if (error) throw error;
+  // Surface a clear, user-facing message for any storage failure (bucket
+  // missing, RLS denial, network) instead of the raw "bucket not found" error.
+  if (error) {
+    console.warn('[scorp] signature upload failed', error);
+    throw new Error('Could not save signature. Please try again or contact support.');
+  }
   return path;
 }
 

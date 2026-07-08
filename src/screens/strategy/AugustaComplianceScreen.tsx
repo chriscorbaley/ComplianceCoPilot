@@ -1,17 +1,22 @@
-// Augusta Rule compliance screen: per-property "Rental Rate Comparables".
-// For each property that has had an Augusta rental this tax year, the user
-// uploads three screenshots (or PDFs) of comparable venue rates to justify the
-// rate they charged. One comparable set covers all of that property's Augusta
-// events for the year.
+// Augusta Rule "Rental Rate Comparables" screen.
+//
+// Comparable uploads justify the rental RATE itself — they are independent of
+// any logged Augusta meeting. The user picks (or types) a property, picks a tax
+// year, and uploads up to three screenshots/PDFs of comparable venue rates.
+// Rows are saved to augusta_comparables keyed by property_name + tax_year, so
+// they associate automatically with any Augusta activity later logged for that
+// same property and year.
 
-import React, { useCallback, useEffect, useState } from 'react';
+import React, { useCallback, useEffect, useMemo, useState } from 'react';
 import {
   Alert,
   Image,
   Linking,
+  Modal,
   ScrollView,
   StyleSheet,
   Text,
+  TextInput,
   TouchableOpacity,
   View,
 } from 'react-native';
@@ -21,10 +26,6 @@ import { useFocusEffect } from '@react-navigation/native';
 import * as DocumentPicker from 'expo-document-picker';
 import { colors, radius, shadow, spacing, typography } from '../../theme';
 import { useBusiness } from '../../business/BusinessContext';
-import { useAuth } from '../../auth/AuthContext';
-import { ManualMinutesModal } from '../../components/ManualMinutesModal';
-import { ComplianceReportButton } from '../../components/ComplianceReportButton';
-import { generateAugustaReport } from '../../services/complianceReports';
 import {
   listAugustaProperties,
   listComparables,
@@ -108,15 +109,64 @@ const ComparableSlot: React.FC<{
   );
 };
 
+// Simple centered option picker reused for both the property and tax-year
+// selectors.
+const OptionPickerModal: React.FC<{
+  visible: boolean;
+  title: string;
+  options: string[];
+  selected: string;
+  onSelect: (v: string) => void;
+  onClose: () => void;
+}> = ({ visible, title, options, selected, onSelect, onClose }) => (
+  <Modal visible={visible} transparent animationType="fade" onRequestClose={onClose}>
+    <TouchableOpacity style={picker.backdrop} activeOpacity={1} onPress={onClose}>
+      <View style={picker.menu}>
+        <Text style={picker.menuTitle}>{title}</Text>
+        <ScrollView style={picker.menuScroll} showsVerticalScrollIndicator={false}>
+          {options.map((opt) => {
+            const active = opt === selected;
+            return (
+              <TouchableOpacity
+                key={opt}
+                activeOpacity={0.8}
+                style={[picker.menuItem, active && picker.menuItemActive]}
+                onPress={() => onSelect(opt)}
+              >
+                <Text style={[picker.menuItemText, active && picker.menuItemTextActive]}>
+                  {opt}
+                </Text>
+                {active ? <Ionicons name="checkmark" size={18} color={colors.white} /> : null}
+              </TouchableOpacity>
+            );
+          })}
+        </ScrollView>
+      </View>
+    </TouchableOpacity>
+  </Modal>
+);
+
 export const AugustaComplianceScreen: React.FC = () => {
   const insets = useSafeAreaInsets();
-  const { activeBusinessId, activeBusiness } = useBusiness();
-  const { fullName } = useAuth();
-  const taxYear = new Date().getFullYear();
+  const { activeBusinessId } = useBusiness();
+
+  const currentYear = new Date().getFullYear();
+  const yearChoices = useMemo(
+    () => Array.from({ length: 6 }, (_, i) => currentYear - i),
+    [currentYear],
+  );
+
+  const [taxYear, setTaxYear] = useState<number>(currentYear);
   const [properties, setProperties] = useState<AugustaPropertyForYear[]>([]);
   const [comparables, setComparables] = useState<AugustaComparableRow[]>([]);
-  const [manualOpen, setManualOpen] = useState(false);
-  const businessName = activeBusiness?.business_name ?? null;
+
+  // Property selection: a dropdown when Augusta properties already exist for the
+  // year, otherwise a free-text label the user types.
+  const [selectedProperty, setSelectedProperty] = useState('');
+  const [manualProperty, setManualProperty] = useState('');
+
+  const [propPickerOpen, setPropPickerOpen] = useState(false);
+  const [yearPickerOpen, setYearPickerOpen] = useState(false);
 
   const refresh = useCallback(async () => {
     try {
@@ -126,6 +176,12 @@ export const AugustaComplianceScreen: React.FC = () => {
       ]);
       setProperties(props);
       setComparables(comps);
+      // Default the dropdown to the first known property if nothing valid is
+      // selected yet for this year.
+      setSelectedProperty((cur) => {
+        if (cur && props.some((p) => p.propertyName === cur)) return cur;
+        return props[0]?.propertyName ?? '';
+      });
     } catch (e) {
       Alert.alert('Could not load comparables', e instanceof Error ? e.message : String(e));
     }
@@ -137,10 +193,33 @@ export const AugustaComplianceScreen: React.FC = () => {
     }, [refresh]),
   );
 
-  const rowFor = (propertyName: string): AugustaComparableRow | undefined =>
-    comparables.find((c) => (c.property_name ?? '') === propertyName);
+  const hasProperties = properties.length > 0;
+  const propertyName = (hasProperties ? selectedProperty : manualProperty).trim();
 
-  const pickAndUpload = async (prop: AugustaPropertyForYear, slot: 1 | 2 | 3) => {
+  // The comparables row (if any) for the active property + year. Rate is pulled
+  // from the matching logged property when one exists.
+  const row = useMemo(
+    () => comparables.find((c) => (c.property_name ?? '').trim() === propertyName),
+    [comparables, propertyName],
+  );
+  const rateForProperty = useMemo(
+    () => properties.find((p) => p.propertyName === propertyName)?.rate ?? null,
+    [properties, propertyName],
+  );
+
+  const count = SLOTS.filter((s) => slotUrl(row, s)).length;
+  const complete = count === 3;
+
+  const pickAndUpload = async (slot: 1 | 2 | 3) => {
+    if (!propertyName) {
+      Alert.alert(
+        'Property required',
+        hasProperties
+          ? 'Select a property before uploading comparables.'
+          : 'Enter a property name or address before uploading comparables.',
+      );
+      return;
+    }
     try {
       const result = await DocumentPicker.getDocumentAsync({
         type: ['image/*', 'application/pdf'],
@@ -152,13 +231,13 @@ export const AugustaComplianceScreen: React.FC = () => {
       if (!file) return;
       await uploadComparable({
         businessId: activeBusinessId,
-        propertyName: prop.propertyName,
+        propertyName,
         taxYear,
         slot,
         localUri: file.uri,
         fileName: file.name,
         mimeType: file.mimeType ?? null,
-        rate: prop.rate,
+        rate: rateForProperty,
       });
       await refresh();
     } catch (e) {
@@ -171,88 +250,90 @@ export const AugustaComplianceScreen: React.FC = () => {
       style={styles.root}
       contentContainerStyle={[styles.content, { paddingBottom: 32 + insets.bottom }]}
       showsVerticalScrollIndicator={false}
+      keyboardShouldPersistTaps="handled"
     >
       <View style={styles.headerBlock}>
-        <Text style={styles.title}>Comparable Rentals</Text>
+        <Text style={styles.title}>Rental Rate Comparables</Text>
         <Text style={styles.subtitle}>
-          Upload comparable venue rates to justify your Augusta rental rates for {taxYear}
+          Upload screenshots or documents showing comparable venue rental rates
+          to justify your rental rate
         </Text>
       </View>
 
-      <View style={styles.actionCard}>
-        <TouchableOpacity
-          activeOpacity={0.85}
-          style={styles.actionBtn}
-          onPress={() => setManualOpen(true)}
-        >
-          <Ionicons name="clipboard-outline" size={18} color={colors.white} />
-          <Text style={styles.actionBtnText}>Create Manual Minutes</Text>
-        </TouchableOpacity>
-        <View style={styles.actionSpace}>
-          <ComplianceReportButton
-            onGenerate={() =>
-              generateAugustaReport({
-                businessId: activeBusinessId,
-                clientName: businessName ?? fullName ?? 'Client',
-                taxYear,
-              })
-            }
+      <View style={styles.card}>
+        {/* Property selector */}
+        <Text style={styles.fieldLabel}>Property</Text>
+        {hasProperties ? (
+          <TouchableOpacity
+            activeOpacity={0.8}
+            style={styles.selectField}
+            onPress={() => setPropPickerOpen(true)}
+          >
+            <Text style={styles.selectValue} numberOfLines={1}>
+              {selectedProperty || 'Select a property'}
+            </Text>
+            <Ionicons name="chevron-down" size={18} color={colors.midNavy} />
+          </TouchableOpacity>
+        ) : (
+          <TextInput
+            style={styles.input}
+            value={manualProperty}
+            onChangeText={setManualProperty}
+            placeholder="Property name or address"
+            placeholderTextColor={colors.subtleText}
           />
+        )}
+
+        {/* Tax year selector */}
+        <Text style={[styles.fieldLabel, { marginTop: spacing.md }]}>Tax year</Text>
+        <TouchableOpacity
+          activeOpacity={0.8}
+          style={styles.selectField}
+          onPress={() => setYearPickerOpen(true)}
+        >
+          <Text style={styles.selectValue}>{taxYear}</Text>
+          <Ionicons name="chevron-down" size={18} color={colors.midNavy} />
+        </TouchableOpacity>
+
+        {/* Upload slots */}
+        <View style={styles.slotRow}>
+          {SLOTS.map((slot) => (
+            <ComparableSlot
+              key={slot}
+              slot={slot}
+              storagePath={slotUrl(row, slot)}
+              onUpload={() => pickAndUpload(slot)}
+            />
+          ))}
         </View>
+
+        <Text style={[styles.progress, complete && styles.progressDone]}>
+          {count} of 3 comparables uploaded
+        </Text>
       </View>
 
-      {properties.length === 0 ? (
-        <View style={styles.emptyCard}>
-          <Ionicons name="business-outline" size={36} color="#CCCCCC" />
-          <Text style={styles.emptyTitle}>No Augusta rentals yet this year</Text>
-          <Text style={styles.emptyText}>
-            Log an Augusta Rule meeting and generate its lease & invoice. Each
-            rented property will then appear here for rate documentation.
-          </Text>
-        </View>
-      ) : (
-        properties.map((prop) => {
-          const row = rowFor(prop.propertyName);
-          const count = SLOTS.filter((s) => slotUrl(row, s)).length;
-          const complete = count === 3;
-          const rateLabel =
-            prop.rate != null ? `$${prop.rate}/day` : 'your rental rate';
-          return (
-            <View key={prop.propertyName} style={styles.card}>
-              <Text style={styles.cardTitle}>Rental Rate Comparables</Text>
-              <Text style={styles.cardProperty}>{prop.propertyName}</Text>
-              <Text style={styles.cardSub}>
-                Upload 3 screenshots showing comparable venue rental rates to
-                justify your rental rate of {rateLabel}
-              </Text>
+      <OptionPickerModal
+        visible={propPickerOpen}
+        title="Select property"
+        options={properties.map((p) => p.propertyName)}
+        selected={selectedProperty}
+        onSelect={(v) => {
+          setSelectedProperty(v);
+          setPropPickerOpen(false);
+        }}
+        onClose={() => setPropPickerOpen(false)}
+      />
 
-              <View style={styles.slotRow}>
-                {SLOTS.map((slot) => (
-                  <ComparableSlot
-                    key={slot}
-                    slot={slot}
-                    storagePath={slotUrl(row, slot)}
-                    onUpload={() => pickAndUpload(prop, slot)}
-                  />
-                ))}
-              </View>
-
-              <Text style={[styles.progress, complete && styles.progressDone]}>
-                {count} of 3 comparables uploaded
-              </Text>
-            </View>
-          );
-        })
-      )}
-
-      <ManualMinutesModal
-        visible={manualOpen}
-        strategy="augusta_rule"
-        businessId={activeBusinessId}
-        businessName={businessName}
-        clientName={fullName ?? null}
-        onClose={() => setManualOpen(false)}
-        onSaved={refresh}
+      <OptionPickerModal
+        visible={yearPickerOpen}
+        title="Tax year"
+        options={yearChoices.map(String)}
+        selected={String(taxYear)}
+        onSelect={(v) => {
+          setTaxYear(Number(v));
+          setYearPickerOpen(false);
+        }}
+        onClose={() => setYearPickerOpen(false)}
       />
     </ScrollView>
   );
@@ -274,30 +355,6 @@ const styles = StyleSheet.create({
     fontSize: 13,
     lineHeight: 18,
   },
-  emptyCard: {
-    backgroundColor: colors.white,
-    borderRadius: radius.card,
-    borderWidth: 0.5,
-    borderColor: colors.cardBorder,
-    padding: spacing.xl,
-    alignItems: 'center',
-    gap: spacing.sm,
-    ...shadow.card,
-  },
-  emptyTitle: {
-    ...typography.h3,
-    color: colors.bodyText,
-    fontSize: 15,
-    fontWeight: '700',
-    textAlign: 'center',
-  },
-  emptyText: {
-    ...typography.body,
-    color: colors.mutedText,
-    fontSize: 13,
-    lineHeight: 19,
-    textAlign: 'center',
-  },
   card: {
     backgroundColor: colors.white,
     borderRadius: radius.card,
@@ -306,56 +363,49 @@ const styles = StyleSheet.create({
     padding: spacing.lg,
     ...shadow.card,
   },
-  actionCard: {
-    backgroundColor: colors.white,
-    borderRadius: radius.card,
-    borderWidth: 0.5,
-    borderColor: colors.cardBorder,
-    padding: spacing.lg,
-    ...shadow.card,
+  fieldLabel: {
+    ...typography.caption,
+    color: colors.mutedText,
+    fontSize: 11,
+    fontWeight: '700',
+    textTransform: 'uppercase',
+    letterSpacing: 0.5,
+    marginBottom: 6,
   },
-  actionBtn: {
+  input: {
+    ...typography.body,
+    fontSize: 14,
+    color: colors.bodyText,
+    backgroundColor: colors.background,
+    borderRadius: 10,
+    borderWidth: 1,
+    borderColor: colors.divider,
+    paddingHorizontal: 12,
+    paddingVertical: 12,
+  },
+  selectField: {
     flexDirection: 'row',
     alignItems: 'center',
-    justifyContent: 'center',
-    gap: spacing.sm,
-    backgroundColor: colors.navy,
+    justifyContent: 'space-between',
+    backgroundColor: colors.background,
+    borderWidth: 1,
+    borderColor: colors.divider,
     borderRadius: 10,
+    paddingHorizontal: 12,
     paddingVertical: 13,
   },
-  actionBtnText: {
-    ...typography.bodyMedium,
-    color: colors.white,
-    fontWeight: '700',
-    fontSize: 14,
-  },
-  actionSpace: {
-    marginTop: spacing.sm,
-  },
-  cardTitle: {
-    ...typography.h3,
-    color: colors.navy,
-    fontSize: 15,
-    fontWeight: '700',
-  },
-  cardProperty: {
-    ...typography.bodyMedium,
-    color: colors.bodyText,
-    fontSize: 13,
-    fontWeight: '700',
-    marginTop: 2,
-  },
-  cardSub: {
+  selectValue: {
     ...typography.body,
-    color: colors.mutedText,
-    fontSize: 12,
-    lineHeight: 17,
-    marginTop: spacing.xs,
-    marginBottom: spacing.md,
+    color: colors.bodyText,
+    fontSize: 14,
+    fontWeight: '600',
+    flex: 1,
+    marginRight: spacing.sm,
   },
   slotRow: {
     flexDirection: 'row',
     gap: spacing.sm,
+    marginTop: spacing.lg,
   },
   slotEmpty: {
     flex: 1,
@@ -427,5 +477,55 @@ const styles = StyleSheet.create({
   },
   progressDone: {
     color: colors.teal,
+  },
+});
+
+const picker = StyleSheet.create({
+  backdrop: {
+    flex: 1,
+    backgroundColor: 'rgba(0,0,0,0.4)',
+    justifyContent: 'center',
+    paddingHorizontal: spacing.xl,
+  },
+  menu: {
+    backgroundColor: colors.white,
+    borderRadius: radius.card,
+    paddingVertical: spacing.sm,
+    paddingHorizontal: spacing.sm,
+    maxHeight: '70%',
+    ...shadow.raised,
+  },
+  menuScroll: { flexGrow: 0 },
+  menuTitle: {
+    ...typography.caption,
+    color: colors.mutedText,
+    fontSize: 11,
+    fontWeight: '700',
+    textTransform: 'uppercase',
+    letterSpacing: 0.5,
+    paddingHorizontal: spacing.sm,
+    paddingVertical: spacing.sm,
+  },
+  menuItem: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    justifyContent: 'space-between',
+    paddingVertical: spacing.md,
+    paddingHorizontal: spacing.md,
+    borderRadius: 8,
+  },
+  menuItemActive: {
+    backgroundColor: colors.midNavy,
+  },
+  menuItemText: {
+    ...typography.bodyMedium,
+    color: colors.bodyText,
+    fontSize: 15,
+    fontWeight: '600',
+    flex: 1,
+    marginRight: spacing.sm,
+  },
+  menuItemTextActive: {
+    color: colors.white,
   },
 });

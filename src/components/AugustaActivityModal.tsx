@@ -77,6 +77,12 @@ export const AugustaActivityModal: React.FC<AugustaActivityModalProps> = ({
   // captured rental context is held here and passed to the docs modal.
   const [docsContext, setDocsContext] = useState<AugustaDocsContext | null>(null);
   const [docsModalOpen, setDocsModalOpen] = useState(false);
+  // iOS can only present one modal at a time. When the user taps "Generate
+  // Both" we must first dismiss this form modal, then open the docs modal once
+  // the dismissal animation completes — otherwise the docs modal silently never
+  // appears (the reported "Generate Both does nothing" bug). pendingDocs marks
+  // that a docs-modal open is queued behind this dismissal.
+  const [pendingDocs, setPendingDocs] = useState(false);
   // Basic subscribers see the mic button in place but amber; tapping it opens
   // the voice-upgrade sheet rather than recording.
   const [showVoiceUpgrade, setShowVoiceUpgrade] = useState(false);
@@ -109,6 +115,16 @@ export const AugustaActivityModal: React.FC<AugustaActivityModalProps> = ({
       setVoicePhase('idle');
     }
   }, [visible]);
+
+  // Android Modals don't fire onDismiss, so open the queued docs modal as soon
+  // as this form modal is hidden. On iOS the onDismiss handler below does this
+  // after the slide-out animation so the two modals never overlap.
+  useEffect(() => {
+    if (Platform.OS === 'android' && !visible && pendingDocs) {
+      setPendingDocs(false);
+      setDocsModalOpen(true);
+    }
+  }, [visible, pendingDocs]);
 
   const parseNum = (s: string): number | null => {
     const n = parseFloat(s);
@@ -214,7 +230,16 @@ export const AugustaActivityModal: React.FC<AugustaActivityModalProps> = ({
         'Your meeting minutes are saved. Would you also like to generate the required lease agreement and invoice for this rental?',
         [
           { text: 'Skip', style: 'cancel', onPress: onClose },
-          { text: 'Generate Both', onPress: () => setDocsModalOpen(true) },
+          {
+            text: 'Generate Both',
+            onPress: () => {
+              // Dismiss this modal first; the docs modal opens once the form
+              // modal has finished animating out (see onDismiss / the visible
+              // effect below for the Android path).
+              setPendingDocs(true);
+              onClose();
+            },
+          },
         ],
       );
     } catch (e) {
@@ -233,7 +258,20 @@ export const AugustaActivityModal: React.FC<AugustaActivityModalProps> = ({
 
   return (
     <>
-    <Modal visible={visible} animationType="slide" transparent onRequestClose={onClose}>
+    <Modal
+      visible={visible}
+      animationType="slide"
+      transparent
+      onRequestClose={onClose}
+      onDismiss={() => {
+        // iOS: the form modal has finished dismissing — now it's safe to
+        // present the docs modal without the two overlapping.
+        if (pendingDocs) {
+          setPendingDocs(false);
+          setDocsModalOpen(true);
+        }
+      }}
+    >
       <View style={styles.backdrop}>
         <View style={styles.sheet}>
           <View style={styles.headerRow}>

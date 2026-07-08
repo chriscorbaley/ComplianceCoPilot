@@ -65,11 +65,23 @@ interface AugustaRentalRow {
   rental_date: string | null;
   duration_hours: number | null;
   rental_rate: number | null;
-  total_amount: number | null;
   lease_url: string | null;
   invoice_url: string | null;
   invoice_paid: boolean | null;
 }
+
+// augusta_rentals has no total_amount column — derive it from the daily rate ×
+// the number of rental days (a business meeting is one day; longer events round
+// up per 24h), matching services/augustaDocuments.
+const augustaRentalDays = (h: number | null): number =>
+  h == null || !Number.isFinite(Number(h)) || Number(h) <= 0
+    ? 1
+    : Math.max(1, Math.ceil(Number(h) / 24));
+
+const augustaRentalTotal = (r: AugustaRentalRow): number | null =>
+  r.rental_rate != null && Number.isFinite(Number(r.rental_rate))
+    ? Number(r.rental_rate) * augustaRentalDays(r.duration_hours)
+    : null;
 
 export async function generateAugustaReport(params: ReportParams): Promise<void> {
   const year = params.taxYear ?? new Date().getFullYear();
@@ -78,7 +90,7 @@ export async function generateAugustaReport(params: ReportParams): Promise<void>
 
   let rentalsQ = supabase
     .from('augusta_rentals')
-    .select('property_name, rental_date, duration_hours, rental_rate, total_amount, lease_url, invoice_url, invoice_paid')
+    .select('property_name, rental_date, duration_hours, rental_rate, lease_url, invoice_url, invoice_paid')
     .gte('rental_date', start)
     .lte('rental_date', end)
     .order('rental_date', { ascending: true });
@@ -121,19 +133,20 @@ export async function generateAugustaReport(params: ReportParams): Promise<void>
   const comparablesUploaded = comparables.some(
     (c) => c.comparable_1_url || c.comparable_2_url || c.comparable_3_url,
   );
-  const totalIncome = rentals.reduce((s, r) => s + (Number(r.total_amount) || 0), 0);
+  const totalIncome = rentals.reduce((s, r) => s + (augustaRentalTotal(r) ?? 0), 0);
 
   const eventRows = rentals.length
     ? rentals
-        .map(
-          (r) => `<tr>
+        .map((r) => {
+          const rowTotal = augustaRentalTotal(r);
+          return `<tr>
         <td>${fmtDate(r.rental_date)}</td>
         <td>${escapeHtml(r.property_name ?? '—')}</td>
         <td>${r.duration_hours != null ? `${r.duration_hours} hrs` : '—'}</td>
         <td class="amount">${r.rental_rate != null ? money(Number(r.rental_rate)) : '—'}</td>
-        <td class="amount">${r.total_amount != null ? money(Number(r.total_amount)) : '—'}</td>
-      </tr>`,
-        )
+        <td class="amount">${rowTotal != null ? money(rowTotal) : '—'}</td>
+      </tr>`;
+        })
         .join('\n')
     : `<tr><td colspan="5">No Augusta Rule events logged this year.</td></tr>`;
 
@@ -262,26 +275,177 @@ export async function generateHomeOfficeReport(params: ReportParams): Promise<vo
   const rows = await listStrategyDocuments('home_office', params.businessId);
 
   const sqftRow = rows.find((r) => r.document_key === 'square_footage');
-  const utilitiesRow = rows.find((r) => r.document_key === 'utilities' && r.file_url);
   const closingRow = rows.find((r) => r.document_key === 'closing_disclosure' && r.file_url);
   const leaseRow = rows.find((r) => r.document_key === 'lease_agreement' && r.file_url);
   const renovationRows = rows.filter((r) => r.document_key === 'renovation_receipt');
+  const utilityDataRow = rows.find((r) => r.document_key === 'utility_expenses');
 
+  // Diagnostics: confirm the report reads the SAME metadata keys the Home Office
+  // calculator writes. Square footage lives on the 'square_footage' row
+  // (total_sqft / office_sqft); the utility totals live on the 'utility_expenses'
+  // row (categories / office_percentage). A key-name mismatch here is what
+  // produced the $0.00 deduction bug.
+  const sqftMetadata = sqftRow?.metadata ?? null;
+  const utilityMetadata = utilityDataRow?.metadata ?? null;
+  console.log('[HomeOffice Report] metadata:', JSON.stringify(sqftMetadata));
+  console.log('[HomeOffice Report] keys:', Object.keys(sqftMetadata || {}));
+  console.log('[HomeOffice Report] utility metadata:', JSON.stringify(utilityMetadata));
+  console.log('[HomeOffice Report] utility keys:', Object.keys(utilityMetadata || {}));
+
+  // Office percentage as a DECIMAL (e.g. 0.125 for 12.5%). Per Fix 3 the ONLY
+  // source is the square-footage calculator (office_sqft / total_sqft) stored on
+  // the 'square_footage' metadata row. It is deliberately independent of whether
+  // ANY document has been uploaded — the calculator persists these two values on
+  // blur even with no supporting file, so the deduction percentage calculates
+  // and displays as soon as both dimensions are present.
   const totalSqft = numMeta(sqftRow, 'total_sqft');
   const officeSqft = numMeta(sqftRow, 'office_sqft');
-  const pct =
-    totalSqft && officeSqft && totalSqft > 0
-      ? (officeSqft / totalSqft) * 100
+  const officePercentage: number | null =
+    totalSqft != null && officeSqft != null && totalSqft > 0 && officeSqft > 0
+      ? officeSqft / totalSqft
       : null;
-  const pctLabel = pct != null ? `${pct.toFixed(1)}%` : '—';
+  const hasPercentage = officePercentage != null && officePercentage > 0;
+  const pctLabel = hasPercentage ? `${(officePercentage! * 100).toFixed(1)}%` : '—';
+
+  // Exact copy for the two "can't fully calculate" states (Fix 3 items 5 & 6).
+  const SQFT_MISSING_MSG =
+    'Deduction percentage: Not calculated — please enter your square footage in ' +
+    'the Home Office screen to calculate your deduction estimate.';
+  const UTILITY_MISSING_MSG =
+    'Utility deduction estimate: No utility expenses entered yet. Add your ' +
+    'expenses in the Home Office screen to calculate your estimated deduction.';
 
   const renovationTotal = renovationRows.reduce((s, r) => {
     const amt = r.metadata?.amount;
     return s + (typeof amt === 'number' ? amt : 0);
   }, 0);
-  const deductibleRenovation = pct != null ? renovationTotal * (pct / 100) : 0;
+  const deductibleRenovation = hasPercentage ? renovationTotal * officePercentage! : 0;
 
   const residenceUploaded = Boolean(closingRow || leaseRow);
+
+  // ── Utility expense analysis by category (Fix 4) ───────────────────────────
+  // Each category stores its own method + monthly/annual values. Annual-method
+  // categories show their total in the Annual Total column with the month
+  // columns left blank and an "(annual)" tag — this avoids fabricating monthly
+  // figures the user never entered.
+  const utilityCategories = (utilityDataRow?.metadata?.categories ?? {}) as Record<
+    string,
+    {
+      method?: string;
+      monthly_entries?: Record<string, unknown>;
+      annual_total?: unknown;
+    }
+  >;
+  const UTIL_MONTH_KEYS = [
+    'january', 'february', 'march', 'april', 'may', 'june',
+    'july', 'august', 'september', 'october', 'november', 'december',
+  ];
+  const CATEGORY_LABELS: Record<string, string> = {
+    mortgage_interest: 'Mortgage Interest',
+    property_taxes: 'Property Taxes',
+    rent: 'Rent',
+    hoa_condo_fees: 'HOA / Condo Fees',
+    homeowners_renters_insurance: "Homeowner's / Renter's Insurance",
+    electricity: 'Electricity',
+    gas: 'Gas',
+    water_sewage: 'Water & Sewage',
+    trash: 'Trash',
+    internet: 'Internet',
+    heating_cooling: 'Heating and Cooling',
+    general_repairs: 'General Repairs',
+    cleaning: 'Cleaning',
+    pest_control: 'Pest Control',
+    landscaping: 'Landscaping',
+    other: 'Other',
+  };
+
+  // Normalize each entered category into { label, isAnnual, months[12], annual }.
+  const utilRowsData = Object.entries(utilityCategories)
+    .map(([key, raw]) => {
+      const isAnnual = raw?.method === 'annual';
+      const months = UTIL_MONTH_KEYS.map((mk) => {
+        const v = raw?.monthly_entries?.[mk];
+        return typeof v === 'number' ? v : 0;
+      });
+      const monthlySum = months.reduce((s, n) => s + n, 0);
+      const annualEntry = typeof raw?.annual_total === 'number' ? raw.annual_total : 0;
+      const annual = isAnnual ? annualEntry : monthlySum;
+      return {
+        label: CATEGORY_LABELS[key] ?? key,
+        isAnnual,
+        months,
+        annual,
+      };
+    })
+    .filter((c) => c.annual > 0)
+    .sort((a, b) => a.label.localeCompare(b.label));
+
+  const hasUtilityData = utilRowsData.length > 0;
+
+  const utilGrandTotal = utilRowsData.reduce((s, c) => s + c.annual, 0);
+  const monthColumnTotals = UTIL_MONTH_KEYS.map((_, i) =>
+    utilRowsData.reduce((s, c) => s + (c.isAnnual ? 0 : c.months[i]), 0),
+  );
+  const utilDeduction = hasPercentage ? utilGrandTotal * officePercentage! : 0;
+
+  console.log(
+    '[HomeOffice Report] officesqft:', officeSqft,
+    'totalSqft:', totalSqft,
+    'percentage:', officePercentage,
+    'utilities:', utilGrandTotal,
+    'deductible:', utilDeduction,
+  );
+
+  // 14-column table: Category + 12 months + Annual Total. Compact font so it
+  // fits the page width.
+  const monthHeaders = MONTHS.map((m) => `<th class="amount">${m}</th>`).join('');
+  const cell = (n: number, blank: boolean): string =>
+    blank ? '<td class="amount"></td>' : `<td class="amount">${money(n)}</td>`;
+
+  const utilCategoryRows = utilRowsData
+    .map((c) => {
+      const monthCells = c.months.map((n) => cell(n, c.isAnnual)).join('');
+      const name = c.isAnnual ? `${escapeHtml(c.label)} <em>(annual)</em>` : escapeHtml(c.label);
+      return `<tr><td>${name}</td>${monthCells}<td class="amount">${money(c.annual)}</td></tr>`;
+    })
+    .join('\n');
+
+  const grandRowCells = monthColumnTotals.map((n) => `<td class="amount">${money(n)}</td>`).join('');
+
+  // The utility table renders only when categories have data. The deduction
+  // percentage + estimate live in their own always-visible section below, so the
+  // percentage is NEVER gated on utility (or any document) completion.
+  const utilitySection = hasUtilityData
+    ? [
+        sectionHeader('Utility Expense Report'),
+        `<table style="font-size:9px">
+          <thead><tr><th>Category</th>${monthHeaders}<th class="amount">Annual Total</th></tr></thead>
+          <tbody>
+            ${utilCategoryRows}
+            <tr class="total-row"><td>GRAND TOTAL</td>${grandRowCells}<td class="amount">${money(utilGrandTotal)}</td></tr>
+          </tbody>
+        </table>`,
+      ].join('\n')
+    : '';
+
+  // Fix 3: deduction percentage depends SOLELY on the square-footage calculator
+  // and always displays. Three states:
+  //   • no square footage      → "Not calculated" prompt (item 5)
+  //   • sqft but no utilities   → percentage + "add expenses" prompt (item 6)
+  //   • sqft + utilities        → percentage + deductible utility amount
+  const deductionSection = [
+    sectionHeader('Home Office Deduction'),
+    !hasPercentage
+      ? `<p class="clause" style="background:#FBEED9;color:#8A5A00;font-weight:700;padding:12px;border-radius:8px">${SQFT_MISSING_MSG}</p>`
+      : [
+          `<p class="clause"><strong>Deduction percentage:</strong> ${pctLabel}</p>`,
+          hasUtilityData
+            ? `<p class="clause" style="background:#E1F5EE;color:#0F6E56;font-weight:700;padding:12px;border-radius:8px">Total deductible utility amount: ${money(
+                utilDeduction,
+              )} &nbsp;(${money(utilGrandTotal)} in home expenses × ${pctLabel})</p>`
+            : `<p class="clause" style="background:#FBEED9;color:#8A5A00;font-weight:700;padding:12px;border-radius:8px">${UTILITY_MISSING_MSG}</p>`,
+        ].join('\n'),
+  ].join('\n');
 
   const bodyHtml = [
     sectionHeader('Square Footage Summary'),
@@ -290,15 +454,17 @@ export async function generateHomeOfficeReport(params: ReportParams): Promise<vo
       <tr><td>Office sq ft</td><td class="amount">${officeSqft ?? '—'}</td></tr>
       <tr><td>Deduction percentage</td><td class="amount">${pctLabel}</td></tr>
     </tbody></table>`,
+    deductionSection,
     sectionHeader('Document Checklist'),
     `<table><thead><tr><th>Document</th><th>Status</th></tr></thead><tbody>
       <tr><td>Square footage documentation</td><td>${sqftRow?.file_url ? ok('Uploaded') : missing('Not uploaded')}</td></tr>
-      <tr><td>Utilities records</td><td>${utilitiesRow ? ok('Uploaded') : missing('Not uploaded')}</td></tr>
+      <tr><td>Utility expenses tracked</td><td>${hasUtilityData ? ok(`${utilRowsData.length} categor${utilRowsData.length === 1 ? 'y' : 'ies'}`) : missing('Not entered')}</td></tr>
       <tr><td>Residence documentation</td><td>${residenceUploaded ? ok('Uploaded') : missing('Not uploaded')}</td></tr>
       <tr><td>Renovation receipts</td><td>${renovationRows.length} receipt(s), ${money(renovationTotal)} total</td></tr>
       <tr><td>Deductible renovation amount</td><td class="amount">${money(deductibleRenovation)}</td></tr>
     </tbody></table>`,
-    sectionHeader('Estimated Annual Deduction'),
+    utilitySection,
+    sectionHeader('Estimated Annual Deduction for Home Renovations'),
     `<p class="clause">Based on the ${pctLabel} office percentage applied to documented renovation expenses, the estimated deductible renovation amount is <strong>${money(
       deductibleRenovation,
     )}</strong>. Apply the same ${pctLabel} to documented utilities and other eligible home expenses for your full deduction.</p>`,

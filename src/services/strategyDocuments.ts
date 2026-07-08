@@ -122,6 +122,59 @@ export async function updateStrategyDocumentMetadata(
   if (error) throw error;
 }
 
+// Find-or-create a metadata-only row (file_url = null) for a (strategy_key,
+// document_key) slot and store `metadata` on it. Used by data-entry sections
+// like Home Office utility expenses that persist structured values without an
+// uploaded file. Because file_url stays null, these rows never count toward a
+// strategy's "documents complete" progress.
+export async function upsertStrategyMetadataRow(input: {
+  strategyKey: string;
+  documentKey: string;
+  businessId?: string | null;
+  metadata: Record<string, unknown>;
+}): Promise<StrategyDocumentRow> {
+  const userId = await requireUserId();
+  const businessId = input.businessId ?? null;
+
+  let findQ = supabase
+    .from('strategy_documents')
+    .select('id')
+    .eq('user_id', userId)
+    .eq('strategy_key', input.strategyKey)
+    .eq('document_key', input.documentKey);
+  findQ = businessId ? findQ.eq('business_id', businessId) : findQ.is('business_id', null);
+  const { data: existing } = await findQ.maybeSingle();
+
+  if (existing?.id) {
+    const { data, error } = await supabase
+      .from('strategy_documents')
+      .update({ metadata: input.metadata })
+      .eq('id', existing.id)
+      .select('*')
+      .single();
+    if (error || !data) throw error ?? new Error('Could not save metadata');
+    return data as StrategyDocumentRow;
+  }
+
+  const { data, error } = await supabase
+    .from('strategy_documents')
+    .insert({
+      user_id: userId,
+      business_id: businessId,
+      strategy_key: input.strategyKey,
+      document_key: input.documentKey,
+      document_name: null,
+      file_url: null,
+      file_type: null,
+      metadata: input.metadata,
+      uploaded_at: new Date().toISOString(),
+    })
+    .select('*')
+    .single();
+  if (error || !data) throw error ?? new Error('Could not save metadata');
+  return data as StrategyDocumentRow;
+}
+
 export async function listStrategyDocuments(
   strategyKey: string,
   businessId?: string | null,

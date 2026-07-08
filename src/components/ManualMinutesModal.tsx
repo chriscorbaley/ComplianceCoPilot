@@ -1,4 +1,4 @@
-import React, { useState } from 'react';
+import React, { useEffect, useState } from 'react';
 import {
   ActivityIndicator,
   Alert,
@@ -23,6 +23,7 @@ import {
   type ManualMinutesStrategy,
   type ManualMinutesInput,
 } from '../services/manualMinutes';
+import { AugustaDocsModal, type AugustaDocsContext } from './AugustaDocsModal';
 
 interface ManualMinutesModalProps {
   visible: boolean;
@@ -57,18 +58,49 @@ export const ManualMinutesModal: React.FC<ManualMinutesModalProps> = ({
   const insets = useSafeAreaInsets();
   const meta = MANUAL_MINUTES_META[strategy];
 
+  // The Augusta Rule variant collects the extra rental fields and, after saving,
+  // offers to generate the required lease agreement + invoice (same flow as the
+  // Log Activity form). The other strategies keep the plain minutes-only path.
+  const isAugusta = strategy === 'augusta_rule';
+
   const [date, setDate] = useState<Date | null>(null);
   const [location, setLocation] = useState('');
   const [attendees, setAttendees] = useState('');
+  const [duration, setDuration] = useState('');
+  const [rentalRate, setRentalRate] = useState('');
   const [topics, setTopics] = useState('');
   const [decisions, setDecisions] = useState('');
   const [actionItems, setActionItems] = useState('');
   const [busy, setBusy] = useState(false);
 
+  // Post-save lease + invoice generation (Augusta only). iOS can only present a
+  // single modal at a time, so on "Generate Both" we dismiss this modal first,
+  // then open the docs modal once this one has finished animating out.
+  const [docsContext, setDocsContext] = useState<AugustaDocsContext | null>(null);
+  const [docsModalOpen, setDocsModalOpen] = useState(false);
+  const [pendingDocs, setPendingDocs] = useState(false);
+
+  // Android Modals don't fire onDismiss, so open the queued docs modal as soon
+  // as this modal is hidden. On iOS the onDismiss handler below does this after
+  // the slide-out animation so the two modals never overlap.
+  useEffect(() => {
+    if (Platform.OS === 'android' && !visible && pendingDocs) {
+      setPendingDocs(false);
+      setDocsModalOpen(true);
+    }
+  }, [visible, pendingDocs]);
+
+  const parseNum = (s: string): number | null => {
+    const n = parseFloat(s.replace(/[^0-9.]/g, ''));
+    return Number.isFinite(n) ? n : null;
+  };
+
   const reset = () => {
     setDate(null);
     setLocation('');
     setAttendees('');
+    setDuration('');
+    setRentalRate('');
     setTopics('');
     setDecisions('');
     setActionItems('');
@@ -103,6 +135,42 @@ export const ManualMinutesModal: React.FC<ManualMinutesModalProps> = ({
       const input = buildInput(date);
       await saveManualMinutes(input);
       onSaved();
+
+      if (isAugusta) {
+        // Stage the rental context from the form so the lease + invoice pre-fill
+        // correctly, then offer to generate both (mirrors the Log Activity path).
+        const ctx: AugustaDocsContext = {
+          businessId,
+          businessEntityName: businessName ?? '',
+          location: location.trim(),
+          rentalDate: isoFor(date),
+          durationHours: parseNum(duration),
+          rentalRate: parseNum(rentalRate),
+          meetingPurpose: [topics, decisions]
+            .map((s) => s.trim())
+            .filter(Boolean)
+            .join('\n\n'),
+        };
+        setDocsContext(ctx);
+        Alert.alert(
+          'Generate Rental Documents',
+          'Your meeting minutes are saved. Would you also like to generate the required lease agreement and invoice for this rental?',
+          [
+            { text: 'Skip', style: 'cancel', onPress: close },
+            {
+              text: 'Generate Both',
+              onPress: () => {
+                // Dismiss this modal first; the docs modal opens once it has
+                // finished animating out (see onDismiss / the visible effect).
+                setPendingDocs(true);
+                close();
+              },
+            },
+          ],
+        );
+        return;
+      }
+
       Alert.alert('Minutes saved', 'Your meeting minutes have been added to your documents.', [
         {
           text: 'Export PDF',
@@ -125,7 +193,21 @@ export const ManualMinutesModal: React.FC<ManualMinutesModalProps> = ({
   };
 
   return (
-    <Modal visible={visible} animationType="slide" onRequestClose={close} presentationStyle="pageSheet">
+    <>
+    <Modal
+      visible={visible}
+      animationType="slide"
+      onRequestClose={close}
+      presentationStyle="pageSheet"
+      onDismiss={() => {
+        // iOS: this modal has finished dismissing — now it's safe to present the
+        // docs modal without the two overlapping.
+        if (pendingDocs) {
+          setPendingDocs(false);
+          setDocsModalOpen(true);
+        }
+      }}
+    >
       <View style={styles.root}>
         <View style={[styles.header, { paddingTop: insets.top + 8 }]}>
           <TouchableOpacity onPress={close} hitSlop={8}>
@@ -170,6 +252,34 @@ export const ManualMinutesModal: React.FC<ManualMinutesModalProps> = ({
               placeholder="Comma separated, e.g. Jane Doe, John Doe"
               placeholderTextColor={colors.subtleText}
             />
+
+            {/* Augusta Rule only: rental fields needed to pre-fill the lease + invoice. */}
+            {isAugusta ? (
+              <>
+                <Text style={styles.label}>Meeting duration (hours)</Text>
+                <TextInput
+                  style={styles.input}
+                  value={duration}
+                  onChangeText={setDuration}
+                  placeholder="e.g. 2.5"
+                  keyboardType="decimal-pad"
+                  placeholderTextColor={colors.subtleText}
+                />
+
+                <Text style={styles.label}>Rental rate agreed ($)</Text>
+                <View style={styles.rateRow}>
+                  <Text style={styles.ratePrefix}>$</Text>
+                  <TextInput
+                    style={styles.rateInput}
+                    value={rentalRate}
+                    onChangeText={setRentalRate}
+                    placeholder="e.g. 850"
+                    keyboardType="decimal-pad"
+                    placeholderTextColor={colors.subtleText}
+                  />
+                </View>
+              </>
+            ) : null}
 
             <Text style={styles.label}>Topics discussed</Text>
             <TextInput
@@ -217,6 +327,15 @@ export const ManualMinutesModal: React.FC<ManualMinutesModalProps> = ({
         </KeyboardAvoidingView>
       </View>
     </Modal>
+
+    <AugustaDocsModal
+      visible={docsModalOpen}
+      context={docsContext}
+      defaultOwnerName={clientName ?? ''}
+      onClose={() => setDocsModalOpen(false)}
+      onGenerated={onSaved}
+    />
+    </>
   );
 };
 
@@ -271,6 +390,28 @@ const styles = StyleSheet.create({
   multiline: {
     height: 96,
     textAlignVertical: 'top',
+  },
+  rateRow: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    backgroundColor: colors.white,
+    borderRadius: 10,
+    borderWidth: 0.5,
+    borderColor: colors.cardBorder,
+    paddingHorizontal: spacing.md,
+  },
+  ratePrefix: {
+    ...typography.bodyMedium,
+    color: colors.mutedText,
+    fontSize: 15,
+    fontWeight: '700',
+    marginRight: 6,
+  },
+  rateInput: {
+    flex: 1,
+    paddingVertical: 12,
+    fontSize: 14,
+    color: colors.bodyText,
   },
   generateBtn: {
     marginTop: spacing.xl,

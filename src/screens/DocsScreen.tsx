@@ -1,10 +1,12 @@
 import React, { useCallback, useEffect, useMemo, useState } from 'react';
 import {
+  ActivityIndicator,
   Alert,
   Linking,
   ScrollView,
   StatusBar,
   StyleSheet,
+  Switch,
   Text,
   TextInput,
   TouchableOpacity,
@@ -21,6 +23,8 @@ import { colors, radius, shadow, spacing, typography } from '../theme';
 import type { RootStackParamList } from '../navigation/types';
 import { DocumentViewer } from '../components/DocumentViewer';
 import { HtmlDocViewer } from '../components/HtmlDocViewer';
+import { DatePickerModal } from '../components/DateInputField';
+import { setInvoicePaid } from '../services/augustaDocuments';
 import {
   supabase,
   requireUserId,
@@ -118,6 +122,14 @@ const formatDocDate = (iso: string): string => {
   const d = new Date(iso);
   if (Number.isNaN(d.getTime())) return '';
   return `${MONTH_SHORT[d.getMonth()]} ${String(d.getDate()).padStart(2, '0')}, ${d.getFullYear()}`;
+};
+
+// Local-date 'YYYY-MM-DD' for the invoice_paid_at value the date picker returns.
+const toIsoDate = (d: Date): string => {
+  const y = d.getFullYear();
+  const mo = String(d.getMonth() + 1).padStart(2, '0');
+  const day = String(d.getDate()).padStart(2, '0');
+  return `${y}-${mo}-${day}`;
 };
 
 const formatDocMeta = (row: DocumentRow): string => {
@@ -364,6 +376,11 @@ export const DocsScreen: React.FC = () => {
   // viewer, and the invoice→paid status map keyed by documents.id.
   const [htmlDoc, setHtmlDoc] = useState<DocEntry | null>(null);
   const [invoicePaidMap, setInvoicePaidMap] = useState<Record<string, boolean>>({});
+  // Inline "Mark Invoice as Paid" toggle state: the invoice whose paid status is
+  // currently being written (spinner), and the invoice awaiting a payment date
+  // from the date picker after the user flips its toggle on.
+  const [paidBusyId, setPaidBusyId] = useState<string | null>(null);
+  const [pendingPaidDoc, setPendingPaidDoc] = useState<DocEntry | null>(null);
 
   const loadDocs = useCallback(async () => {
     try {
@@ -521,6 +538,35 @@ export const DocsScreen: React.FC = () => {
     // Everything else opens in the in-app viewer: minutes/activity_log are
     // editable; uploaded files and other generated docs are read-only.
     setViewerDoc(doc);
+  };
+
+  // Write the paid status for an invoice row: regenerate the invoice PDF (with
+  // or without the PAID watermark) and update augusta_rentals, then reflect it
+  // locally and refresh. Mirrors the flow in HtmlDocViewer.
+  const applyRowPaid = async (
+    doc: DocEntry,
+    nextPaid: boolean,
+    paidDate: string | null,
+  ) => {
+    setPaidBusyId(doc.id);
+    try {
+      await setInvoicePaid(doc.id, nextPaid, paidDate);
+      setInvoicePaidMap((prev) => ({ ...prev, [doc.id]: nextPaid }));
+      if (nextPaid) Alert.alert('Invoice marked as paid — document updated');
+      await loadDocs();
+    } catch (e) {
+      Alert.alert('Could not update invoice', e instanceof Error ? e.message : String(e));
+    } finally {
+      setPaidBusyId(null);
+    }
+  };
+
+  // Toggle handler for the inline row switch. Turning ON opens the payment-date
+  // picker; turning OFF clears the paid status immediately.
+  const onRowTogglePaid = (doc: DocEntry, next: boolean) => {
+    if (paidBusyId) return;
+    if (next) setPendingPaidDoc(doc);
+    else applyRowPaid(doc, false, null);
   };
 
   // Persist edits made in the viewer. Updates the documents row and, for
@@ -791,11 +837,35 @@ export const DocsScreen: React.FC = () => {
                     {doc.meta}
                   </Text>
                 </View>
-                <View style={[styles.badge, { backgroundColor: badge.bg }]}>
-                  <Text style={[styles.badgeText, { color: badge.fg }]}>
-                    {badgeLabel}
-                  </Text>
-                </View>
+                {isInvoice ? (
+                  <View style={styles.invoiceRight}>
+                    <View style={[styles.badge, { backgroundColor: badge.bg }]}>
+                      <Text style={[styles.badgeText, { color: badge.fg }]}>
+                        {badgeLabel}
+                      </Text>
+                    </View>
+                    <View style={styles.paidToggleRow}>
+                      <Text style={styles.paidToggleLabel}>Mark Invoice as Paid</Text>
+                      {paidBusyId === doc.id ? (
+                        <ActivityIndicator size="small" color={colors.teal} />
+                      ) : (
+                        <Switch
+                          value={Boolean(invoicePaid)}
+                          onValueChange={(v) => onRowTogglePaid(doc, v)}
+                          trackColor={{ false: '#CCCCCC', true: colors.teal }}
+                          thumbColor={colors.white}
+                          style={styles.paidSwitch}
+                        />
+                      )}
+                    </View>
+                  </View>
+                ) : (
+                  <View style={[styles.badge, { backgroundColor: badge.bg }]}>
+                    <Text style={[styles.badgeText, { color: badge.fg }]}>
+                      {badgeLabel}
+                    </Text>
+                  </View>
+                )}
               </TouchableOpacity>
             );
           })}
@@ -866,6 +936,20 @@ export const DocsScreen: React.FC = () => {
           onChanged={() => loadDocs()}
         />
       ) : null}
+
+      {/* Payment-date picker for the inline invoice "Mark Invoice as Paid"
+          toggle. Confirming regenerates the invoice with the PAID watermark. */}
+      <DatePickerModal
+        visible={pendingPaidDoc !== null}
+        title="Date payment received"
+        value={new Date()}
+        onCancel={() => setPendingPaidDoc(null)}
+        onConfirm={(d) => {
+          const doc = pendingPaidDoc;
+          setPendingPaidDoc(null);
+          if (doc) applyRowPaid(doc, true, toIsoDate(d));
+        }}
+      />
 
       <LockedStrategySheet
         visible={lockedSheet !== null}
@@ -1064,6 +1148,25 @@ const styles = StyleSheet.create({
     paddingVertical: 3,
     borderRadius: radius.pill,
     alignSelf: 'flex-start',
+  },
+  invoiceRight: {
+    alignItems: 'flex-end',
+    gap: 4,
+  },
+  paidToggleRow: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: 4,
+  },
+  paidToggleLabel: {
+    fontSize: 9,
+    color: '#888888',
+    fontWeight: '600',
+    maxWidth: 70,
+    textAlign: 'right',
+  },
+  paidSwitch: {
+    transform: [{ scaleX: 0.8 }, { scaleY: 0.8 }],
   },
   badgeText: {
     fontSize: 10,

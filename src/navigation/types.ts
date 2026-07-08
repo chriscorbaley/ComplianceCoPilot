@@ -1,3 +1,4 @@
+import type { NavigatorScreenParams } from '@react-navigation/native';
 import type { Strategy } from '../components/StrategyCard';
 import type { StatusVariant } from '../components/StatusPill';
 import type {
@@ -49,10 +50,35 @@ export type OnboardingStackParamList = {
 };
 
 export type RootStackParamList = {
-  Tabs: undefined;
+  Tabs: NavigatorScreenParams<TabParamList>;
   // The onboarding plan-selection screen, also reachable post-onboarding so
   // clients can upgrade from inside the app at any time.
   ChoosePlan: { highlight?: SubscriptionTier } | undefined;
+  // Post-onboarding upgrade flow: confirm → process → pick additional
+  // strategies → dashboard (with a welcome banner).
+  UpgradeConfirm: { tier: 'core' | 'pro' };
+  UpgradeStrategySelect: { tier: 'core' | 'pro' };
+  // Real-estate onboarding flow, also mounted here so it can be entered after an
+  // in-app upgrade when Real Estate is newly added to active_strategies. Same
+  // screens/params as the onboarding stack; the completion screen routes to the
+  // Dashboard instead of relying on the onboarding Gate.
+  RealEstateType: { selectedStrategies: string[] };
+  RealEstateMpTest: { selectedStrategies: string[]; portfolioType: RePropertyTypeKey };
+  RealEstateReps: RealEstateFlowBase;
+  RealEstateProperties: RealEstateFlowBase & {
+    repsPursuit: boolean | null;
+    totalWorkHours: number | null;
+  };
+  RealEstateGrouping: RealEstateFlowBase & {
+    repsPursuit: boolean | null;
+    totalWorkHours: number | null;
+    propertyCount: number;
+  };
+  RealEstateComplete: RealEstateFlowBase & {
+    repsPursuit: boolean | null;
+    totalWorkHours: number | null;
+    grouping: boolean | null;
+  };
   DocumentDetail: {
     title: string;
     meta: string;
@@ -91,7 +117,8 @@ export type RootStackParamList = {
 };
 
 export type TabParamList = {
-  Dashboard: undefined;
+  // upgradedTo triggers the post-upgrade welcome banner + fresh gating refetch.
+  Dashboard: { upgradedTo?: SubscriptionTier } | undefined;
   Hours: undefined;
   Trips: undefined;
   Minutes: undefined;

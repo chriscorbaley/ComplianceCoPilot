@@ -2,17 +2,19 @@
 //
 // Four sections:
 //   1. Square-footage calculator + supporting doc upload
-//   2. Utility records: download template + upload completed records
+//   2. Utility expenses: per-category monthly/annual tracker (no uploads)
 //   3. Residence documentation: own (closing disclosure) or rent (lease)
 //   4. Renovation receipts: multiple uploads with per-receipt amount + total
 //
 // The four-of-four progress indicator at the top considers a section complete
-// when at least one file is present for that section's document_key.
+// when at least one file is present for that section's document_key — except the
+// Utility Expenses section, which is complete once any category has data entered.
 
 import React, { useCallback, useEffect, useMemo, useState } from 'react';
 import {
   Alert,
   Linking,
+  Modal,
   ScrollView,
   StyleSheet,
   Text,
@@ -24,8 +26,6 @@ import { Ionicons } from '@expo/vector-icons';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
 import { useFocusEffect } from '@react-navigation/native';
 import * as DocumentPicker from 'expo-document-picker';
-import * as Print from 'expo-print';
-import * as Sharing from 'expo-sharing';
 import { colors, radius, shadow, spacing, typography } from '../../theme';
 import { ProgressBar } from '../../components/ProgressBar';
 import { DocumentUploadRow } from '../../components/DocumentUploadRow';
@@ -39,6 +39,7 @@ import {
   replaceStrategyDocument,
   deleteStrategyDocument,
   updateStrategyDocumentMetadata,
+  upsertStrategyMetadataRow,
   getStrategyDocumentSignedUrl,
   type StrategyDocumentRow,
 } from '../../services/strategyDocuments';
@@ -46,12 +47,66 @@ import {
 const STRATEGY_KEY = 'home_office';
 
 const DOC_SQUARE_FOOTAGE = 'square_footage';
-const DOC_UTILITIES = 'utilities';
+const DOC_UTILITY_DATA = 'utility_expenses';
 const DOC_CLOSING = 'closing_disclosure';
 const DOC_LEASE = 'lease_agreement';
 const DOC_RENOVATION = 'renovation_receipt';
 
 type Residence = 'own' | 'rent';
+type UtilityMethod = 'monthly' | 'annual';
+
+// One tracked utility/home-expense category. Each is stored independently under
+// metadata.categories[key] with its own method + monthly/annual values.
+interface CategoryData {
+  method: UtilityMethod;
+  monthly_entries: Record<string, number>;
+  annual_total: number;
+}
+
+// The selectable expense categories (Fix 3). `key` is the stable metadata key.
+const UTILITY_CATEGORIES: Array<{ key: string; label: string }> = [
+  { key: 'mortgage_interest', label: 'Mortgage Interest' },
+  { key: 'property_taxes', label: 'Property Taxes' },
+  { key: 'rent', label: 'Rent' },
+  { key: 'hoa_condo_fees', label: 'HOA / Condo Fees' },
+  { key: 'homeowners_renters_insurance', label: "Homeowner's / Renter's Insurance" },
+  { key: 'electricity', label: 'Electricity' },
+  { key: 'gas', label: 'Gas' },
+  { key: 'water_sewage', label: 'Water & Sewage' },
+  { key: 'trash', label: 'Trash' },
+  { key: 'internet', label: 'Internet' },
+  { key: 'heating_cooling', label: 'Heating and Cooling' },
+  { key: 'general_repairs', label: 'General Repairs' },
+  { key: 'cleaning', label: 'Cleaning' },
+  { key: 'pest_control', label: 'Pest Control' },
+  { key: 'landscaping', label: 'Landscaping' },
+  { key: 'other', label: 'Other' },
+];
+
+const categoryLabel = (key: string): string =>
+  UTILITY_CATEGORIES.find((c) => c.key === key)?.label ?? key;
+
+// Month keys stored in metadata.categories[*].monthly_entries and display labels.
+const UTILITY_MONTHS: Array<{ key: string; label: string }> = [
+  { key: 'january', label: 'January' },
+  { key: 'february', label: 'February' },
+  { key: 'march', label: 'March' },
+  { key: 'april', label: 'April' },
+  { key: 'may', label: 'May' },
+  { key: 'june', label: 'June' },
+  { key: 'july', label: 'July' },
+  { key: 'august', label: 'August' },
+  { key: 'september', label: 'September' },
+  { key: 'october', label: 'October' },
+  { key: 'november', label: 'November' },
+  { key: 'december', label: 'December' },
+];
+
+// The annual amount a single category contributes (monthly sum or annual total).
+const categoryAnnual = (d: CategoryData): number =>
+  d.method === 'annual'
+    ? d.annual_total
+    : UTILITY_MONTHS.reduce((s, { key }) => s + (d.monthly_entries[key] ?? 0), 0);
 
 const calcPct = (office: number, total: number): number | null => {
   if (!Number.isFinite(office) || !Number.isFinite(total) || total <= 0 || office <= 0) {
@@ -74,33 +129,6 @@ const parseAmount = (s: string): number => {
 const formatMoney = (n: number): string =>
   `$${n.toLocaleString(undefined, { maximumFractionDigits: 2 })}`;
 
-const buildUtilityTemplateHtml = (): string => `
-<!DOCTYPE html>
-<html><head><meta charset="utf-8"/><style>
-  body { font-family: -apple-system, system-ui, sans-serif; padding: 32px; color: #1A1A2E; }
-  h1 { color: #042C53; font-size: 22px; margin-bottom: 4px; }
-  p.sub { color: #6B7280; font-size: 12px; margin-top: 0; }
-  table { width: 100%; border-collapse: collapse; margin-top: 24px; font-size: 12px; }
-  th, td { border: 1px solid #CCCCCC; padding: 8px; text-align: left; }
-  th { background: #E1F5EE; color: #085041; }
-  td.amount { text-align: right; }
-</style></head><body>
-  <h1>Home Office — Utility Tracking</h1>
-  <p class="sub">Record monthly utility costs. Your deductible portion equals your home office percentage applied to each total.</p>
-  <table>
-    <thead><tr>
-      <th>Month</th><th>Electric</th><th>Gas</th><th>Water</th><th>Internet</th><th>Trash</th><th class="amount">Total</th>
-    </tr></thead>
-    <tbody>
-      ${['January','February','March','April','May','June','July','August','September','October','November','December']
-        .map((m) => `<tr><td>${m}</td><td></td><td></td><td></td><td></td><td></td><td class="amount"></td></tr>`)
-        .join('')}
-      <tr><td><strong>Annual Total</strong></td><td></td><td></td><td></td><td></td><td></td><td class="amount"></td></tr>
-    </tbody>
-  </table>
-</body></html>
-`;
-
 export const HomeOfficeComplianceScreen: React.FC = () => {
   const insets = useSafeAreaInsets();
   const { activeBusinessId } = useBusiness();
@@ -110,6 +138,19 @@ export const HomeOfficeComplianceScreen: React.FC = () => {
   const [totalSqft, setTotalSqft] = useState('');
   const [officeSqft, setOfficeSqft] = useState('');
   const [residence, setResidence] = useState<Residence>('own');
+
+  // Utility expense tracking (Fix 3): one entry per category, each with its own
+  // monthly/annual method. `categories` is the committed numeric model persisted
+  // to a metadata-only strategy_documents row. The currently-selected category
+  // is edited through string buffers (catMethod/catMonthly/catAnnual) and
+  // committed back into `categories` on blur or method change.
+  const [categories, setCategories] = useState<Record<string, CategoryData>>({});
+  const [selectedCat, setSelectedCat] = useState<string | null>(null);
+  const [catMethod, setCatMethod] = useState<UtilityMethod>('monthly');
+  const [catMonthly, setCatMonthly] = useState<Record<string, string>>({});
+  const [catAnnual, setCatAnnual] = useState('');
+  const [catPickerOpen, setCatPickerOpen] = useState(false);
+  const [utilityHydrated, setUtilityHydrated] = useState(false);
 
   const refresh = useCallback(async () => {
     try {
@@ -128,10 +169,6 @@ export const HomeOfficeComplianceScreen: React.FC = () => {
 
   const squareFootageRow = useMemo(
     () => rows.find((r) => r.document_key === DOC_SQUARE_FOOTAGE) ?? null,
-    [rows],
-  );
-  const utilitiesRow = useMemo(
-    () => rows.find((r) => r.document_key === DOC_UTILITIES) ?? null,
     [rows],
   );
   const closingRow = useMemo(
@@ -163,21 +200,171 @@ export const HomeOfficeComplianceScreen: React.FC = () => {
   const officeN = parseFloat(officeSqft);
   const pct = calcPct(officeN, totalN);
 
-  // Persist the calc to the square_footage row's metadata if it already
-  // exists; otherwise the calc is stored as part of the next upload.
+  // Persist the calc even when no supporting document has been uploaded yet, so
+  // the sqft-derived percentage is always available to the compliance report.
+  // upsertStrategyMetadataRow updates the existing row's metadata in place
+  // (preserving any uploaded file) or creates a metadata-only row (file_url
+  // null, which never counts toward "documents complete").
   const persistCalc = useCallback(async () => {
-    if (!squareFootageRow) return;
+    // Nothing to persist until at least one dimension has been entered.
+    if (!Number.isFinite(totalN) && !Number.isFinite(officeN)) return;
     try {
-      await updateStrategyDocumentMetadata(squareFootageRow.id, {
-        ...squareFootageRow.metadata,
+      const savedMetadata = {
+        ...(squareFootageRow?.metadata ?? {}),
         total_sqft: Number.isFinite(totalN) ? totalN : null,
         office_sqft: Number.isFinite(officeN) ? officeN : null,
         percentage: pct,
+      };
+      console.log('[HomeOffice Save] metadata:', JSON.stringify(savedMetadata));
+      const saved = await upsertStrategyMetadataRow({
+        strategyKey: STRATEGY_KEY,
+        documentKey: DOC_SQUARE_FOOTAGE,
+        businessId: activeBusinessId,
+        metadata: savedMetadata,
       });
+      // Keep the local row list in sync so the row id exists for a later upload
+      // without a full refresh (which would clobber in-progress input elsewhere).
+      setRows((prev) => [saved, ...prev.filter((r) => r.id !== saved.id)]);
     } catch {
       // Best-effort: silent failure is preferable to a popup on every blur.
     }
-  }, [squareFootageRow, totalN, officeN, pct]);
+  }, [squareFootageRow, totalN, officeN, pct, activeBusinessId]);
+
+  // ── Utility expense tracking (per category) ──────────────────────────────
+  const utilityRow = useMemo(
+    () => rows.find((r) => r.document_key === DOC_UTILITY_DATA) ?? null,
+    [rows],
+  );
+
+  // Hydrate categories from saved metadata once, when the row first loads.
+  useEffect(() => {
+    if (utilityHydrated || !utilityRow) return;
+    const m = utilityRow.metadata ?? {};
+    const saved = (m.categories ?? {}) as Record<string, unknown>;
+    const seeded: Record<string, CategoryData> = {};
+    for (const [catKey, raw] of Object.entries(saved)) {
+      const v = (raw ?? {}) as {
+        method?: string;
+        monthly_entries?: Record<string, unknown>;
+        annual_total?: unknown;
+      };
+      const monthly_entries: Record<string, number> = {};
+      for (const { key } of UTILITY_MONTHS) {
+        const n = v.monthly_entries?.[key];
+        monthly_entries[key] = typeof n === 'number' ? n : 0;
+      }
+      seeded[catKey] = {
+        method: v.method === 'annual' ? 'annual' : 'monthly',
+        monthly_entries,
+        annual_total: typeof v.annual_total === 'number' ? v.annual_total : 0,
+      };
+    }
+    setCategories(seeded);
+    setUtilityHydrated(true);
+  }, [utilityRow, utilityHydrated]);
+
+  // Grand total across all committed categories, and the deductible portion.
+  const utilityGrandTotal = useMemo(
+    () => Object.values(categories).reduce((s, d) => s + categoryAnnual(d), 0),
+    [categories],
+  );
+  const utilityDeduction = pct !== null ? utilityGrandTotal * (pct / 100) : 0;
+
+  // Persist the full category set to the metadata-only row. Best-effort: a
+  // silent failure is preferable to a popup on every blur.
+  const persistUtilities = useCallback(
+    async (cats: Record<string, CategoryData>) => {
+      const grand = Object.values(cats).reduce((s, d) => s + categoryAnnual(d), 0);
+      const deduction = pct !== null ? grand * (pct / 100) : 0;
+      try {
+        const savedMetadata = {
+          categories: cats,
+          calculated_deduction: deduction,
+          office_percentage: pct ?? 0,
+          last_updated: new Date().toISOString(),
+        };
+        console.log('[HomeOffice Save] metadata:', JSON.stringify(savedMetadata));
+        const saved = await upsertStrategyMetadataRow({
+          strategyKey: STRATEGY_KEY,
+          documentKey: DOC_UTILITY_DATA,
+          businessId: activeBusinessId,
+          metadata: savedMetadata,
+        });
+        // Keep the local row list in sync so the row id exists for later updates
+        // without forcing a full refresh (which would clobber in-progress input).
+        setRows((prev) => {
+          const without = prev.filter(
+            (r) => r.id !== saved.id && r.document_key !== DOC_UTILITY_DATA,
+          );
+          return [saved, ...without];
+        });
+      } catch {
+        // Best-effort: silent failure is preferable to a popup on every blur.
+      }
+    },
+    [pct, activeBusinessId],
+  );
+
+  // Load a category's saved values into the editing buffers for display/edit.
+  const selectCategory = useCallback(
+    (key: string) => {
+      const d = categories[key];
+      setSelectedCat(key);
+      setCatMethod(d?.method ?? 'monthly');
+      const seeded: Record<string, string> = {};
+      if (d) {
+        for (const { key: mk } of UTILITY_MONTHS) {
+          const v = d.monthly_entries[mk];
+          if (typeof v === 'number' && v > 0) seeded[mk] = String(v);
+        }
+      }
+      setCatMonthly(seeded);
+      setCatAnnual(d && d.annual_total > 0 ? String(d.annual_total) : '');
+    },
+    [categories],
+  );
+
+  // Commit the current editing buffers into `categories` and persist. A category
+  // with no data is dropped so it never appears in the summary or the report.
+  const saveSelectedCategory = useCallback(
+    (overrideMethod?: UtilityMethod) => {
+      if (!selectedCat) return;
+      const method = overrideMethod ?? catMethod;
+      const monthly_entries: Record<string, number> = {};
+      for (const { key } of UTILITY_MONTHS) {
+        monthly_entries[key] = parseAmount(catMonthly[key] ?? '');
+      }
+      const data: CategoryData = {
+        method,
+        monthly_entries,
+        annual_total: parseAmount(catAnnual),
+      };
+      const next = { ...categories };
+      if (categoryAnnual(data) > 0) next[selectedCat] = data;
+      else delete next[selectedCat];
+      setCategories(next);
+      void persistUtilities(next);
+    },
+    [selectedCat, catMethod, catMonthly, catAnnual, categories, persistUtilities],
+  );
+
+  // Live total for the category being edited (reflects un-committed input).
+  const editingCategoryTotal = useMemo(
+    () =>
+      catMethod === 'annual'
+        ? parseAmount(catAnnual)
+        : UTILITY_MONTHS.reduce((s, { key }) => s + parseAmount(catMonthly[key] ?? ''), 0),
+    [catMethod, catAnnual, catMonthly],
+  );
+
+  // Categories with data, for the summary list.
+  const enteredCategories = useMemo(
+    () =>
+      Object.entries(categories)
+        .filter(([, d]) => categoryAnnual(d) > 0)
+        .sort((a, b) => categoryLabel(a[0]).localeCompare(categoryLabel(b[0]))),
+    [categories],
+  );
 
   const pickFile = async (): Promise<DocumentPicker.DocumentPickerAsset | null> => {
     const result = await DocumentPicker.getDocumentAsync({
@@ -234,24 +421,6 @@ export const HomeOfficeComplianceScreen: React.FC = () => {
     }
   };
 
-  const downloadUtilityTemplate = async () => {
-    try {
-      const { uri } = await Print.printToFileAsync({ html: buildUtilityTemplateHtml() });
-      const available = await Sharing.isAvailableAsync();
-      if (available) {
-        await Sharing.shareAsync(uri, {
-          mimeType: 'application/pdf',
-          dialogTitle: 'Utility Tracking Template',
-          UTI: 'com.adobe.pdf',
-        });
-      } else {
-        Alert.alert('Template generated', `Saved to ${uri}`);
-      }
-    } catch (e) {
-      Alert.alert('Could not generate template', e instanceof Error ? e.message : String(e));
-    }
-  };
-
   const addReceipt = async () => {
     try {
       const file = await pickFile();
@@ -302,9 +471,10 @@ export const HomeOfficeComplianceScreen: React.FC = () => {
   }, 0);
   const deductiblePortion = pct !== null ? renovationTotal * (pct / 100) : 0;
 
-  // Section completion: each of the four sections counts independently.
+  // Section completion: each of the four sections counts independently. The
+  // utility section is complete once any category has data entered.
   const section1Done = squareFootageRow !== null && squareFootageRow.file_url !== null;
-  const section2Done = utilitiesRow !== null && utilitiesRow.file_url !== null;
+  const section2Done = enteredCategories.length > 0;
   const section3Done =
     (residence === 'own' && closingRow !== null) ||
     (residence === 'rent' && leaseRow !== null) ||
@@ -406,43 +576,173 @@ export const HomeOfficeComplianceScreen: React.FC = () => {
                 }
               : null
           }
-          onUpload={() => handleSqftUpload(null)}
+          onUpload={() => handleSqftUpload(squareFootageRow?.id ?? null)}
           onReplace={squareFootageRow ? () => handleSqftUpload(squareFootageRow.id) : undefined}
-          onView={squareFootageRow ? () => viewDoc(squareFootageRow) : undefined}
+          onView={squareFootageRow && squareFootageRow.file_url ? () => viewDoc(squareFootageRow) : undefined}
         />
       </View>
 
-      {/* ─── Section 2: Utilities ─────────────────────────────────────── */}
+      {/* ─── Section 2: Utility expenses (per-category tracker) ───────── */}
       <View style={styles.sectionCard}>
-        <SectionHeading icon={section2Done ? 'checkmark-circle' : 'flash-outline'} title="Utilities" done={section2Done} />
+        <SectionHeading
+          icon={section2Done ? 'checkmark-circle' : 'flash-outline'}
+          title="Utility Expenses"
+          done={section2Done}
+        />
         <Text style={styles.sectionDesc}>
-          Upload your utility bills showing home expenses. Your deductible portion is {pctLabel} of total utilities.
+          Track each home expense category to calculate your home office
+          deduction
         </Text>
+
+        {/* Category selector */}
+        <Text style={styles.inputLabel}>Expense category</Text>
+        <TouchableOpacity
+          activeOpacity={0.8}
+          style={styles.categorySelect}
+          onPress={() => setCatPickerOpen(true)}
+        >
+          <Text style={[styles.categorySelectText, !selectedCat && styles.categorySelectPlaceholder]}>
+            {selectedCat ? categoryLabel(selectedCat) : 'Select a category'}
+          </Text>
+          <Ionicons name="chevron-down" size={18} color={colors.midNavy} />
+        </TouchableOpacity>
+
+        {selectedCat ? (
+          <>
+            <View style={[styles.tabRow, { marginTop: spacing.md }]}>
+              <TouchableOpacity
+                activeOpacity={0.85}
+                onPress={() => {
+                  setCatMethod('monthly');
+                  saveSelectedCategory('monthly');
+                }}
+                style={[styles.tab, catMethod === 'monthly' && styles.tabActive]}
+              >
+                <Text style={[styles.tabText, catMethod === 'monthly' && styles.tabTextActive]}>
+                  Monthly Breakdown
+                </Text>
+              </TouchableOpacity>
+              <TouchableOpacity
+                activeOpacity={0.85}
+                onPress={() => {
+                  setCatMethod('annual');
+                  saveSelectedCategory('annual');
+                }}
+                style={[styles.tab, catMethod === 'annual' && styles.tabActive]}
+              >
+                <Text style={[styles.tabText, catMethod === 'annual' && styles.tabTextActive]}>
+                  Annual Total
+                </Text>
+              </TouchableOpacity>
+            </View>
+
+            {catMethod === 'monthly' ? (
+              <View>
+                {UTILITY_MONTHS.map(({ key, label }) => (
+                  <View key={key} style={styles.monthRow}>
+                    <Text style={styles.monthLabel}>{label}</Text>
+                    <View style={styles.monthInputWrap}>
+                      <Text style={styles.dollar}>$</Text>
+                      <TextInput
+                        value={catMonthly[key] ?? ''}
+                        onChangeText={(t) =>
+                          setCatMonthly((prev) => ({ ...prev, [key]: t }))
+                        }
+                        onBlur={() => saveSelectedCategory()}
+                        placeholder="$0.00"
+                        keyboardType="decimal-pad"
+                        style={styles.amountInput}
+                        placeholderTextColor={colors.subtleText}
+                      />
+                    </View>
+                  </View>
+                ))}
+                <View style={styles.utilTotalRow}>
+                  <Text style={styles.utilTotalLabel}>
+                    {categoryLabel(selectedCat)} annual total
+                  </Text>
+                  <Text style={styles.utilTotalValue}>{formatMoney(editingCategoryTotal)}</Text>
+                </View>
+              </View>
+            ) : (
+              <View>
+                <Text style={styles.inputLabel}>
+                  {categoryLabel(selectedCat)} — total annual amount
+                </Text>
+                <View style={styles.annualInputWrap}>
+                  <Text style={styles.dollar}>$</Text>
+                  <TextInput
+                    value={catAnnual}
+                    onChangeText={setCatAnnual}
+                    onBlur={() => saveSelectedCategory()}
+                    placeholder="e.g. 4,800"
+                    keyboardType="decimal-pad"
+                    style={styles.amountInput}
+                    placeholderTextColor={colors.subtleText}
+                  />
+                </View>
+              </View>
+            )}
+          </>
+        ) : null}
+
+        {/* Summary of categories already entered */}
+        {enteredCategories.length > 0 ? (
+          <View style={styles.summaryCard}>
+            <Text style={styles.summaryTitle}>Categories entered</Text>
+            {enteredCategories.map(([key, data]) => (
+              <TouchableOpacity
+                key={key}
+                activeOpacity={0.7}
+                onPress={() => selectCategory(key)}
+                style={styles.summaryRow}
+              >
+                <Text style={styles.summaryLabel} numberOfLines={1}>
+                  {categoryLabel(key)}
+                </Text>
+                <Text style={styles.summaryValue}>{formatMoney(categoryAnnual(data))}</Text>
+                <Ionicons name="create-outline" size={16} color={colors.midNavy} />
+              </TouchableOpacity>
+            ))}
+            <View style={styles.summaryDivider} />
+            <View style={styles.summaryRow}>
+              <Text style={[styles.summaryLabel, styles.summaryGrandLabel]}>All categories total</Text>
+              <Text style={[styles.summaryValue, styles.summaryGrandValue]}>
+                {formatMoney(utilityGrandTotal)}
+              </Text>
+            </View>
+          </View>
+        ) : null}
+
+        {/* Deduction estimate */}
+        <View style={styles.savingsCard}>
+          <Text style={styles.savingsTitle}>Home Office Utility Deduction Estimate</Text>
+          <SavingsLine label="Total home expenses" value={formatMoney(utilityGrandTotal)} />
+          <SavingsLine label="Office percentage" value={formatPct(pct)} />
+          <View style={styles.savingsDivider} />
+          <SavingsLine label="Estimated deductible amount" value={formatMoney(utilityDeduction)} emphasize />
+        </View>
 
         <TouchableOpacity
           activeOpacity={0.85}
-          onPress={downloadUtilityTemplate}
-          style={styles.downloadBtn}
+          onPress={() =>
+            generateHomeOfficeReport({
+              businessId: activeBusinessId,
+              clientName: fullName ?? 'Client',
+            }).catch((e) =>
+              Alert.alert('Could not generate report', e instanceof Error ? e.message : String(e)),
+            )
+          }
+          style={styles.utilReportBtn}
         >
-          <Ionicons name="download-outline" size={18} color={colors.navy} />
-          <Text style={styles.downloadBtnText}>Download Utilities Tracking Template</Text>
+          <Ionicons name="document-text-outline" size={18} color={colors.white} />
+          <Text style={styles.utilReportBtnText}>Generate Utility Report</Text>
         </TouchableOpacity>
 
-        <DocumentUploadRow
-          title="UPLOAD COMPLETED UTILITY RECORDS"
-          description="After you fill in the tracking template, upload the completed file here"
-          uploaded={
-            utilitiesRow && utilitiesRow.file_url
-              ? {
-                  fileName: utilitiesRow.document_name ?? 'Document',
-                  uploadedAt: utilitiesRow.uploaded_at,
-                }
-              : null
-          }
-          onUpload={() => handleUpload(DOC_UTILITIES, null)}
-          onReplace={utilitiesRow ? () => handleUpload(DOC_UTILITIES, utilitiesRow.id) : undefined}
-          onView={utilitiesRow ? () => viewDoc(utilitiesRow) : undefined}
-        />
+        <Text style={styles.disclaimerNote}>
+          This is an estimate only. Consult your tax professional for exact
+          deduction amounts.
+        </Text>
       </View>
 
       {/* ─── Section 3: Residence documentation ───────────────────────── */}
@@ -563,6 +863,56 @@ export const HomeOfficeComplianceScreen: React.FC = () => {
           </View>
         ) : null}
       </View>
+
+      {/* Category picker (utility expenses) */}
+      <Modal
+        visible={catPickerOpen}
+        transparent
+        animationType="fade"
+        onRequestClose={() => setCatPickerOpen(false)}
+      >
+        <TouchableOpacity
+          style={catPicker.backdrop}
+          activeOpacity={1}
+          onPress={() => setCatPickerOpen(false)}
+        >
+          <View style={catPicker.menu}>
+            <Text style={catPicker.menuTitle}>Expense category</Text>
+            <ScrollView style={catPicker.menuScroll} showsVerticalScrollIndicator={false}>
+              {UTILITY_CATEGORIES.map(({ key, label }) => {
+                const active = key === selectedCat;
+                const filled = categoryAnnual(categories[key] ?? {
+                  method: 'monthly',
+                  monthly_entries: {},
+                  annual_total: 0,
+                }) > 0;
+                return (
+                  <TouchableOpacity
+                    key={key}
+                    activeOpacity={0.8}
+                    style={[catPicker.menuItem, active && catPicker.menuItemActive]}
+                    onPress={() => {
+                      selectCategory(key);
+                      setCatPickerOpen(false);
+                    }}
+                  >
+                    <Text style={[catPicker.menuItemText, active && catPicker.menuItemTextActive]}>
+                      {label}
+                    </Text>
+                    {filled ? (
+                      <Ionicons
+                        name="checkmark-circle"
+                        size={16}
+                        color={active ? colors.white : colors.teal}
+                      />
+                    ) : null}
+                  </TouchableOpacity>
+                );
+              })}
+            </ScrollView>
+          </View>
+        </TouchableOpacity>
+      </Modal>
     </ScrollView>
   );
 };
@@ -580,6 +930,15 @@ const SectionHeading: React.FC<{ title: string; icon: keyof typeof Ionicons.glyp
       <Ionicons name={icon} size={18} color={done ? colors.teal : colors.midNavy} />
     </View>
     <Text style={headingStyles.title}>{title}</Text>
+  </View>
+);
+
+const SavingsLine: React.FC<{ label: string; value: string; emphasize?: boolean }> = ({
+  label, value, emphasize,
+}) => (
+  <View style={styles.savingsRow}>
+    <Text style={styles.savingsLabel}>{label}</Text>
+    <Text style={[styles.savingsValue, emphasize && styles.savingsValueEmph]}>{value}</Text>
   </View>
 );
 
@@ -772,27 +1131,225 @@ const styles = StyleSheet.create({
     marginTop: 6,
     marginBottom: spacing.md,
   },
-  downloadBtn: {
+  categorySelect: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    justifyContent: 'space-between',
+    backgroundColor: colors.background,
+    borderWidth: 1,
+    borderColor: colors.divider,
+    borderRadius: 10,
+    paddingHorizontal: 12,
+    paddingVertical: 13,
+  },
+  categorySelectText: {
+    ...typography.body,
+    color: colors.bodyText,
+    fontSize: 14,
+    fontWeight: '600',
+    flex: 1,
+    marginRight: spacing.sm,
+  },
+  categorySelectPlaceholder: {
+    color: colors.subtleText,
+    fontWeight: '400',
+  },
+  summaryCard: {
+    backgroundColor: colors.background,
+    borderRadius: 10,
+    padding: spacing.md,
+    marginTop: spacing.lg,
+    gap: 8,
+  },
+  summaryTitle: {
+    ...typography.caption,
+    color: colors.mutedText,
+    fontSize: 11,
+    fontWeight: '700',
+    textTransform: 'uppercase',
+    letterSpacing: 0.4,
+  },
+  summaryRow: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: spacing.sm,
+  },
+  summaryLabel: {
+    ...typography.body,
+    color: colors.bodyText,
+    fontSize: 13,
+    flex: 1,
+  },
+  summaryValue: {
+    ...typography.bodyMedium,
+    color: colors.bodyText,
+    fontSize: 13,
+    fontWeight: '700',
+  },
+  summaryDivider: {
+    height: StyleSheet.hairlineWidth,
+    backgroundColor: colors.divider,
+    marginVertical: 2,
+  },
+  summaryGrandLabel: {
+    fontWeight: '700',
+  },
+  summaryGrandValue: {
+    color: colors.teal,
+    fontSize: 14,
+  },
+  utilReportBtn: {
     flexDirection: 'row',
     alignItems: 'center',
     justifyContent: 'center',
     gap: 8,
-    paddingVertical: 12,
+    paddingVertical: 13,
     borderRadius: 10,
-    borderWidth: 1.5,
-    borderColor: colors.navy,
-    backgroundColor: colors.white,
-    marginBottom: spacing.md,
+    backgroundColor: colors.navy,
+    marginTop: spacing.md,
+    ...shadow.raised,
   },
-  downloadBtnText: {
+  utilReportBtnText: {
     ...typography.bodyMedium,
-    color: colors.navy,
-    fontSize: 13,
+    color: colors.white,
+    fontSize: 14,
     fontWeight: '700',
   },
   radioGroup: {
     gap: 2,
     marginBottom: spacing.md,
+  },
+  tabRow: {
+    flexDirection: 'row',
+    backgroundColor: colors.background,
+    borderRadius: 10,
+    padding: 3,
+    marginBottom: spacing.md,
+  },
+  tab: {
+    flex: 1,
+    paddingVertical: 9,
+    borderRadius: 8,
+    alignItems: 'center',
+  },
+  tabActive: {
+    backgroundColor: colors.white,
+    borderWidth: 1,
+    borderColor: colors.teal,
+  },
+  tabText: {
+    ...typography.bodyMedium,
+    color: colors.mutedText,
+    fontSize: 13,
+    fontWeight: '600',
+  },
+  tabTextActive: {
+    color: colors.teal,
+    fontWeight: '700',
+  },
+  monthRow: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    justifyContent: 'space-between',
+    paddingVertical: 5,
+  },
+  monthLabel: {
+    ...typography.body,
+    color: colors.bodyText,
+    fontSize: 13,
+  },
+  monthInputWrap: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    backgroundColor: colors.background,
+    borderRadius: 6,
+    borderWidth: 1,
+    borderColor: colors.divider,
+    paddingHorizontal: 8,
+    minWidth: 130,
+  },
+  annualInputWrap: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    backgroundColor: colors.background,
+    borderRadius: 8,
+    borderWidth: 1,
+    borderColor: colors.divider,
+    paddingHorizontal: 10,
+    marginTop: 4,
+  },
+  utilTotalRow: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    justifyContent: 'space-between',
+    marginTop: 8,
+    paddingTop: 8,
+    borderTopWidth: StyleSheet.hairlineWidth,
+    borderTopColor: colors.divider,
+  },
+  utilTotalLabel: {
+    ...typography.bodyMedium,
+    color: colors.bodyText,
+    fontSize: 13,
+    fontWeight: '700',
+  },
+  utilTotalValue: {
+    ...typography.bodyMedium,
+    color: colors.bodyText,
+    fontSize: 14,
+    fontWeight: '700',
+  },
+  savingsCard: {
+    backgroundColor: colors.tealLight,
+    borderRadius: 10,
+    padding: spacing.md,
+    marginTop: spacing.md,
+    gap: 6,
+  },
+  savingsTitle: {
+    ...typography.bodyMedium,
+    color: colors.teal,
+    fontSize: 13,
+    fontWeight: '700',
+    marginBottom: 2,
+  },
+  savingsRow: {
+    flexDirection: 'row',
+    justifyContent: 'space-between',
+    alignItems: 'center',
+  },
+  savingsLabel: {
+    ...typography.body,
+    color: colors.bodyText,
+    fontSize: 12,
+  },
+  savingsValue: {
+    ...typography.bodyMedium,
+    color: colors.bodyText,
+    fontSize: 13,
+    fontWeight: '600',
+  },
+  savingsValueEmph: {
+    color: colors.teal,
+    fontSize: 15,
+    fontWeight: '800',
+  },
+  savingsHint: {
+    ...typography.caption,
+    color: colors.teal,
+    fontSize: 11,
+    fontStyle: 'italic',
+  },
+  savingsDivider: {
+    height: StyleSheet.hairlineWidth,
+    backgroundColor: 'rgba(15,110,86,0.25)',
+    marginVertical: 2,
+  },
+  disclaimerNote: {
+    color: '#888888',
+    fontSize: 11,
+    marginTop: spacing.sm,
+    lineHeight: 15,
   },
   receiptCard: {
     borderWidth: 1,
@@ -900,5 +1457,55 @@ const styles = StyleSheet.create({
     color: colors.bodyText,
     fontSize: 14,
     fontWeight: '700',
+  },
+});
+
+const catPicker = StyleSheet.create({
+  backdrop: {
+    flex: 1,
+    backgroundColor: 'rgba(0,0,0,0.4)',
+    justifyContent: 'center',
+    paddingHorizontal: spacing.xl,
+  },
+  menu: {
+    backgroundColor: colors.white,
+    borderRadius: radius.card,
+    paddingVertical: spacing.sm,
+    paddingHorizontal: spacing.sm,
+    maxHeight: '70%',
+    ...shadow.raised,
+  },
+  menuScroll: { flexGrow: 0 },
+  menuTitle: {
+    ...typography.caption,
+    color: colors.mutedText,
+    fontSize: 11,
+    fontWeight: '700',
+    textTransform: 'uppercase',
+    letterSpacing: 0.5,
+    paddingHorizontal: spacing.sm,
+    paddingVertical: spacing.sm,
+  },
+  menuItem: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    justifyContent: 'space-between',
+    paddingVertical: spacing.md,
+    paddingHorizontal: spacing.md,
+    borderRadius: 8,
+  },
+  menuItemActive: {
+    backgroundColor: colors.midNavy,
+  },
+  menuItemText: {
+    ...typography.bodyMedium,
+    color: colors.bodyText,
+    fontSize: 15,
+    fontWeight: '600',
+    flex: 1,
+    marginRight: spacing.sm,
+  },
+  menuItemTextActive: {
+    color: colors.white,
   },
 });

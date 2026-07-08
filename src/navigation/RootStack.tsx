@@ -8,6 +8,8 @@ import { RealEstateActivityLog } from '../screens/strategy/RealEstateActivityLog
 import { AdminPanelScreen } from '../screens/admin/AdminPanelScreen';
 import { SettingsScreen } from '../screens/SettingsScreen';
 import { ChoosePlanScreen } from '../screens/onboarding/ChoosePlanScreen';
+import { UpgradeConfirmScreen } from '../screens/UpgradeConfirmScreen';
+import { UpgradeStrategySelectScreen } from '../screens/UpgradeStrategySelectScreen';
 import { MinutesDocumentScreen } from '../screens/MinutesDocumentScreen';
 import { CancelWarning1Screen } from '../screens/CancelWarning1Screen';
 import { CancelWarning2Screen } from '../screens/CancelWarning2Screen';
@@ -15,6 +17,12 @@ import { BusinessesScreen } from '../screens/BusinessesScreen';
 import { BusinessEditScreen } from '../screens/BusinessEditScreen';
 import { PropertiesScreen } from '../screens/PropertiesScreen';
 import { PropertyEditScreen } from '../screens/PropertyEditScreen';
+import { RealEstateTypeScreen } from '../screens/onboarding/RealEstateTypeScreen';
+import { RealEstateMpTestScreen } from '../screens/onboarding/RealEstateMpTestScreen';
+import { RealEstateRepsScreen } from '../screens/onboarding/RealEstateRepsScreen';
+import { RealEstatePropertiesScreen } from '../screens/onboarding/RealEstatePropertiesScreen';
+import { RealEstateGroupingScreen } from '../screens/onboarding/RealEstateGroupingScreen';
+import { RealEstateCompleteScreen } from '../screens/onboarding/RealEstateCompleteScreen';
 import { SCorpComplianceScreen } from '../screens/strategy/SCorpComplianceScreen';
 import { AugustaComplianceScreen } from '../screens/strategy/AugustaComplianceScreen';
 import { HomeOfficeComplianceScreen } from '../screens/strategy/HomeOfficeComplianceScreen';
@@ -44,6 +52,30 @@ export const RootStack: React.FC = () => {
         component={ChoosePlanScreen}
         options={{ title: 'Upgrade' }}
       />
+      <Stack.Screen
+        name="UpgradeConfirm"
+        component={UpgradeConfirmScreen}
+        options={({ route }) => ({
+          title: `Upgrade to ${route.params.tier === 'pro' ? 'Pro' : 'Core'}`,
+        })}
+      />
+      <Stack.Screen
+        name="UpgradeStrategySelect"
+        component={UpgradeStrategySelectScreen}
+        options={{ title: 'Add Strategies', gestureEnabled: false }}
+      />
+      {/* Real-estate onboarding flow, reachable after an in-app upgrade that
+          newly activates Real Estate. Headerless + no swipe-back, matching the
+          onboarding stack presentation. */}
+      <Stack.Group screenOptions={{ headerShown: false, gestureEnabled: false }}>
+        <Stack.Screen name="RealEstateType" component={RealEstateTypeScreen} />
+        <Stack.Screen name="RealEstateMpTest" component={RealEstateMpTestScreen} />
+        <Stack.Screen name="RealEstateReps" component={RealEstateRepsScreen} />
+        <Stack.Screen name="RealEstateProperties" component={RealEstatePropertiesScreen} />
+        <Stack.Screen name="RealEstateGrouping" component={RealEstateGroupingScreen} />
+        <Stack.Screen name="RealEstateComplete" component={RealEstateCompleteScreen} />
+      </Stack.Group>
+
       <Stack.Screen
         name="DocumentDetail"
         component={DocumentDetailScreen}

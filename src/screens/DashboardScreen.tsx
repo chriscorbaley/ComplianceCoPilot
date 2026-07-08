@@ -1,7 +1,7 @@
 import React, { useCallback, useEffect, useState } from 'react';
 import { Pressable, ScrollView, StyleSheet, Text, View } from 'react-native';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
-import { useFocusEffect, useNavigation, CommonActions } from '@react-navigation/native';
+import { useFocusEffect, useNavigation, useRoute, CommonActions } from '@react-navigation/native';
 import type { NativeStackNavigationProp } from '@react-navigation/native-stack';
 import { Ionicons } from '@expo/vector-icons';
 import { colors, spacing } from '../theme';
@@ -25,8 +25,10 @@ import {
   type HoursLogRow,
   type PropertyRow,
   type RePropertyType,
+  type SubscriptionTier,
 } from '../services/supabase';
 import { useBusiness } from '../business/BusinessContext';
+import { useAuth } from '../auth/AuthContext';
 import {
   loadComplianceRules,
   subscribeToRules,
@@ -133,6 +135,8 @@ const isAnnouncementActive = (row: AnnouncementRow): boolean => {
 export const DashboardScreen: React.FC = () => {
   const insets = useSafeAreaInsets();
   const navigation = useNavigation<DashboardNavigationProp>();
+  const route = useRoute();
+  const { refreshProfile } = useAuth();
   const { activeBusinessId } = useBusiness();
   const [data, setData] = useState<DashboardData>(EMPTY_DATA);
   const [rules, setRules] = useState<ComplianceRules | null>(null);
@@ -140,6 +144,27 @@ export const DashboardScreen: React.FC = () => {
   const [dismissedIds, setDismissedIds] = useState<Set<string>>(() => new Set());
   const access = useStrategyAccess();
   const [lockedSheet, setLockedSheet] = useState<{ name: string } | null>(null);
+
+  // STEP 4 of the upgrade flow: when we return from UpgradeStrategySelect with
+  // an `upgradedTo` param, refetch tier + active_strategies fresh from Supabase
+  // (never cached) so every strategy card re-renders with the new gating, then
+  // show a 3-second welcome banner.
+  const upgradedTo = (route.params as { upgradedTo?: SubscriptionTier } | undefined)?.upgradedTo;
+  const [upgradeBannerTier, setUpgradeBannerTier] = useState<SubscriptionTier | null>(null);
+
+  useEffect(() => {
+    if (!upgradedTo) return;
+    refreshProfile().catch(() => undefined);
+    setUpgradeBannerTier(upgradedTo);
+    // Clear the param so the banner doesn't reappear on the next focus.
+    navigation.setParams({ upgradedTo: undefined } as never);
+  }, [upgradedTo, refreshProfile, navigation]);
+
+  useEffect(() => {
+    if (!upgradeBannerTier) return;
+    const t = setTimeout(() => setUpgradeBannerTier(null), 3000);
+    return () => clearTimeout(t);
+  }, [upgradeBannerTier]);
 
   const loadLatestAnnouncement = useCallback(async () => {
     const { data: rows } = await supabase
@@ -520,6 +545,16 @@ export const DashboardScreen: React.FC = () => {
     <View style={styles.root}>
       <Header year={2026} />
 
+      {upgradeBannerTier && (
+        <View style={styles.upgradeBanner}>
+          <Ionicons name="checkmark-circle" size={18} color={colors.white} />
+          <Text style={styles.upgradeBannerText}>
+            Welcome to {upgradeBannerTier === 'pro' ? 'Pro' : 'Core'}! Your new
+            strategies are now active.
+          </Text>
+        </View>
+      )}
+
       {visibleAnnouncement && (
         <AnnouncementBanner
           message={visibleAnnouncement.message}
@@ -666,17 +701,21 @@ export const DashboardScreen: React.FC = () => {
             {complianceCards.map((card) => {
               const pct = card.total === 0 ? 0 : Math.round((card.completed / card.total) * 100);
               const done = card.completed === card.total && card.total > 0;
-              return (
-                <Pressable
-                  key={card.strategyKey}
-                  onPress={() =>
-                    navigation.navigate(STRATEGY_COMPLIANCE_ROUTE[card.strategyKey] as never)
-                  }
-                  style={({ pressed }) => [
-                    styles.complianceCard,
-                    pressed && { opacity: 0.85 },
-                  ]}
-                >
+              // Document generator cards follow the same gating as the strategy
+              // cards above: if the strategy isn't in active_strategies the card
+              // is grayed with an amber padlock and tapping opens the upgrade
+              // sheet instead of navigating. Admins (hasStrategy returns true)
+              // are never locked.
+              const locked = !access.hasStrategy(card.strategyKey);
+              const onPress = () => {
+                if (locked) {
+                  setLockedSheet({ name: card.title });
+                  return;
+                }
+                navigation.navigate(STRATEGY_COMPLIANCE_ROUTE[card.strategyKey] as never);
+              };
+              const inner = (
+                <>
                   <View style={[styles.complianceIcon, { backgroundColor: done ? colors.tealLight : colors.lightBlue }]}>
                     <Ionicons
                       name={card.icon}
@@ -696,6 +735,30 @@ export const DashboardScreen: React.FC = () => {
                     </Text>
                     <Ionicons name="chevron-forward" size={16} color={colors.mutedText} />
                   </View>
+                </>
+              );
+              if (locked) {
+                return (
+                  <Pressable key={card.strategyKey} onPress={onPress} style={styles.lockedWrap}>
+                    <View pointerEvents="none" style={[styles.complianceCard, styles.lockedInner]}>
+                      {inner}
+                    </View>
+                    <View style={styles.lockedBadge}>
+                      <Ionicons name="lock-closed" size={20} color={colors.amber} />
+                    </View>
+                  </Pressable>
+                );
+              }
+              return (
+                <Pressable
+                  key={card.strategyKey}
+                  onPress={onPress}
+                  style={({ pressed }) => [
+                    styles.complianceCard,
+                    pressed && { opacity: 0.85 },
+                  ]}
+                >
+                  {inner}
                 </Pressable>
               );
             })}
@@ -830,5 +893,20 @@ const styles = StyleSheet.create({
   compliancePct: {
     fontSize: 13,
     fontWeight: '700',
+  },
+  upgradeBanner: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: spacing.sm,
+    backgroundColor: colors.teal,
+    paddingHorizontal: spacing.lg,
+    paddingVertical: spacing.md,
+  },
+  upgradeBannerText: {
+    flex: 1,
+    color: colors.white,
+    fontSize: 13,
+    fontWeight: '700',
+    lineHeight: 18,
   },
 });

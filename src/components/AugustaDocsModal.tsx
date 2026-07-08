@@ -18,6 +18,7 @@ import { Ionicons } from '@expo/vector-icons';
 import { colors, radius, shadow, spacing, typography } from '../theme';
 import { SignaturePad } from './SignaturePad';
 import { generateAugustaDocuments } from '../services/augustaDocuments';
+import { shareHtmlAsPdf } from '../services/pdfDocuments';
 
 export interface AugustaDocsContext {
   businessId: string | null;
@@ -51,6 +52,9 @@ export const AugustaDocsModal: React.FC<Props> = ({
   const [ownerSig, setOwnerSig] = useState<string | null>(null);
   const [tenantSig, setTenantSig] = useState<string | null>(null);
   const [generating, setGenerating] = useState(false);
+  // Live step label shown on the button while the two PDFs are built in
+  // sequence ("Generating lease agreement…" → "Generating invoice…").
+  const [progress, setProgress] = useState<string | null>(null);
 
   useEffect(() => {
     if (visible && context) {
@@ -61,6 +65,7 @@ export const AugustaDocsModal: React.FC<Props> = ({
       setOwnerSig(null);
       setTenantSig(null);
       setGenerating(false);
+      setProgress(null);
     }
   }, [visible, context, defaultOwnerName]);
 
@@ -75,8 +80,11 @@ export const AugustaDocsModal: React.FC<Props> = ({
       return;
     }
     setGenerating(true);
+    setProgress('Generating lease agreement…');
     try {
-      await generateAugustaDocuments(
+      // Both PDFs are generated + saved in sequence; onProgress drives the
+      // "Generating lease agreement…" → "Generating invoice…" button label.
+      const result = await generateAugustaDocuments(
         {
           businessId: context.businessId,
           ownerName: ownerName.trim(),
@@ -93,17 +101,41 @@ export const AugustaDocsModal: React.FC<Props> = ({
           tenantRepName: tenantRepName.trim(),
           tenantRepTitle: tenantRepTitle.trim() || 'Authorized Representative',
         },
+        setProgress,
       );
       onGenerated();
       onClose();
+      // Both documents are already saved; offer to share them with the
+      // accountant. expo-sharing presents one file per sheet, so the lease sheet
+      // opens first and the invoice sheet follows once it's dismissed.
       Alert.alert(
-        'Documents generated',
-        'Your lease agreement and invoice were saved to your Augusta documents.',
+        'Documents saved',
+        'Lease agreement and invoice saved to your Augusta documents.',
+        [
+          { text: 'Not now', style: 'cancel' },
+          {
+            text: 'Share both',
+            onPress: async () => {
+              try {
+                await shareHtmlAsPdf(result.leaseHtml, 'Augusta Lease Agreement');
+                await shareHtmlAsPdf(result.invoiceHtml, 'Augusta Invoice');
+              } catch (e) {
+                Alert.alert(
+                  'Could not share documents',
+                  e instanceof Error ? e.message : String(e),
+                );
+              }
+            },
+          },
+        ],
       );
     } catch (e) {
+      // The service throws step-specific messages (rental record, lease,
+      // invoice, linking) so the user sees exactly what failed.
       Alert.alert('Could not generate documents', e instanceof Error ? e.message : String(e));
     } finally {
       setGenerating(false);
+      setProgress(null);
     }
   };
 
@@ -198,7 +230,7 @@ export const AugustaDocsModal: React.FC<Props> = ({
             >
               <Ionicons name="documents-outline" size={18} color={colors.white} />
               <Text style={styles.generateBtnText}>
-                {generating ? 'Generating…' : 'Generate lease & invoice'}
+                {generating ? progress ?? 'Generating…' : 'Generate lease & invoice'}
               </Text>
             </TouchableOpacity>
           </ScrollView>

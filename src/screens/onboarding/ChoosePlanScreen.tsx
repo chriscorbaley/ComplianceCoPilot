@@ -18,7 +18,7 @@ import { Ionicons } from '@expo/vector-icons';
 import { colors } from '../../theme';
 import { supabase, type SubscriptionTier } from '../../services/supabase';
 import { useAuth } from '../../auth/AuthContext';
-import type { OnboardingStackParamList } from '../../navigation/types';
+import type { OnboardingStackParamList, RootStackParamList } from '../../navigation/types';
 
 type Nav = NativeStackNavigationProp<OnboardingStackParamList, 'ChoosePlan'>;
 type Route = NativeStackScreenProps<OnboardingStackParamList, 'ChoosePlan'>['route'];
@@ -119,6 +119,14 @@ export const ChoosePlanScreen: React.FC = () => {
 
   const selectPlan = async (tier: SubscriptionTier) => {
     if (!session?.user.id) return;
+    // Post-onboarding upgrade to a paid tier: don't charge or change anything
+    // yet. Route through the confirmation → strategy-selection flow, which
+    // performs the actual tier change and strategy activation on confirm.
+    if (onboardingCompleted && (tier === 'core' || tier === 'pro')) {
+      const rootNav = nav as unknown as NativeStackNavigationProp<RootStackParamList>;
+      rootNav.navigate('UpgradeConfirm', { tier });
+      return;
+    }
     setBusyTier(tier);
     try {
       const { error } = await supabase
@@ -127,9 +135,9 @@ export const ChoosePlanScreen: React.FC = () => {
         .eq('id', session.user.id);
       if (error) throw error;
       await refreshProfile();
-      // Post-onboarding (this screen is also mounted in RootStack so clients can
-      // upgrade any time): the new tier takes effect immediately — gating reads
-      // subscription_tier at render — so just confirm and return.
+      // Post-onboarding downgrade to Starter: the new tier takes effect
+      // immediately (gating reads subscription_tier at render) — confirm and
+      // return.
       if (onboardingCompleted) {
         const label = tier === 'pro' ? 'Pro' : tier === 'core' ? 'Core' : 'Starter';
         Alert.alert('Plan updated', `You're now on the ${label} plan.`);
