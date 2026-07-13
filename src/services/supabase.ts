@@ -20,6 +20,16 @@ export type DayLogJson = Array<{
   description: string;
 }>;
 
+// Day-by-day schedule persisted with a business trip (Fix 2). Each day carries
+// its designation; the derived night counts drive lodging deductibility under
+// the IRS rule (a night is deductible when the following day is a business or
+// travel day, not deductible when the following day is personal).
+export interface DayScheduleJson {
+  days: Array<{ date: string; type: 'business' | 'travel' | 'personal' }>;
+  deductible_nights: number;
+  total_nights: number;
+}
+
 export type SubscriptionTier = 'starter' | 'core' | 'pro';
 export type SubscriptionStatus = 'trial' | 'active' | 'cancelled';
 
@@ -167,6 +177,7 @@ export interface BusinessTripRow {
   business_day_pct: number | null;
   transport_deduct_pct: number | null;
   day_by_day_log: DayLogJson | null;
+  day_schedule: DayScheduleJson | null;
   itinerary_transcript: string | null;
   compliance_verdict: string | null;
   compliance_notes: string | null;
@@ -179,6 +190,48 @@ export interface BusinessTripRow {
 }
 
 export type BusinessTripInsert = Omit<BusinessTripRow, 'id' | 'created_at'> & {
+  id?: string;
+  created_at?: string;
+};
+
+// ── Mileage Tracker (Pro) ────────────────────────────────────────────────
+export interface VehicleRow {
+  id: string;
+  user_id: string;
+  business_id: string | null;
+  year: number | null;
+  make: string | null;
+  model: string | null;
+  nickname: string | null;
+  is_active: boolean;
+  created_at: string;
+}
+
+export type VehicleInsert = Omit<VehicleRow, 'id' | 'created_at' | 'is_active'> & {
+  id?: string;
+  created_at?: string;
+  is_active?: boolean;
+};
+
+export type MileageTripType = 'business' | 'medical';
+
+export interface MileageLogRow {
+  id: string;
+  user_id: string;
+  business_id: string | null;
+  vehicle_id: string | null;
+  trip_date: string | null;
+  start_odometer: number | null;
+  end_odometer: number | null;
+  total_miles: number | null;
+  trip_type: MileageTripType | null;
+  purpose: string | null;
+  tax_year: number | null;
+  deduction_amount: number | null;
+  created_at: string;
+}
+
+export type MileageLogInsert = Omit<MileageLogRow, 'id' | 'created_at'> & {
   id?: string;
   created_at?: string;
 };

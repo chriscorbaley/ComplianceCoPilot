@@ -112,7 +112,7 @@ export const BoardResolutionModal: React.FC<Props> = ({
       onClose();
       Alert.alert(
         'Board Resolution signed and saved',
-        'Your Board Resolution was saved to your S-Corp documents.',
+        'Your Board Resolution has been signed and added to your S-Corp compliance documents automatically.',
       );
     } catch (e) {
       Alert.alert('Could not generate resolution', e instanceof Error ? e.message : String(e));

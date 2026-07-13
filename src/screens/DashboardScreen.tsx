@@ -1,4 +1,4 @@
-import React, { useCallback, useEffect, useState } from 'react';
+import React, { useCallback, useEffect, useRef, useState } from 'react';
 import { Pressable, ScrollView, StyleSheet, Text, View } from 'react-native';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
 import { useFocusEffect, useNavigation, useRoute, CommonActions } from '@react-navigation/native';
@@ -8,6 +8,8 @@ import { colors, spacing } from '../theme';
 import { Header } from '../components/Header';
 import { AlertBanner } from '../components/AlertBanner';
 import { AnnouncementBanner } from '../components/AnnouncementBanner';
+import { RetentionBanner } from '../components/RetentionBanner';
+import { useDocumentRetention } from '../hooks/useDocumentRetention';
 import { MetricCard } from '../components/MetricCard';
 import { StrategyCard, Strategy } from '../components/StrategyCard';
 import { DocumentItem, DocumentRow } from '../components/DocumentItem';
@@ -136,8 +138,30 @@ export const DashboardScreen: React.FC = () => {
   const insets = useSafeAreaInsets();
   const navigation = useNavigation<DashboardNavigationProp>();
   const route = useRoute();
-  const { refreshProfile } = useAuth();
-  const { activeBusinessId } = useBusiness();
+  const { refreshProfile, businessOnboardingCompleted } = useAuth();
+  const {
+    activeBusinessId,
+    businesses,
+    loading: businessLoading,
+  } = useBusiness();
+  const retention = useDocumentRetention(activeBusinessId);
+
+  // Fix 6: first-run business setup. If the user finished onboarding but has no
+  // business record and hasn't skipped setup, route them to the setup screen
+  // once. Guarded by a ref so returning to the Dashboard doesn't re-trigger it.
+  const businessSetupPrompted = useRef(false);
+  useEffect(() => {
+    if (businessLoading || businessSetupPrompted.current) return;
+    if (businesses.length === 0 && !businessOnboardingCompleted) {
+      businessSetupPrompted.current = true;
+      navigation.navigate('BusinessSetup');
+    }
+  }, [businessLoading, businesses.length, businessOnboardingCompleted, navigation]);
+
+  // Show a "complete your business profile" prompt for users who skipped setup
+  // (marked complete but still have no business record).
+  const showBusinessProfilePrompt =
+    !businessLoading && businesses.length === 0 && businessOnboardingCompleted;
   const [data, setData] = useState<DashboardData>(EMPTY_DATA);
   const [rules, setRules] = useState<ComplianceRules | null>(null);
   const [announcement, setAnnouncement] = useState<AnnouncementRow | null>(null);
@@ -545,6 +569,15 @@ export const DashboardScreen: React.FC = () => {
     <View style={styles.root}>
       <Header year={2026} />
 
+      {retention.warning ? (
+        <RetentionBanner
+          warning={retention.warning}
+          onDownloadAll={retention.downloadAll}
+          onDismiss={retention.dismiss}
+          progress={retention.progress}
+        />
+      ) : null}
+
       {upgradeBannerTier && (
         <View style={styles.upgradeBanner}>
           <Ionicons name="checkmark-circle" size={18} color={colors.white} />
@@ -566,6 +599,23 @@ export const DashboardScreen: React.FC = () => {
             })
           }
         />
+      )}
+
+      {showBusinessProfilePrompt && (
+        <View style={styles.businessPrompt}>
+          <View style={styles.businessPromptText}>
+            <Ionicons name="business-outline" size={18} color={colors.navy} />
+            <Text style={styles.businessPromptLabel}>
+              Complete your business profile to unlock all features
+            </Text>
+          </View>
+          <Pressable
+            style={styles.businessPromptBtn}
+            onPress={() => navigation.navigate('BusinessSetup')}
+          >
+            <Text style={styles.businessPromptBtnText}>Set Up Now</Text>
+          </Pressable>
+        </View>
       )}
 
       <ScrollView
@@ -595,7 +645,7 @@ export const DashboardScreen: React.FC = () => {
               ? 'You are at or past the threshold for this year.'
               : `${hoursRemaining} more hours needed by Dec 31. Your minimum is ${effectiveTarget} hours${
                   fiftyBinds
-                    ? ` because the 50% rule applies to your ${data.totalWorkHours} total annual work hours`
+                    ? ` because you work ${data.totalWorkHours} hours in non-real-estate activities and need more real estate hours than that to spend more than half your total working time in real estate`
                     : ''
                 }.`
           }
@@ -908,5 +958,37 @@ const styles = StyleSheet.create({
     fontSize: 13,
     fontWeight: '700',
     lineHeight: 18,
+  },
+  businessPrompt: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: spacing.md,
+    backgroundColor: colors.amberLight,
+    paddingHorizontal: spacing.lg,
+    paddingVertical: spacing.md,
+  },
+  businessPromptText: {
+    flex: 1,
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: spacing.sm,
+  },
+  businessPromptLabel: {
+    flex: 1,
+    color: colors.navy,
+    fontSize: 13,
+    fontWeight: '700',
+    lineHeight: 18,
+  },
+  businessPromptBtn: {
+    backgroundColor: colors.navy,
+    borderRadius: 8,
+    paddingHorizontal: spacing.md,
+    paddingVertical: 8,
+  },
+  businessPromptBtnText: {
+    color: colors.white,
+    fontSize: 13,
+    fontWeight: '700',
   },
 });

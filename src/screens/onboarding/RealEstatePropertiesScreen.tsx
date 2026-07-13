@@ -126,6 +126,25 @@ export const RealEstatePropertiesScreen: React.FC = () => {
     if (!session?.user.id || !valid) return;
     setSaving(true);
     try {
+      // Associate onboarding properties with the user's business so they surface
+      // in screens that filter by the active business (Material Participation
+      // Hours, Properties management). During first-run onboarding no business
+      // exists yet, so business_id stays null here and createBusiness() backfills
+      // these rows once the business is created. During the upgrade flow a
+      // business already exists and we attach directly.
+      let businessId: string | null = null;
+      const { data: bizRows, error: bizErr } = await supabase
+        .from('businesses')
+        .select('id')
+        .eq('user_id', session.user.id)
+        .order('is_default', { ascending: false })
+        .order('created_at', { ascending: true })
+        .limit(1);
+      if (bizErr) {
+        console.error('[RE Onboarding] business lookup failed:', bizErr);
+      }
+      businessId = bizRows?.[0]?.id ?? null;
+
       for (const d of drafts) {
         const propertyName = d.nickname.trim();
         const propertyType: PropertyType = d.type;
@@ -136,6 +155,7 @@ export const RealEstatePropertiesScreen: React.FC = () => {
           .from('properties')
           .insert({
             user_id: session.user.id,
+            business_id: businessId,
             property_name: propertyName,
             property_type: propertyType,
             mp_test_selected: mpTestSelected,
@@ -144,21 +164,21 @@ export const RealEstatePropertiesScreen: React.FC = () => {
           });
 
         if (error) {
-          console.error('[RealEstateProperties] insert failed', {
+          console.error('[RE Onboarding] property save failed:', {
+            propertyName,
             code: error.code,
             message: error.message,
             details: error.details,
             hint: error.hint,
           });
           const parts = [
+            `Could not save ${propertyName}. Please try again.`,
             error.message,
             error.code ? `(code ${error.code})` : null,
             error.hint ? `Hint: ${error.hint}` : null,
             error.details ? `Details: ${error.details}` : null,
           ].filter(Boolean);
-          throw new Error(
-            parts.length > 0 ? parts.join(' — ') : 'Could not save property',
-          );
+          throw new Error(parts.join(' — '));
         }
       }
 

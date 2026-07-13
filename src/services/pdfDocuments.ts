@@ -272,6 +272,16 @@ export async function shareHtmlAsPdf(
   });
 }
 
+// Renders HTML (which may still contain __LOGO_SRC__) to a local PDF file and
+// returns its file:// URI. Used when a generated document also needs to be
+// stored as a file (e.g. uploaded to a strategy_documents slot) rather than
+// only shared.
+export async function renderHtmlToPdfUri(html: string): Promise<string> {
+  const hydrated = await hydrateLogo(html);
+  const { uri } = await Print.printToFileAsync({ html: hydrated, base64: false });
+  return uri;
+}
+
 export interface SaveGeneratedDocumentInput {
   businessId: string | null;
   name: string;

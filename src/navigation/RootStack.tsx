@@ -1,4 +1,6 @@
 import React from 'react';
+import { TouchableOpacity } from 'react-native';
+import { Ionicons } from '@expo/vector-icons';
 import { createNativeStackNavigator } from '@react-navigation/native-stack';
 import { colors } from '../theme';
 import { BottomTabs } from './BottomTabs';
@@ -15,6 +17,7 @@ import { CancelWarning1Screen } from '../screens/CancelWarning1Screen';
 import { CancelWarning2Screen } from '../screens/CancelWarning2Screen';
 import { BusinessesScreen } from '../screens/BusinessesScreen';
 import { BusinessEditScreen } from '../screens/BusinessEditScreen';
+import { BusinessSetupScreen } from '../screens/onboarding/BusinessSetupScreen';
 import { PropertiesScreen } from '../screens/PropertiesScreen';
 import { PropertyEditScreen } from '../screens/PropertyEditScreen';
 import { RealEstateTypeScreen } from '../screens/onboarding/RealEstateTypeScreen';
@@ -34,13 +37,30 @@ const Stack = createNativeStackNavigator<RootStackParamList>();
 export const RootStack: React.FC = () => {
   return (
     <Stack.Navigator
-      screenOptions={{
+      screenOptions={({ navigation }) => ({
         headerStyle: { backgroundColor: colors.navy },
         headerTintColor: colors.white,
         headerTitleStyle: { color: colors.white, fontSize: 17, fontWeight: '600' },
         headerShadowVisible: false,
         contentStyle: { backgroundColor: colors.background },
-      }}
+        // Replace the platform back button with an explicit, always-functional
+        // JS back button. The native header back button was intermittently not
+        // firing on sub-menu screens (users had to swipe back); this guarantees
+        // a tappable back control on every pushed screen while leaving the
+        // swipe-back gesture enabled as a fallback. Rendered only when there's a
+        // screen to return to.
+        headerBackVisible: false,
+        headerLeft: () =>
+          navigation.canGoBack() ? (
+            <TouchableOpacity
+              onPress={() => navigation.goBack()}
+              style={{ paddingRight: 16, paddingVertical: 4 }}
+              hitSlop={{ top: 8, bottom: 8, left: 8, right: 8 }}
+            >
+              <Ionicons name="chevron-back" size={24} color={colors.white} />
+            </TouchableOpacity>
+          ) : null,
+      })}
     >
       <Stack.Screen
         name="Tabs"
@@ -125,6 +145,11 @@ export const RootStack: React.FC = () => {
         name="BusinessEdit"
         component={BusinessEditScreen}
         options={{ title: 'Business' }}
+      />
+      <Stack.Screen
+        name="BusinessSetup"
+        component={BusinessSetupScreen}
+        options={{ headerShown: false, gestureEnabled: false }}
       />
       <Stack.Screen
         name="Properties"

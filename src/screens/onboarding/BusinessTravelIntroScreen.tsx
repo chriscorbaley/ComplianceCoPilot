@@ -132,7 +132,11 @@ export const BusinessTravelIntroScreen: React.FC = () => {
               <TouchableOpacity
                 activeOpacity={0.85}
                 style={[styles.cta, styles.ctaNavy]}
-                onPress={() => nav.replace('Payment')}
+                // Core sees the Mileage (Pro) upsell next; Pro already has
+                // everything and goes straight to payment.
+                onPress={() =>
+                  nav.replace(tier === 'core' ? 'MileageIntro' : 'Payment')
+                }
               >
                 <Text style={styles.ctaText}>Continue</Text>
               </TouchableOpacity>
@@ -175,28 +179,35 @@ const styles = StyleSheet.create({
   },
   statsRow: {
     flexDirection: 'row',
-    gap: 10,
+    gap: 8,
     marginTop: 24,
+    alignItems: 'stretch',
   },
   statCard: {
     flex: 1,
+    minWidth: 0,
     backgroundColor: 'rgba(255,255,255,0.06)',
     borderWidth: 1,
     borderColor: 'rgba(133,183,235,0.25)',
     borderRadius: 12,
     paddingVertical: 14,
-    paddingHorizontal: 10,
+    paddingHorizontal: 8,
+    alignItems: 'center',
   },
   statValue: {
     color: colors.amber,
-    fontSize: 17,
+    fontSize: 15,
     fontWeight: '800',
+    textAlign: 'center',
+    flexShrink: 1,
   },
   statLabel: {
     color: colors.white,
     fontSize: 11,
     lineHeight: 15,
     marginTop: 6,
+    textAlign: 'center',
+    flexShrink: 1,
   },
   card: {
     backgroundColor: colors.white,

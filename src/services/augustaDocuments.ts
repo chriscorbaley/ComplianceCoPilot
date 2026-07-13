@@ -7,6 +7,7 @@
 import { File } from 'expo-file-system';
 import { decode as decodeBase64 } from 'base64-arraybuffer';
 import { supabase, requireUserId } from './supabase';
+import { compressImageForUpload } from '../utils/imageCompress';
 import {
   buildBrandedDocHtml,
   sectionHeader,
@@ -538,6 +539,25 @@ export async function listComparables(
   return (data ?? []) as AugustaComparableRow[];
 }
 
+// Every comparables row the user has ever saved, across all tax years, newest
+// first. Backs the "your comparables" property cards so previously-uploaded
+// comparables are retrieved automatically — the user never has to re-type a
+// property name to find them.
+export async function listAllComparables(
+  businessId: string | null,
+): Promise<AugustaComparableRow[]> {
+  const userId = await requireUserId();
+  let q = supabase
+    .from('augusta_comparables')
+    .select('*')
+    .eq('user_id', userId)
+    .order('created_at', { ascending: false });
+  if (businessId) q = q.eq('business_id', businessId);
+  const { data, error } = await q;
+  if (error) throw new Error(error.message);
+  return (data ?? []) as AugustaComparableRow[];
+}
+
 const slug = (s: string): string =>
   s.toLowerCase().replace(/[^a-z0-9]+/g, '-').replace(/^-+|-+$/g, '').slice(0, 40) || 'property';
 
@@ -554,16 +574,48 @@ export async function uploadComparable(input: {
   rate: number | null;
 }): Promise<AugustaComparableRow> {
   const userId = await requireUserId();
-  const base64 = await new File(input.localUri).base64();
+  // Downscale + re-encode images before upload so a large screenshot can't stall
+  // the request (which would hang the slot's spinner). Non-image files (PDFs)
+  // pass through unchanged. Derive the extension from the file we actually upload.
+  const uploadUri = await compressImageForUpload(input.localUri);
+  const base64 = await new File(uploadUri).base64();
   const bytes = decodeBase64(base64);
-  const ext = (input.fileName.split('.').pop() ?? 'png').toLowerCase().replace(/[^a-z0-9]/g, '') || 'png';
-  const path = `${userId}/${slug(input.propertyName)}/${input.taxYear}/comp${input.slot}_${Date.now()}.${ext}`;
-  const contentType = input.mimeType ?? 'application/octet-stream';
+  const ext = (uploadUri.split('.').pop() ?? 'jpg').toLowerCase().replace(/[^a-z0-9]/g, '') || 'jpg';
+  // Path convention: augusta-comparables/<user_id>/<filename>. The file name
+  // still encodes the property, tax year and slot so multiple comparables stay
+  // unique inside the user's folder. Keeping <user_id> as the first path
+  // segment matches the bucket's RLS policy (owner = auth.uid()).
+  const fileName = `${slug(input.propertyName)}_${input.taxYear}_comp${input.slot}_${Date.now()}.${ext}`;
+  const path = `${userId}/${fileName}`;
+  // Prefer the picker-provided MIME type; otherwise derive a real image/PDF
+  // content type from the extension. Uploading as application/octet-stream made
+  // the stored file un-previewable (signed URLs served the wrong type).
+  const contentType =
+    input.mimeType ??
+    (ext === 'jpg' || ext === 'jpeg'
+      ? 'image/jpeg'
+      : ext === 'pdf'
+        ? 'application/pdf'
+        : `image/${ext}`);
 
   const { error: upErr } = await supabase.storage
     .from(COMPARABLES_BUCKET)
-    .upload(path, bytes, { contentType, upsert: false });
-  if (upErr) throw upErr;
+    .upload(path, bytes, { contentType, upsert: true });
+  // Surface a clear, user-facing message for any storage failure (bucket
+  // missing, RLS denial, network) instead of the raw Supabase error. Log the
+  // full error so the root cause is visible in the Metro console.
+  if (upErr) {
+    const e = upErr as { message?: string; statusCode?: string; error?: string };
+    console.error('[Augusta Comparables] upload failed:', {
+      message: e?.message,
+      statusCode: e?.statusCode,
+      error: e?.error,
+      details: JSON.stringify(upErr),
+    });
+    throw new Error(
+      'Upload failed: ' + (e?.message || (e as { error_description?: string })?.error_description || JSON.stringify(upErr)),
+    );
+  }
 
   const column = `comparable_${input.slot}_url` as const;
   const { data, error } = await supabase
@@ -578,11 +630,25 @@ export async function uploadComparable(input: {
         rental_rate_justified: input.rate,
         updated_at: new Date().toISOString(),
       },
-      { onConflict: 'user_id,business_id,property_name,tax_year' },
+      // Must match the exact unique constraint on augusta_comparables:
+      // UNIQUE (user_id, property_name, tax_year). business_id is stored but is
+      // not part of the conflict target.
+      { onConflict: 'user_id,property_name,tax_year' },
     )
     .select('*')
     .single();
-  if (error || !data) throw error ?? new Error('Could not save comparable');
+  if (error || !data) {
+    console.error('[Augusta Comparables] save failed:', {
+      message: error?.message,
+      code: error?.code,
+      details: error?.details,
+      hint: error?.hint,
+      raw: JSON.stringify(error),
+    });
+    throw new Error(
+      'Upload failed: ' + (error?.message || error?.details || JSON.stringify(error ?? {})),
+    );
+  }
   return data as AugustaComparableRow;
 }
 

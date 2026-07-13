@@ -23,10 +23,13 @@ interface RealEstateFlowBase {
 export type OnboardingStackParamList = {
   EmailVerify: undefined;
   Terms: undefined;
+  NotificationsPermission: undefined;
   Privacy: undefined;
   ChoosePlan: { highlight?: SubscriptionTier } | undefined;
   UpgradeTeaser: undefined;
   BusinessTravelIntro: undefined;
+  // Core-only upsell screen shown between Business Travel intro and Payment.
+  MileageIntro: undefined;
   Payment: undefined;
   StrategySelection: undefined;
   // Real estate v2 onboarding flow.
@@ -108,6 +111,9 @@ export type RootStackParamList = {
   };
   Businesses: undefined;
   BusinessEdit: { businessId?: string } | undefined;
+  // Post-onboarding business profile setup, shown once when the user has no
+  // business record yet (Fix 6).
+  BusinessSetup: undefined;
   Properties: undefined;
   PropertyEdit: { propertyId?: string } | undefined;
   SCorpCompliance: undefined;
@@ -121,6 +127,7 @@ export type TabParamList = {
   Dashboard: { upgradedTo?: SubscriptionTier } | undefined;
   Hours: undefined;
   Trips: undefined;
+  Mileage: undefined;
   Minutes: undefined;
   Docs: undefined;
 };

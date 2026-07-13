@@ -62,7 +62,7 @@ export const TermsScreen: React.FC = () => {
         .from('tos_acceptances')
         .insert({ user_id: session.user.id, tos_version: TOS_VERSION });
       if (error) throw error;
-      nav.replace('Privacy');
+      nav.replace('NotificationsPermission');
     } catch (err) {
       Alert.alert('Could not save acceptance', err instanceof Error ? err.message : String(err));
     } finally {

@@ -70,9 +70,17 @@ create table if not exists public.augusta_comparables (
 );
 create index if not exists augusta_comparables_user_idx
   on public.augusta_comparables(user_id, tax_year desc);
--- One comparable set per (business, property, year).
+-- One comparable set per (user, property, year). business_id is intentionally
+-- NOT part of the conflict target: it is nullable (comparables can be uploaded
+-- during onboarding before a business row exists), and NULLs are distinct in a
+-- unique index, which would break the upsert dedupe. This index must match the
+-- onConflict target used by uploadComparable() in src/services/augustaDocuments.ts
+-- ('user_id,property_name,tax_year') — a mismatch raises Postgres error 42P10
+-- ("no unique or exclusion constraint matching the ON CONFLICT specification")
+-- and the row is never saved after the file uploads to storage.
+drop index if exists public.augusta_comparables_unique_idx;
 create unique index if not exists augusta_comparables_unique_idx
-  on public.augusta_comparables(user_id, business_id, property_name, tax_year);
+  on public.augusta_comparables(user_id, property_name, tax_year);
 
 -- ─── Row Level Security ────────────────────────────────────────────────────
 -- Same per-user policy pattern used by businesses/documents/etc in schema.sql.

@@ -71,7 +71,7 @@ export const AccountablePlanModal: React.FC<Props> = ({
       onClose();
       Alert.alert(
         'Accountable Plan signed and saved',
-        'Your Accountable Plan was saved to your S-Corp documents.',
+        'Your Accountable Plan has been signed and added to your S-Corp compliance documents automatically.',
       );
     } catch (e) {
       Alert.alert('Could not generate plan', e instanceof Error ? e.message : String(e));

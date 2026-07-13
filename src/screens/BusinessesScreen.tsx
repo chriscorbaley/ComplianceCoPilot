@@ -13,6 +13,7 @@ import { useFocusEffect, useNavigation } from '@react-navigation/native';
 import type { NativeStackNavigationProp } from '@react-navigation/native-stack';
 import { colors, radius, spacing, typography } from '../theme';
 import { useBusiness } from '../business/BusinessContext';
+import { useSignedLogoUrls } from '../hooks/useSignedLogoUrls';
 import { deleteBusiness, setDefaultBusiness } from '../services/businesses';
 import type { RootStackParamList } from '../navigation/types';
 import type { BusinessRow } from '../services/supabase';
@@ -20,6 +21,10 @@ import type { BusinessRow } from '../services/supabase';
 export const BusinessesScreen: React.FC = () => {
   const navigation = useNavigation<NativeStackNavigationProp<RootStackParamList>>();
   const { businesses, activeBusinessId, setActiveBusinessId, refresh } = useBusiness();
+
+  // The 'business-logos' bucket is private, so resolve each stored storage path
+  // into a short-lived signed URL for display. Re-minted on focus.
+  const logoUrls = useSignedLogoUrls(businesses);
 
   // Refresh on focus so an edit/add in the form screen is reflected here.
   useFocusEffect(
@@ -73,11 +78,13 @@ export const BusinessesScreen: React.FC = () => {
             </Text>
           </View>
         ) : (
-          businesses.map((b) => (
+          businesses.map((b) => {
+            const rowLogo = logoUrls[b.id] ?? null;
+            return (
             <View key={b.id} style={styles.card}>
               <View style={styles.cardRow}>
-                {b.logo_url ? (
-                  <Image source={{ uri: b.logo_url }} style={styles.logo} />
+                {rowLogo ? (
+                  <Image source={{ uri: rowLogo }} style={styles.logo} />
                 ) : (
                   <View style={styles.logoPlaceholder}>
                     <Ionicons name="business-outline" size={22} color={colors.midNavy} />
@@ -122,7 +129,8 @@ export const BusinessesScreen: React.FC = () => {
                 </TouchableOpacity>
               </View>
             </View>
-          ))
+            );
+          })
         )}
 
         <TouchableOpacity

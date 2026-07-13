@@ -31,6 +31,10 @@ import {
   type DocumentRow,
 } from '../services/supabase';
 import { useBusiness } from '../business/BusinessContext';
+import { useYear } from '../context/YearContext';
+import { YearSelector } from '../components/YearSelector';
+import { RetentionBanner } from '../components/RetentionBanner';
+import { useDocumentRetention } from '../hooks/useDocumentRetention';
 import { useStrategyAccess } from '../hooks/useStrategyAccess';
 import { LockedStrategySheet } from '../components/LockedStrategySheet';
 import {
@@ -168,7 +172,8 @@ const rowToDoc = (row: DocumentRow): DocEntry => {
   const inlineText =
     fileType === 'minutes' ||
     fileType === 'activity_log' ||
-    fileType === 'augusta_meeting'
+    fileType === 'augusta_meeting' ||
+    fileType === 'trip_report'
       ? row.file_url ?? ''
       : '';
   const searchBlob = [
@@ -244,7 +249,9 @@ const comparableRowToDoc = (row: ComparableRow): DocEntry => {
   const count = [row.comparable_1_url, row.comparable_2_url, row.comparable_3_url].filter(
     Boolean,
   ).length;
-  const name = `Rate Comparables — ${property} ${year}`;
+  // Named by property alone (no year) so the user never needs to know the year
+  // to find a property's comparables — e.g. "Scottsdale Comparables".
+  const name = `${property} Comparables`;
   const searchBlob = [name, 'Augusta', 'augusta_rule', 'rate_comparables', property, String(year)]
     .join('\n')
     .toLowerCase();
@@ -294,7 +301,7 @@ const ACTIVITY_BADGE = { bg: colors.tealLight, fg: colors.teal };
 
 // file_type values whose file_url holds the document text itself (not a remote
 // URI). These render in the in-app viewer and share as a generated PDF.
-const TEXT_DOC_TYPES = new Set(['minutes', 'activity_log', 'augusta_meeting']);
+const TEXT_DOC_TYPES = new Set(['minutes', 'activity_log', 'augusta_meeting', 'trip_report']);
 // Of the text docs, these are user-editable in place.
 const EDITABLE_DOC_TYPES = new Set(['minutes', 'activity_log']);
 // file_type values whose file_url holds full branded HTML (generated signed
@@ -356,6 +363,8 @@ export const DocsScreen: React.FC = () => {
   const insets = useSafeAreaInsets();
   const navigation = useNavigation<DocsNavigationProp>();
   const { activeBusinessId } = useBusiness();
+  const { startIso, endIso } = useYear();
+  const retention = useDocumentRetention(activeBusinessId);
   const access = useStrategyAccess();
   // Non-selected strategy chips are locked: tapping shows the upgrade sheet
   // instead of filtering. `lockedSheet` holds the tapped strategy's name.
@@ -387,6 +396,8 @@ export const DocsScreen: React.FC = () => {
       let query = supabase
         .from('documents')
         .select('*')
+        .gte('created_at', `${startIso}T00:00:00`)
+        .lte('created_at', `${endIso}T23:59:59`)
         .order('created_at', { ascending: false });
       if (activeBusinessId) query = query.eq('business_id', activeBusinessId);
       let rentalsQuery = supabase
@@ -440,7 +451,7 @@ export const DocsScreen: React.FC = () => {
         error?.message || JSON.stringify(error),
       );
     }
-  }, [activeBusinessId]);
+  }, [activeBusinessId, startIso, endIso]);
 
   useFocusEffect(
     useCallback(() => {
@@ -652,6 +663,17 @@ export const DocsScreen: React.FC = () => {
         <Text style={styles.title}>My documents</Text>
         <Text style={styles.subtitle}>Your private compliance document vault</Text>
       </View>
+
+      {retention.warning ? (
+        <RetentionBanner
+          warning={retention.warning}
+          onDownloadAll={retention.downloadAll}
+          onDismiss={retention.dismiss}
+          progress={retention.progress}
+        />
+      ) : null}
+
+      <YearSelector />
 
       <View style={styles.searchWrap}>
         <View style={[styles.searchBar, searchFocused && styles.searchBarFocused]}>

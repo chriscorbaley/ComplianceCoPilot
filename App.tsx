@@ -7,6 +7,7 @@ import { OnboardingStack } from './src/navigation/OnboardingStack';
 import { colors } from './src/theme';
 import { AuthProvider, useAuth } from './src/auth/AuthContext';
 import { BusinessProvider } from './src/business/BusinessContext';
+import { YearProvider } from './src/context/YearContext';
 import { LoginScreen } from './src/screens/LoginScreen';
 import { SignUpScreen } from './src/screens/SignUpScreen';
 import { SplashScreen } from './src/screens/SplashScreen';
@@ -52,9 +53,11 @@ const Gate: React.FC = () => {
   }
   return (
     <BusinessProvider>
-      <NavigationContainer theme={navTheme}>
-        <RootStack />
-      </NavigationContainer>
+      <YearProvider>
+        <NavigationContainer theme={navTheme}>
+          <RootStack />
+        </NavigationContainer>
+      </YearProvider>
     </BusinessProvider>
   );
 };

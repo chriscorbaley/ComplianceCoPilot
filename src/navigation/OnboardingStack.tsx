@@ -3,10 +3,12 @@ import { createNativeStackNavigator } from '@react-navigation/native-stack';
 import { colors } from '../theme';
 import { EmailVerifyScreen } from '../screens/onboarding/EmailVerifyScreen';
 import { TermsScreen } from '../screens/onboarding/TermsScreen';
+import { NotificationsPermissionScreen } from '../screens/onboarding/NotificationsPermissionScreen';
 import { PrivacyScreen } from '../screens/onboarding/PrivacyScreen';
 import { ChoosePlanScreen } from '../screens/onboarding/ChoosePlanScreen';
 import { UpgradeTeaserScreen } from '../screens/onboarding/UpgradeTeaserScreen';
 import { BusinessTravelIntroScreen } from '../screens/onboarding/BusinessTravelIntroScreen';
+import { MileageIntroScreen } from '../screens/onboarding/MileageIntroScreen';
 import { PaymentScreen } from '../screens/onboarding/PaymentScreen';
 import { StrategySelectionScreen } from '../screens/onboarding/StrategySelectionScreen';
 import { RealEstateTypeScreen } from '../screens/onboarding/RealEstateTypeScreen';
@@ -31,10 +33,15 @@ export const OnboardingStack: React.FC = () => {
     >
       <Stack.Screen name="EmailVerify" component={EmailVerifyScreen} />
       <Stack.Screen name="Terms" component={TermsScreen} />
+      <Stack.Screen
+        name="NotificationsPermission"
+        component={NotificationsPermissionScreen}
+      />
       <Stack.Screen name="Privacy" component={PrivacyScreen} />
       <Stack.Screen name="ChoosePlan" component={ChoosePlanScreen} />
       <Stack.Screen name="UpgradeTeaser" component={UpgradeTeaserScreen} />
       <Stack.Screen name="BusinessTravelIntro" component={BusinessTravelIntroScreen} />
+      <Stack.Screen name="MileageIntro" component={MileageIntroScreen} />
       <Stack.Screen name="Payment" component={PaymentScreen} />
       <Stack.Screen name="StrategySelection" component={StrategySelectionScreen} />
       <Stack.Screen name="RealEstateType" component={RealEstateTypeScreen} />

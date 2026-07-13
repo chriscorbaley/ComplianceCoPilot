@@ -7,6 +7,7 @@ interface AuthState {
   isAdmin: boolean;
   fullName: string | null;
   onboardingCompleted: boolean;
+  businessOnboardingCompleted: boolean;
   subscriptionTier: SubscriptionTier | null;
   activeStrategies: string[];
   emailVerified: boolean;
@@ -22,6 +23,7 @@ interface UserProfile {
   isAdmin: boolean;
   fullName: string | null;
   onboardingCompleted: boolean;
+  businessOnboardingCompleted: boolean;
   subscriptionTier: SubscriptionTier | null;
   activeStrategies: string[];
 }
@@ -29,7 +31,9 @@ interface UserProfile {
 async function fetchUserProfile(userId: string): Promise<UserProfile> {
   const { data, error } = await supabase
     .from('users')
-    .select('is_admin, full_name, onboarding_completed, subscription_tier, active_strategies')
+    .select(
+      'is_admin, full_name, onboarding_completed, business_onboarding_completed, subscription_tier, active_strategies',
+    )
     .eq('id', userId)
     .maybeSingle();
   if (error || !data) {
@@ -37,6 +41,7 @@ async function fetchUserProfile(userId: string): Promise<UserProfile> {
       isAdmin: false,
       fullName: null,
       onboardingCompleted: false,
+      businessOnboardingCompleted: false,
       subscriptionTier: null,
       activeStrategies: [],
     };
@@ -45,6 +50,7 @@ async function fetchUserProfile(userId: string): Promise<UserProfile> {
     is_admin?: boolean;
     full_name?: string | null;
     onboarding_completed?: boolean | null;
+    business_onboarding_completed?: boolean | null;
     subscription_tier?: SubscriptionTier | null;
     active_strategies?: string[] | null;
   };
@@ -52,6 +58,7 @@ async function fetchUserProfile(userId: string): Promise<UserProfile> {
     isAdmin: Boolean(row.is_admin),
     fullName: row.full_name ?? null,
     onboardingCompleted: Boolean(row.onboarding_completed),
+    businessOnboardingCompleted: Boolean(row.business_onboarding_completed),
     subscriptionTier: row.subscription_tier ?? null,
     activeStrategies: Array.isArray(row.active_strategies) ? row.active_strategies : [],
   };
@@ -63,6 +70,7 @@ export const AuthProvider: React.FC<React.PropsWithChildren> = ({ children }) =>
   const [isAdmin, setIsAdmin] = useState(false);
   const [fullName, setFullName] = useState<string | null>(null);
   const [onboardingCompleted, setOnboardingCompleted] = useState(false);
+  const [businessOnboardingCompleted, setBusinessOnboardingCompleted] = useState(false);
   const [subscriptionTier, setSubscriptionTier] = useState<SubscriptionTier | null>(null);
   const [activeStrategies, setActiveStrategies] = useState<string[]>([]);
 
@@ -70,6 +78,7 @@ export const AuthProvider: React.FC<React.PropsWithChildren> = ({ children }) =>
     setIsAdmin(p.isAdmin);
     setFullName(p.fullName);
     setOnboardingCompleted(p.onboardingCompleted);
+    setBusinessOnboardingCompleted(p.businessOnboardingCompleted);
     setSubscriptionTier(p.subscriptionTier);
     setActiveStrategies(p.activeStrategies);
   }, []);
@@ -102,6 +111,7 @@ export const AuthProvider: React.FC<React.PropsWithChildren> = ({ children }) =>
           isAdmin: false,
           fullName: null,
           onboardingCompleted: false,
+          businessOnboardingCompleted: false,
           subscriptionTier: null,
           activeStrategies: [],
         });
@@ -142,6 +152,7 @@ export const AuthProvider: React.FC<React.PropsWithChildren> = ({ children }) =>
         isAdmin,
         fullName,
         onboardingCompleted,
+        businessOnboardingCompleted,
         subscriptionTier,
         activeStrategies,
         emailVerified,

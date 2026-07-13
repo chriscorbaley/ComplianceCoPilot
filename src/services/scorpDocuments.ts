@@ -14,9 +14,36 @@ import {
   escapeHtml,
   saveGeneratedDocument,
   shareHtmlAsPdf,
+  renderHtmlToPdfUri,
 } from './pdfDocuments';
+import { uploadStrategyDocument } from './strategyDocuments';
 
 const SIGNATURE_BUCKET = 'scorp-signatures';
+
+// Renders the generated document to a PDF file and files it into the S-Corp
+// compliance slot (strategy_documents) so the corresponding upload slot on the
+// S-Corp Compliance screen shows as completed automatically — the client does
+// not need to re-upload the document they just generated.
+//
+// documentKey MUST match a slot key from strategyComplianceSlots.STRATEGY_
+// COMPLIANCE_SLOTS.s_corp — 'accountable_plan' for the Accountable Plan and
+// 'annual_board_minutes' for the Annual Board Meeting Minutes slot.
+async function fileToSCorpSlot(opts: {
+  businessId: string | null;
+  documentKey: string;
+  documentName: string;
+  html: string;
+}): Promise<void> {
+  const pdfUri = await renderHtmlToPdfUri(opts.html);
+  await uploadStrategyDocument({
+    strategyKey: 's_corp',
+    documentKey: opts.documentKey,
+    businessId: opts.businessId,
+    localUri: pdfUri,
+    fileName: `${opts.documentName}.pdf`,
+    mimeType: 'application/pdf',
+  });
+}
 
 const MONTHS_LONG = [
   'January', 'February', 'March', 'April', 'May', 'June',
@@ -160,6 +187,13 @@ export async function generateAccountablePlan(
     fileType: 'signed_document',
     html,
   });
+  // Auto-fill the "Accountable Plan Adoption Document" compliance slot.
+  await fileToSCorpSlot({
+    businessId: input.businessId,
+    documentKey: 'accountable_plan',
+    documentName: name,
+    html,
+  });
   await shareHtmlAsPdf(html, name);
 }
 
@@ -282,6 +316,16 @@ export async function generateBoardResolution(
     name,
     strategyCategory: 's_corp',
     fileType: 'signed_document',
+    html,
+  });
+  // Auto-fill the "Annual Board Meeting Minutes" compliance slot. The slot key
+  // registered for that slot is 'annual_board_minutes' (see
+  // strategyComplianceSlots), so we file under that key for the checkmark to
+  // appear on the S-Corp Compliance screen.
+  await fileToSCorpSlot({
+    businessId: input.businessId,
+    documentKey: 'annual_board_minutes',
+    documentName: name,
     html,
   });
   await shareHtmlAsPdf(html, name);

@@ -6,6 +6,7 @@ import { colors, typography } from '../theme';
 import { DashboardScreen } from '../screens/DashboardScreen';
 import { HoursScreen } from '../screens/HoursScreen';
 import { BusinessTravelScreen } from '../screens/BusinessTravelScreen';
+import { MileageScreen } from '../screens/MileageScreen';
 import { MinutesScreen } from '../screens/MinutesScreen';
 import { DocsScreen } from '../screens/DocsScreen';
 import type { TabParamList } from './types';
@@ -22,6 +23,8 @@ const iconFor = (route: keyof TabParamList, focused: boolean): IconName => {
       return focused ? 'time' : 'time-outline';
     case 'Trips':
       return focused ? 'airplane' : 'airplane-outline';
+    case 'Mileage':
+      return focused ? 'speedometer' : 'speedometer-outline';
     case 'Minutes':
       return focused ? 'document-text' : 'document-text-outline';
     case 'Docs':
@@ -55,6 +58,7 @@ export const BottomTabs: React.FC = () => {
         component={BusinessTravelScreen}
         options={{ tabBarLabel: 'Trips' }}
       />
+      <Tab.Screen name="Mileage" component={MileageScreen} />
       <Tab.Screen name="Minutes" component={MinutesScreen} />
       <Tab.Screen name="Docs" component={DocsScreen} />
     </Tab.Navigator>

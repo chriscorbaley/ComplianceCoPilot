@@ -21,6 +21,8 @@ import * as Print from 'expo-print';
 import { colors, spacing, typography } from '../theme';
 import type { RootStackParamList } from '../navigation/types';
 import { useBusiness } from '../business/BusinessContext';
+import { getSignedLogoUrl } from '../services/businesses';
+import { useSignedLogoUrl } from '../hooks/useSignedLogoUrls';
 import type { BusinessRow } from '../services/supabase';
 
 type Route = RouteProp<RootStackParamList, 'MinutesDocument'>;
@@ -103,7 +105,9 @@ const escapeHtml = (s: string): string =>
 // PDF. Pulls the active business name, entity, address, and logo so that an
 // auditor sees who the document belongs to. Returns empty string when no
 // business is active so the document still renders cleanly.
-const buildBusinessHeaderHtml = (business: BusinessRow | null): string => {
+// logoUrl is a pre-resolved signed URL (the 'business-logos' bucket is private,
+// so business.logo_url holds only a storage path that <img> cannot fetch).
+const buildBusinessHeaderHtml = (business: BusinessRow | null, logoUrl: string | null): string => {
   if (!business) return '';
   const lines = [
     business.entity_type ? escapeHtml(business.entity_type) : '',
@@ -111,8 +115,8 @@ const buildBusinessHeaderHtml = (business: BusinessRow | null): string => {
   ]
     .filter(Boolean)
     .join(' · ');
-  const logoImg = business.logo_url
-    ? `<img src="${escapeHtml(business.logo_url)}" class="bizLogo" />`
+  const logoImg = logoUrl
+    ? `<img src="${escapeHtml(logoUrl)}" class="bizLogo" />`
     : '';
   return `
   <div class="bizHdr">
@@ -130,6 +134,7 @@ const buildHtmlForPdf = (
   meetingDate: string,
   location: string,
   business: BusinessRow | null,
+  logoUrl: string | null,
 ): string => {
   const lines = document.split(/\r?\n/);
   const body = lines
@@ -175,7 +180,7 @@ const buildHtmlForPdf = (
   .foot { margin-top: 32px; color: #6B7280; font-size: 9pt; border-top: 1px solid #E5E7EB; padding-top: 8px; }
 </style></head>
 <body>
-  ${buildBusinessHeaderHtml(business)}
+  ${buildBusinessHeaderHtml(business, logoUrl)}
   <div class="hdr">
     <h1>Meeting Minutes</h1>
     <div class="meta">${escapeHtml(meetingType)} · ${escapeHtml(meetingDate)} · ${escapeHtml(location)}</div>
@@ -191,6 +196,8 @@ export const MinutesDocumentScreen: React.FC = () => {
   const { params } = useRoute<Route>();
   const { document, meetingType, meetingDate, location } = params;
   const { activeBusiness } = useBusiness();
+  // Private-bucket logo → signed URL for the on-screen header preview.
+  const bizLogo = useSignedLogoUrl(activeBusiness?.logo_url);
 
   const [shareOpen, setShareOpen] = useState(false);
   const [sharing, setSharing] = useState(false);
@@ -244,7 +251,16 @@ export const MinutesDocumentScreen: React.FC = () => {
         Alert.alert('Sharing not available', 'This device cannot share files.');
         return;
       }
-      const html = buildHtmlForPdf(document, meetingType, meetingDate, location, activeBusiness);
+      // Mint a signed URL for the private-bucket logo so it renders in the PDF.
+      const logoUrl = await getSignedLogoUrl(activeBusiness?.logo_url);
+      const html = buildHtmlForPdf(
+        document,
+        meetingType,
+        meetingDate,
+        location,
+        activeBusiness,
+        logoUrl,
+      );
       const { uri } = await Print.printToFileAsync({ html });
       // Rename the PDF so the share sheet shows a friendly name.
       const dir = FileSystem.cacheDirectory;
@@ -318,9 +334,9 @@ export const MinutesDocumentScreen: React.FC = () => {
       >
         {activeBusiness ? (
           <View style={styles.bizHeaderBlock}>
-            {activeBusiness.logo_url ? (
+            {bizLogo ? (
               <Image
-                source={{ uri: activeBusiness.logo_url }}
+                source={{ uri: bizLogo }}
                 style={styles.bizHeaderLogo}
                 resizeMode="contain"
               />

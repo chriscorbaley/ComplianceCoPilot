@@ -23,12 +23,12 @@ import {
 import { Ionicons } from '@expo/vector-icons';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
 import { useFocusEffect } from '@react-navigation/native';
-import * as DocumentPicker from 'expo-document-picker';
+import { pickImageWithSource } from '../../utils/imagePicker';
 import { colors, radius, shadow, spacing, typography } from '../../theme';
 import { useBusiness } from '../../business/BusinessContext';
 import {
   listAugustaProperties,
-  listComparables,
+  listAllComparables,
   uploadComparable,
   getComparableSignedUrl,
   type AugustaComparableRow,
@@ -48,9 +48,12 @@ const slotUrl = (row: AugustaComparableRow | undefined, slot: 1 | 2 | 3): string
 
 const ComparableSlot: React.FC<{
   storagePath: string | null;
+  // Local file URI of a just-picked image. Shown immediately (before/without a
+  // round-trip to storage) so the thumbnail appears instantly on selection.
+  localUri?: string | null;
   slot: 1 | 2 | 3;
   onUpload: () => void;
-}> = ({ storagePath, slot, onUpload }) => {
+}> = ({ storagePath, localUri, slot, onUpload }) => {
   const [thumbUrl, setThumbUrl] = useState<string | null>(null);
 
   useEffect(() => {
@@ -66,6 +69,25 @@ const ComparableSlot: React.FC<{
       active = false;
     };
   }, [storagePath]);
+
+  // A freshly-picked local image displays right away and takes precedence over
+  // the remote signed URL until the next refresh replaces it.
+  if (localUri) {
+    return (
+      <View style={styles.slotFilled}>
+        <TouchableOpacity activeOpacity={0.85} onPress={onUpload} style={styles.slotThumbWrap}>
+          <Image source={{ uri: localUri }} style={styles.slotThumb} resizeMode="cover" />
+          <View style={styles.slotCheck}>
+            <Ionicons name="checkmark-circle" size={18} color={colors.teal} />
+          </View>
+        </TouchableOpacity>
+        <Text style={styles.slotLabel}>Comparable {slot}</Text>
+        <TouchableOpacity onPress={onUpload} hitSlop={6}>
+          <Text style={styles.replaceLink}>Replace</Text>
+        </TouchableOpacity>
+      </View>
+    );
+  }
 
   const openFile = async () => {
     if (!storagePath) return;
@@ -106,6 +128,49 @@ const ComparableSlot: React.FC<{
         <Text style={styles.replaceLink}>Replace</Text>
       </TouchableOpacity>
     </View>
+  );
+};
+
+// Compact, read-only thumbnail used on the saved-property cards. Resolves a
+// signed URL for image comparables; falls back to a document icon for PDFs and a
+// dashed placeholder for empty slots.
+const CardThumb: React.FC<{ storagePath: string | null; onOpen: () => void }> = ({
+  storagePath,
+  onOpen,
+}) => {
+  const [thumbUrl, setThumbUrl] = useState<string | null>(null);
+
+  useEffect(() => {
+    let active = true;
+    if (storagePath && isImagePath(storagePath)) {
+      getComparableSignedUrl(storagePath)
+        .then((u) => active && setThumbUrl(u))
+        .catch(() => undefined);
+    } else {
+      setThumbUrl(null);
+    }
+    return () => {
+      active = false;
+    };
+  }, [storagePath]);
+
+  if (!storagePath) {
+    return (
+      <View style={styles.cardThumbEmpty}>
+        <Ionicons name="image-outline" size={16} color={colors.subtleText} />
+      </View>
+    );
+  }
+  return (
+    <TouchableOpacity activeOpacity={0.85} onPress={onOpen} style={styles.cardThumbWrap}>
+      {thumbUrl ? (
+        <Image source={{ uri: thumbUrl }} style={styles.slotThumb} resizeMode="cover" />
+      ) : (
+        <View style={styles.slotPdf}>
+          <Ionicons name="document-text" size={18} color={colors.midNavy} />
+        </View>
+      )}
+    </TouchableOpacity>
   );
 };
 
@@ -158,30 +223,32 @@ export const AugustaComplianceScreen: React.FC = () => {
 
   const [taxYear, setTaxYear] = useState<number>(currentYear);
   const [properties, setProperties] = useState<AugustaPropertyForYear[]>([]);
-  const [comparables, setComparables] = useState<AugustaComparableRow[]>([]);
+  // Every comparables row the user has saved, across all tax years. Loaded
+  // automatically on focus so previously-uploaded comparables are retrieved
+  // without the user re-typing a property name to find them.
+  const [allComparables, setAllComparables] = useState<AugustaComparableRow[]>([]);
 
-  // Property selection: a dropdown when Augusta properties already exist for the
-  // year, otherwise a free-text label the user types.
-  const [selectedProperty, setSelectedProperty] = useState('');
-  const [manualProperty, setManualProperty] = useState('');
+  // Property selection for the editor. `propertyName` is the single source of
+  // truth for which property the upload slots act on; `addingNew` switches
+  // between picking an existing property (dropdown) and typing a brand-new one.
+  const [propertyName, setPropertyName] = useState('');
+  const [addingNew, setAddingNew] = useState(false);
 
   const [propPickerOpen, setPropPickerOpen] = useState(false);
   const [yearPickerOpen, setYearPickerOpen] = useState(false);
+
+  // Local file URIs of just-picked comparables, keyed by slot. Cleared when the
+  // property or year changes so previews never leak across contexts.
+  const [localUris, setLocalUris] = useState<Record<number, string>>({});
 
   const refresh = useCallback(async () => {
     try {
       const [props, comps] = await Promise.all([
         listAugustaProperties(activeBusinessId, taxYear),
-        listComparables(activeBusinessId, taxYear),
+        listAllComparables(activeBusinessId),
       ]);
       setProperties(props);
-      setComparables(comps);
-      // Default the dropdown to the first known property if nothing valid is
-      // selected yet for this year.
-      setSelectedProperty((cur) => {
-        if (cur && props.some((p) => p.propertyName === cur)) return cur;
-        return props[0]?.propertyName ?? '';
-      });
+      setAllComparables(comps);
     } catch (e) {
       Alert.alert('Could not load comparables', e instanceof Error ? e.message : String(e));
     }
@@ -193,55 +260,129 @@ export const AugustaComplianceScreen: React.FC = () => {
     }, [refresh]),
   );
 
-  const hasProperties = properties.length > 0;
-  const propertyName = (hasProperties ? selectedProperty : manualProperty).trim();
+  // Comparables for the tax year currently selected in the editor (the slots
+  // upload into this year); the cards below show every year.
+  const yearComparables = useMemo(
+    () => allComparables.filter((c) => c.tax_year === taxYear),
+    [allComparables, taxYear],
+  );
+
+  // Every property that already has an Augusta rental OR saved comparables for
+  // the selected year — the dropdown options, so nothing needs re-typing.
+  const propertyOptions = useMemo(() => {
+    const set = new Set<string>();
+    properties.forEach((p) => set.add(p.propertyName));
+    yearComparables.forEach((c) => {
+      const n = (c.property_name ?? '').trim();
+      if (n) set.add(n);
+    });
+    return Array.from(set);
+  }, [properties, yearComparables]);
+
+  // Property cards: one per saved comparables row (any year) that has at least
+  // one uploaded file, newest first.
+  const savedCards = useMemo(
+    () =>
+      allComparables.filter(
+        (c) => c.comparable_1_url || c.comparable_2_url || c.comparable_3_url,
+      ),
+    [allComparables],
+  );
+
+  const hasProperties = propertyOptions.length > 0;
+  const usingDropdown = hasProperties && !addingNew;
+
+  // Keep the dropdown selection valid: when picking from existing options and the
+  // current value isn't one of them, snap to the first available property.
+  useEffect(() => {
+    if (addingNew || propertyOptions.length === 0) return;
+    if (!propertyOptions.includes(propertyName)) {
+      setPropertyName(propertyOptions[0]);
+    }
+  }, [propertyOptions, addingNew, propertyName]);
+
+  const trimmedProperty = propertyName.trim();
 
   // The comparables row (if any) for the active property + year. Rate is pulled
   // from the matching logged property when one exists.
   const row = useMemo(
-    () => comparables.find((c) => (c.property_name ?? '').trim() === propertyName),
-    [comparables, propertyName],
+    () => yearComparables.find((c) => (c.property_name ?? '').trim() === trimmedProperty),
+    [yearComparables, trimmedProperty],
   );
   const rateForProperty = useMemo(
-    () => properties.find((p) => p.propertyName === propertyName)?.rate ?? null,
-    [properties, propertyName],
+    () => properties.find((p) => p.propertyName === trimmedProperty)?.rate ?? null,
+    [properties, trimmedProperty],
   );
 
   const count = SLOTS.filter((s) => slotUrl(row, s)).length;
   const complete = count === 3;
 
+  // Switching property or year invalidates any local previews from the prior
+  // selection — the freshly-loaded rows carry the correct stored comparables.
+  useEffect(() => {
+    setLocalUris({});
+  }, [trimmedProperty, taxYear]);
+
+  // Tapping a saved card loads that property + year into the editor so the user
+  // can view or add more comparables without re-typing anything.
+  const selectCard = (card: AugustaComparableRow) => {
+    setAddingNew(false);
+    setTaxYear(card.tax_year ?? currentYear);
+    setPropertyName((card.property_name ?? '').trim());
+  };
+
+  const openStoragePath = async (storagePath: string | null) => {
+    if (!storagePath) return;
+    try {
+      const url = await getComparableSignedUrl(storagePath);
+      await Linking.openURL(url);
+    } catch (e) {
+      Alert.alert('Could not open', e instanceof Error ? e.message : String(e));
+    }
+  };
+
   const pickAndUpload = async (slot: 1 | 2 | 3) => {
-    if (!propertyName) {
+    if (!trimmedProperty) {
       Alert.alert(
         'Property required',
-        hasProperties
+        usingDropdown
           ? 'Select a property before uploading comparables.'
           : 'Enter a property name or address before uploading comparables.',
       );
       return;
     }
+    // Full image (no square crop) with the shared permission handling used by
+    // the business-logo upload.
+    const uri = await pickImageWithSource({ allowsEditing: false });
+    if (!uri) return;
+    // Show the picked image instantly, before the upload completes.
+    setLocalUris((prev) => ({ ...prev, [slot]: uri }));
     try {
-      const result = await DocumentPicker.getDocumentAsync({
-        type: ['image/*', 'application/pdf'],
-        copyToCacheDirectory: true,
-        multiple: false,
-      });
-      if (result.canceled) return;
-      const file = result.assets?.[0];
-      if (!file) return;
       await uploadComparable({
         businessId: activeBusinessId,
-        propertyName,
+        propertyName: trimmedProperty,
         taxYear,
         slot,
-        localUri: file.uri,
-        fileName: file.name,
-        mimeType: file.mimeType ?? null,
+        localUri: uri,
+        // The URI carries the extension the uploader needs to derive the type.
+        fileName: uri,
+        mimeType: null,
         rate: rateForProperty,
       });
       await refresh();
     } catch (e) {
-      Alert.alert('Upload failed', e instanceof Error ? e.message : String(e));
+      // Drop the failed preview so the slot returns to its empty state.
+      setLocalUris((prev) => {
+        const next = { ...prev };
+        delete next[slot];
+        return next;
+      });
+      const err = e as { message?: string; error_description?: string };
+      console.error('[Augusta Comparables] upload failed:', err?.message ?? err);
+      Alert.alert(
+        'Upload failed',
+        err?.message || err?.error_description || 'Could not upload the comparable. Please try again.',
+      );
     }
   };
 
@@ -261,27 +402,52 @@ export const AugustaComplianceScreen: React.FC = () => {
       </View>
 
       <View style={styles.card}>
-        {/* Property selector */}
+        {/* Property selector — dropdown of existing properties, or a text input
+            for adding a brand-new one. */}
         <Text style={styles.fieldLabel}>Property</Text>
-        {hasProperties ? (
-          <TouchableOpacity
-            activeOpacity={0.8}
-            style={styles.selectField}
-            onPress={() => setPropPickerOpen(true)}
-          >
-            <Text style={styles.selectValue} numberOfLines={1}>
-              {selectedProperty || 'Select a property'}
-            </Text>
-            <Ionicons name="chevron-down" size={18} color={colors.midNavy} />
-          </TouchableOpacity>
+        {usingDropdown ? (
+          <>
+            <TouchableOpacity
+              activeOpacity={0.8}
+              style={styles.selectField}
+              onPress={() => setPropPickerOpen(true)}
+            >
+              <Text style={styles.selectValue} numberOfLines={1}>
+                {propertyName || 'Select a property'}
+              </Text>
+              <Ionicons name="chevron-down" size={18} color={colors.midNavy} />
+            </TouchableOpacity>
+            <TouchableOpacity
+              hitSlop={6}
+              onPress={() => {
+                setAddingNew(true);
+                setPropertyName('');
+              }}
+            >
+              <Text style={styles.inlineLink}>+ Add a new property</Text>
+            </TouchableOpacity>
+          </>
         ) : (
-          <TextInput
-            style={styles.input}
-            value={manualProperty}
-            onChangeText={setManualProperty}
-            placeholder="Property name or address"
-            placeholderTextColor={colors.subtleText}
-          />
+          <>
+            <TextInput
+              style={styles.input}
+              value={propertyName}
+              onChangeText={setPropertyName}
+              placeholder="Property name or address"
+              placeholderTextColor={colors.subtleText}
+            />
+            {hasProperties ? (
+              <TouchableOpacity
+                hitSlop={6}
+                onPress={() => {
+                  setAddingNew(false);
+                  setPropertyName(propertyOptions[0] ?? '');
+                }}
+              >
+                <Text style={styles.inlineLink}>Choose an existing property</Text>
+              </TouchableOpacity>
+            ) : null}
+          </>
         )}
 
         {/* Tax year selector */}
@@ -302,6 +468,7 @@ export const AugustaComplianceScreen: React.FC = () => {
               key={slot}
               slot={slot}
               storagePath={slotUrl(row, slot)}
+              localUri={localUris[slot] ?? null}
               onUpload={() => pickAndUpload(slot)}
             />
           ))}
@@ -312,13 +479,53 @@ export const AugustaComplianceScreen: React.FC = () => {
         </Text>
       </View>
 
+      {/* Saved comparables — auto-loaded property cards. No re-typing required to
+          find previously-uploaded comparables. */}
+      <Text style={styles.sectionTitle}>Your comparables</Text>
+      {savedCards.length === 0 ? (
+        <View style={styles.emptyCard}>
+          <Text style={styles.emptyText}>
+            No comparables uploaded yet. Add a property above to get started.
+          </Text>
+        </View>
+      ) : (
+        savedCards.map((card) => {
+          const cardCount = SLOTS.filter((s) => slotUrl(card, s)).length;
+          return (
+            <View key={card.id} style={styles.propCard}>
+              <View style={styles.propCardHead}>
+                <Text style={styles.propCardTitle} numberOfLines={1}>
+                  {(card.property_name ?? 'Property').trim() || 'Property'}
+                </Text>
+                <Text style={styles.propCardYear}>{card.tax_year ?? ''}</Text>
+              </View>
+              <View style={styles.cardThumbRow}>
+                {SLOTS.map((slot) => (
+                  <CardThumb
+                    key={slot}
+                    storagePath={slotUrl(card, slot)}
+                    onOpen={() => openStoragePath(slotUrl(card, slot))}
+                  />
+                ))}
+              </View>
+              <View style={styles.propCardFoot}>
+                <Text style={styles.propCardCount}>{cardCount} of 3 uploaded</Text>
+                <TouchableOpacity hitSlop={6} onPress={() => selectCard(card)}>
+                  <Text style={styles.inlineLink}>View / update</Text>
+                </TouchableOpacity>
+              </View>
+            </View>
+          );
+        })
+      )}
+
       <OptionPickerModal
         visible={propPickerOpen}
         title="Select property"
-        options={properties.map((p) => p.propertyName)}
-        selected={selectedProperty}
+        options={propertyOptions}
+        selected={propertyName}
         onSelect={(v) => {
-          setSelectedProperty(v);
+          setPropertyName(v);
           setPropPickerOpen(false);
         }}
         onClose={() => setPropPickerOpen(false)}
@@ -401,6 +608,95 @@ const styles = StyleSheet.create({
     fontWeight: '600',
     flex: 1,
     marginRight: spacing.sm,
+  },
+  inlineLink: {
+    color: colors.midNavy,
+    fontSize: 12,
+    fontWeight: '700',
+    marginTop: spacing.sm,
+  },
+  sectionTitle: {
+    ...typography.h2,
+    color: colors.navy,
+    fontSize: 16,
+    fontWeight: '700',
+    marginTop: spacing.xs,
+  },
+  emptyCard: {
+    backgroundColor: colors.white,
+    borderRadius: radius.card,
+    borderWidth: 0.5,
+    borderColor: colors.cardBorder,
+    padding: spacing.lg,
+    ...shadow.card,
+  },
+  emptyText: {
+    ...typography.body,
+    color: colors.mutedText,
+    fontSize: 13,
+    lineHeight: 18,
+  },
+  propCard: {
+    backgroundColor: colors.white,
+    borderRadius: radius.card,
+    borderWidth: 0.5,
+    borderColor: colors.cardBorder,
+    padding: spacing.lg,
+    gap: spacing.md,
+    ...shadow.card,
+  },
+  propCardHead: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    justifyContent: 'space-between',
+    gap: spacing.sm,
+  },
+  propCardTitle: {
+    ...typography.bodyMedium,
+    color: colors.bodyText,
+    fontSize: 15,
+    fontWeight: '700',
+    flex: 1,
+  },
+  propCardYear: {
+    ...typography.caption,
+    color: colors.mutedText,
+    fontSize: 12,
+    fontWeight: '700',
+  },
+  cardThumbRow: {
+    flexDirection: 'row',
+    gap: spacing.sm,
+  },
+  cardThumbWrap: {
+    flex: 1,
+    aspectRatio: 1,
+    borderRadius: 10,
+    overflow: 'hidden',
+    borderWidth: 1,
+    borderColor: colors.tealLight,
+    backgroundColor: colors.lightBlue,
+  },
+  cardThumbEmpty: {
+    flex: 1,
+    aspectRatio: 1,
+    borderRadius: 10,
+    borderWidth: 1,
+    borderStyle: 'dashed',
+    borderColor: '#CCCCCC',
+    alignItems: 'center',
+    justifyContent: 'center',
+  },
+  propCardFoot: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    justifyContent: 'space-between',
+  },
+  propCardCount: {
+    ...typography.bodyMedium,
+    color: colors.mutedText,
+    fontSize: 12,
+    fontWeight: '700',
   },
   slotRow: {
     flexDirection: 'row',

@@ -22,7 +22,8 @@ import type { OnboardingStackParamList } from '../../navigation/types';
 type Nav = NativeStackNavigationProp<OnboardingStackParamList, 'Payment'>;
 
 const TIER_NAMES: Record<SubscriptionTier, string> = {
-  starter: 'Starter',
+  // Display label only — the DB tier value stays 'starter'.
+  starter: 'Basic',
   core: 'Core',
   pro: 'Pro',
 };

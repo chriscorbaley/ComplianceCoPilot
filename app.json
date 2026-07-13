@@ -16,7 +16,9 @@
       "bundleIdentifier": "com.compliancecopilot.app",
       "merchantIdentifier": "merchant.com.compliancecopilot.app",
       "infoPlist": {
-        "NSMicrophoneUsageDescription": "Compliance Co-Pilot needs microphone access to record meeting minutes and log compliance activities by voice."
+        "NSMicrophoneUsageDescription": "Compliance Co-Pilot needs microphone access to record meeting minutes and log compliance activities by voice.",
+        "NSPhotoLibraryUsageDescription": "Compliance Co-Pilot needs access to your photo library so you can select your business logo for generated compliance documents.",
+        "NSCameraUsageDescription": "Compliance Co-Pilot needs camera access so you can take a photo of your business logo."
       }
     },
     "android": {
@@ -26,7 +28,8 @@
       },
       "package": "com.compliancecopilot.app",
       "permissions": [
-        "android.permission.RECORD_AUDIO"
+        "android.permission.RECORD_AUDIO",
+        "android.permission.CAMERA"
       ]
     },
     "plugins": [
@@ -43,7 +46,15 @@
           "enableGooglePay": false
         }
       ],
-      "@react-native-community/datetimepicker"
+      "@react-native-community/datetimepicker",
+      "expo-notifications",
+      [
+        "expo-image-picker",
+        {
+          "photosPermission": "Compliance Co-Pilot needs access to your photo library so you can select your business logo for generated compliance documents.",
+          "cameraPermission": "Compliance Co-Pilot needs camera access so you can take a photo of your business logo."
+        }
+      ]
     ]
   }
 }

@@ -25,6 +25,8 @@ import type { NativeStackNavigationProp } from '@react-navigation/native-stack';
 import { colors, radius, shadow, spacing, typography } from '../theme';
 import type { RootStackParamList } from '../navigation/types';
 import { Header } from '../components/Header';
+import { YearSelector } from '../components/YearSelector';
+import { useYear } from '../context/YearContext';
 import { Card } from '../components/Card';
 import { SectionHeader } from '../components/SectionHeader';
 import { StatusPill } from '../components/StatusPill';
@@ -178,6 +180,7 @@ const MinutesScreenInner: React.FC = () => {
   const insets = useSafeAreaInsets();
   const navigation = useNavigation<NativeStackNavigationProp<RootStackParamList>>();
   const { activeBusinessId } = useBusiness();
+  const { year: taxYear, startIso, endIso } = useYear();
 
   const [meetingType, setMeetingType] = useState<MeetingType>(MEETING_TYPES[0]);
   const [dropdownOpen, setDropdownOpen] = useState(false);
@@ -269,6 +272,8 @@ const MinutesScreenInner: React.FC = () => {
       let query = supabase
         .from('meeting_minutes')
         .select('*')
+        .gte('meeting_date', startIso)
+        .lte('meeting_date', endIso)
         .order('meeting_date', { ascending: false })
         .limit(20);
       if (activeBusinessId) query = query.eq('business_id', activeBusinessId);
@@ -278,7 +283,7 @@ const MinutesScreenInner: React.FC = () => {
     } catch (e) {
       Alert.alert('Could not load minutes', e instanceof Error ? e.message : String(e));
     }
-  }, [activeBusinessId]);
+  }, [activeBusinessId, startIso, endIso]);
 
   useFocusEffect(
     useCallback(() => {
@@ -719,7 +724,8 @@ const MinutesScreenInner: React.FC = () => {
 
   return (
     <View style={styles.root}>
-      <Header year={2026} />
+      <Header year={taxYear} />
+      <YearSelector />
 
       <ScrollView
         style={styles.scroll}

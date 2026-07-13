@@ -139,7 +139,7 @@ export const ChoosePlanScreen: React.FC = () => {
       // immediately (gating reads subscription_tier at render) — confirm and
       // return.
       if (onboardingCompleted) {
-        const label = tier === 'pro' ? 'Pro' : tier === 'core' ? 'Core' : 'Starter';
+        const label = tier === 'pro' ? 'Pro' : tier === 'core' ? 'Core' : 'Basic';
         Alert.alert('Plan updated', `You're now on the ${label} plan.`);
         if (nav.canGoBack()) nav.goBack();
         return;
@@ -193,7 +193,7 @@ export const ChoosePlanScreen: React.FC = () => {
 
         <View style={styles.cards}>
           <StarterCard
-            name="Starter"
+            name="Basic"
             price={TIER_PRICES.starter}
             features={[
               { text: '1 tax strategy' },
@@ -211,7 +211,7 @@ export const ChoosePlanScreen: React.FC = () => {
             price={TIER_PRICES.core}
             features={[
               { text: 'Up to 3 tax strategies' },
-              { text: 'All Starter features' },
+              { text: 'All Basic features' },
               { text: 'Strategy progress tracking' },
               { text: 'Priority support' },
             ]}
@@ -227,7 +227,8 @@ export const ChoosePlanScreen: React.FC = () => {
               { text: 'All strategies' },
               { text: 'AI voice meeting minutes' },
               { text: 'Complete audit trail' },
-              { text: 'All Core and Starter features' },
+              { text: 'Mileage tracker with IRS deduction calculator' },
+              { text: 'All Core and Basic features' },
             ]}
             highlighted={highlight === 'pro'}
             busy={busyTier === 'pro'}

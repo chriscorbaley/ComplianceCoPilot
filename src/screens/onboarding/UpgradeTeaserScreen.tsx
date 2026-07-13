@@ -26,7 +26,7 @@ const STARTER_TEASER: TeaserContent = {
   lockedFeatures: ['Additional strategies', 'Strategy progress dashboard', 'Priority support'],
   upgradeLabel: 'Upgrade to Core — $99/mo',
   upgradeTarget: 'core',
-  skipLabel: 'Continue with Starter',
+  skipLabel: 'Continue with Basic',
 };
 
 const CORE_TEASER: TeaserContent = {

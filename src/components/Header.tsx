@@ -1,4 +1,4 @@
-import React, { useState } from 'react';
+import React, { useCallback, useState } from 'react';
 import {
   View,
   Text,
@@ -11,12 +11,13 @@ import {
   ScrollView,
 } from 'react-native';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
-import { useNavigation } from '@react-navigation/native';
+import { useFocusEffect, useNavigation } from '@react-navigation/native';
 import type { NativeStackNavigationProp } from '@react-navigation/native-stack';
 import { Ionicons } from '@expo/vector-icons';
 import { colors, spacing, radius, typography } from '../theme';
 import { useAuth } from '../auth/AuthContext';
 import { useBusiness } from '../business/BusinessContext';
+import { useSignedLogoUrls } from '../hooks/useSignedLogoUrls';
 import type { RootStackParamList } from '../navigation/types';
 import type { BusinessRow } from '../services/supabase';
 
@@ -29,10 +30,21 @@ export const Header: React.FC<HeaderProps> = ({ subtitle, year = 2026 }) => {
   const insets = useSafeAreaInsets();
   const navigation = useNavigation<NativeStackNavigationProp<RootStackParamList>>();
   const { isAdmin, fullName } = useAuth();
-  const { businesses, activeBusiness, setActiveBusinessId } = useBusiness();
+  const { businesses, activeBusiness, setActiveBusinessId, refresh } = useBusiness();
   const displaySubtitle = subtitle ?? fullName ?? ' ';
 
   const [switcherOpen, setSwitcherOpen] = useState(false);
+  // The 'business-logos' bucket is private, so we render short-lived signed URLs
+  // keyed by business id instead of the stored storage path. Re-minted on focus.
+  const logoUrls = useSignedLogoUrls(businesses);
+
+  // Re-pull businesses so logo_url reflects a just-saved change whenever this
+  // header comes back into focus.
+  useFocusEffect(
+    useCallback(() => {
+      refresh().catch(() => undefined);
+    }, [refresh]),
+  );
 
   const onLogoLongPress = () => {
     if (!isAdmin) return;
@@ -54,7 +66,7 @@ export const Header: React.FC<HeaderProps> = ({ subtitle, year = 2026 }) => {
   };
 
   const switcherLabel = activeBusiness?.business_name ?? 'Choose business';
-  const switcherLogo = activeBusiness?.logo_url ?? null;
+  const switcherLogo = activeBusiness ? logoUrls[activeBusiness.id] ?? null : null;
 
   return (
     <View style={[styles.container, { paddingTop: insets.top }]}>
@@ -67,9 +79,9 @@ export const Header: React.FC<HeaderProps> = ({ subtitle, year = 2026 }) => {
           android_disableSound
         >
           <Image
-            source={require('../../assets/logo.png')}
-            style={styles.logo}
-            resizeMode="contain"
+            source={switcherLogo ? { uri: switcherLogo } : require('../../assets/logo.png')}
+            style={switcherLogo ? styles.bizBrandLogo : styles.logo}
+            resizeMode={switcherLogo ? 'cover' : 'contain'}
           />
           <Text style={styles.subtitle} numberOfLines={1}>
             {displaySubtitle}
@@ -125,6 +137,7 @@ export const Header: React.FC<HeaderProps> = ({ subtitle, year = 2026 }) => {
               <ScrollView style={styles.bizList} contentContainerStyle={styles.bizListContent}>
                 {businesses.map((b) => {
                   const isActive = b.id === activeBusiness?.id;
+                  const rowLogo = logoUrls[b.id] ?? null;
                   return (
                     <TouchableOpacity
                       key={b.id}
@@ -132,8 +145,8 @@ export const Header: React.FC<HeaderProps> = ({ subtitle, year = 2026 }) => {
                       onPress={() => onPickBusiness(b)}
                       activeOpacity={0.7}
                     >
-                      {b.logo_url ? (
-                        <Image source={{ uri: b.logo_url }} style={styles.bizRowLogo} />
+                      {rowLogo ? (
+                        <Image source={{ uri: rowLogo }} style={styles.bizRowLogo} />
                       ) : (
                         <View style={styles.bizRowLogoPlaceholder}>
                           <Ionicons name="business-outline" size={18} color={colors.midNavy} />
@@ -194,6 +207,16 @@ const styles = StyleSheet.create({
     height: 28,
     width: undefined,
     aspectRatio: 1,
+    alignSelf: 'flex-start',
+  },
+  // Business logo shown in the main/left brand slot (replaces the CCP logo once
+  // the active business has an uploaded logo). Rounded + white-backed so any
+  // aspect ratio reads cleanly against the navy header.
+  bizBrandLogo: {
+    height: 28,
+    width: 28,
+    borderRadius: 6,
+    backgroundColor: colors.white,
     alignSelf: 'flex-start',
   },
   subtitle: {

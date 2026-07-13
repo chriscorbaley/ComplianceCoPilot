@@ -23,6 +23,8 @@ import type { BarChartProps } from 'react-native-chart-kit/dist/BarChart';
 const BarChart = RawBarChart as unknown as React.ComponentType<BarChartProps>;
 import { colors, radius, shadow, spacing, typography } from '../theme';
 import { Header } from '../components/Header';
+import { YearSelector } from '../components/YearSelector';
+import { useYear } from '../context/YearContext';
 import { AlertBanner } from '../components/AlertBanner';
 import { MetricCard } from '../components/MetricCard';
 import { Card } from '../components/Card';
@@ -307,6 +309,7 @@ const HoursScreenInner: React.FC = () => {
   const insets = useSafeAreaInsets();
   const { activeBusinessId } = useBusiness();
   const { session, fullName } = useAuth();
+  const { year: taxYear } = useYear();
   const [reportGenerating, setReportGenerating] = useState(false);
   const [recording, setRecording] = useState(false);
   const [processing, setProcessing] = useState(false);
@@ -343,7 +346,7 @@ const HoursScreenInner: React.FC = () => {
   const loadHours = useCallback(async () => {
     try {
       const userId = await requireUserId();
-      const year = new Date().getFullYear();
+      const year = taxYear;
       let query = supabase
         .from('hours_log')
         .select('*')
@@ -359,7 +362,7 @@ const HoursScreenInner: React.FC = () => {
       console.warn('[hours] loadHours failed', e);
       Alert.alert('Could not load hours', e instanceof Error ? e.message : String(e));
     }
-  }, [activeBusinessId]);
+  }, [activeBusinessId, taxYear]);
 
   const loadProperties = useCallback(async () => {
     try {
@@ -781,7 +784,7 @@ const HoursScreenInner: React.FC = () => {
   const repsBarColor = repsStatus.variant === 'success' ? colors.teal : colors.amber;
   const repsTooltip =
     reView.total != null && reView.total > 0
-      ? `Your REPS minimum is the higher of ${reView.reps750} hours or more than ${reView.majorityPct}% of your total annual work hours. With ${reView.total} total work hours your minimum is ${reView.effectiveMin} hours.`
+      ? `You work ${reView.total} hours in non-real-estate activities. To spend more than half your total working time in real estate you need at least ${reView.effectiveMin} real estate hours.`
       : `Your REPS minimum is the higher of ${reView.reps750} hours or more than ${reView.majorityPct}% of your total annual work hours. Add your total annual work hours in Settings to apply the ${reView.majorityPct}% rule.`;
 
   const chartWidth = Dimensions.get('window').width - spacing.lg * 2 - spacing.lg * 2;
@@ -821,7 +824,8 @@ const HoursScreenInner: React.FC = () => {
 
   return (
     <View style={styles.root}>
-      <Header year={2026} />
+      <Header year={taxYear} />
+      <YearSelector />
 
       <ScrollView
         style={styles.scroll}
@@ -897,8 +901,9 @@ const HoursScreenInner: React.FC = () => {
 
               {reView.fiftyBinds ? (
                 <Text style={styles.repsSubAmber}>
-                  50% rule raises your minimum to {reView.effectiveMin} hours
-                  based on {reView.total} total annual work hours
+                  With {reView.total} non-RE work hours you need{' '}
+                  {reView.effectiveMin} RE hours to exceed 50% of your total
+                  working time
                 </Text>
               ) : (
                 <Text style={styles.repsSubMuted}>

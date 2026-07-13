@@ -20,6 +20,8 @@ import { DateInputField, DatePickerModal } from '../components/DateInputField';
 import { useStrategyAccess } from '../hooks/useStrategyAccess';
 import { BusinessTravelLockedScreen } from '../components/BusinessTravelLockedScreen';
 import { Header } from '../components/Header';
+import { YearSelector } from '../components/YearSelector';
+import { useYear } from '../context/YearContext';
 import { Card } from '../components/Card';
 import { SectionHeader } from '../components/SectionHeader';
 import { StatusPill } from '../components/StatusPill';
@@ -32,6 +34,7 @@ import {
   loadComplianceRules,
 } from '../services/complianceRules';
 import {
+  DayKind,
   DeductibilityResult,
   ParsedItinerary,
   TripType,
@@ -39,6 +42,10 @@ import {
   evaluateDeductibility,
   evaluateFromCounts,
 } from '../services/deductibilityEngine';
+import {
+  exportTripReportPdf,
+  saveTripDocument,
+} from '../services/tripDocuments';
 import { DEMO_TRANSCRIPT, getDemoItinerary } from '../services/itineraryAnalyzer';
 import {
   MissingProxyError,
@@ -57,6 +64,7 @@ import {
   requireUserId,
   type BusinessTripRow,
   type DayLogJson,
+  type DayScheduleJson,
 } from '../services/supabase';
 import { useBusiness } from '../business/BusinessContext';
 import { useKeepAwakeWhile } from '../hooks/useKeepAwakeWhile';
@@ -112,6 +120,8 @@ const MONTH_SHORT_BT = [
   'Jul', 'Aug', 'Sep', 'Oct', 'Nov', 'Dec',
 ];
 
+const WEEKDAY_SHORT = ['Sun', 'Mon', 'Tue', 'Wed', 'Thu', 'Fri', 'Sat'];
+
 // Earliest selectable trip date — shared by both date pickers.
 const MIN_TRIP_DATE = new Date('2020-01-01');
 
@@ -133,6 +143,13 @@ const toISODate = (date: Date): string => {
   const month = String(date.getMonth() + 1).padStart(2, '0');
   const day = String(date.getDate()).padStart(2, '0');
   return `${date.getFullYear()}-${month}-${day}`;
+};
+
+// A new Date `n` days after `date` (local, no mutation of the original).
+const addDaysDate = (date: Date, n: number): Date => {
+  const d = new Date(date);
+  d.setDate(d.getDate() + n);
+  return d;
 };
 
 // Two years after a date — the return picker's maximum, so trips can be
@@ -250,12 +267,15 @@ const BusinessTravelScreenInner: React.FC = () => {
   }, []);
 
   const { activeBusinessId } = useBusiness();
+  const { year: taxYear, startIso, endIso } = useYear();
 
   const loadTrips = React.useCallback(async () => {
     try {
       let query = supabase
         .from('business_trips')
         .select('*')
+        .gte('departure_date', startIso)
+        .lte('departure_date', endIso)
         .order('departure_date', { ascending: false, nullsFirst: false });
       if (activeBusinessId) query = query.eq('business_id', activeBusinessId);
       const { data, error } = await query;
@@ -264,7 +284,7 @@ const BusinessTravelScreenInner: React.FC = () => {
     } catch (e) {
       Alert.alert('Could not load trips', e instanceof Error ? e.message : String(e));
     }
-  }, [activeBusinessId]);
+  }, [activeBusinessId, startIso, endIso]);
 
   useFocusEffect(
     React.useCallback(() => {
@@ -274,7 +294,7 @@ const BusinessTravelScreenInner: React.FC = () => {
 
   return (
     <View style={styles.root}>
-      <Header subtitle="Business Travel · Compliance Engine" year={2026} />
+      <Header subtitle="Business Travel · Compliance Engine" year={taxYear} />
       <View style={styles.tabBar}>
         {TABS.map((t) => {
           const active = tab === t.key;
@@ -338,7 +358,12 @@ const BusinessTravelScreenInner: React.FC = () => {
             />
           )}
           {tab === 'history' && (
-            <HistoryTab trips={trips} insets={insets} onEdit={setEditingTrip} />
+            <HistoryTab
+              trips={trips}
+              insets={insets}
+              rules={rules}
+              onEdit={setEditingTrip}
+            />
           )}
           {tab === 'rules' && <RulesTab rules={rules} insets={insets} />}
 
@@ -955,6 +980,10 @@ const LogTripTab: React.FC<LogTripTabProps> = ({
   // it can be saved with the trip.
   const [autoFilled, setAutoFilled] = useState(false);
   const [prefillDayLog, setPrefillDayLog] = useState<DayLogJson | null>(null);
+  // Day-by-day classification for the manual grid (Fix 2). Length equals
+  // total_days; index 0 = departure, last = return (both Travel). Middle days
+  // toggle between Business and Personal. Empty until both dates are entered.
+  const [dayKinds, setDayKinds] = useState<DayKind[]>([]);
 
   // Apply the analyzer payload once when it arrives, then clear it from the
   // parent so re-renders don't clobber subsequent manual edits.
@@ -989,6 +1018,187 @@ const LogTripTab: React.FC<LogTripTabProps> = ({
     return Number.isFinite(n) ? n : 0;
   };
 
+  // Build the initial day classification: endpoints are Travel days; the first
+  // `bizCount` middle days are Business, the remainder Personal.
+  const buildDayKinds = React.useCallback(
+    (dep: Date, ret: Date, bizCount: number): DayKind[] => {
+      const total = calculateTotalDays(dep, ret);
+      const kinds: DayKind[] = [];
+      for (let i = 0; i < total; i += 1) {
+        const isTravel = total >= 2 ? i === 0 || i === total - 1 : true;
+        kinds.push(isTravel ? 'travel' : 'personal');
+      }
+      let assigned = 0;
+      for (let i = 0; i < total && assigned < bizCount; i += 1) {
+        if (kinds[i] !== 'travel') {
+          kinds[i] = 'business';
+          assigned += 1;
+        }
+      }
+      return kinds;
+    },
+    [],
+  );
+
+  // Re-seed the grid whenever the trip's date span changes. Toggles and manual
+  // Business-days edits reseed through their own handlers, so this effect keys
+  // on the dates only and never clobbers a user's per-day toggles.
+  useEffect(() => {
+    if (departureDate && returnDateValue) {
+      setDayKinds(buildDayKinds(departureDate, returnDateValue, parseN(businessDays)));
+    } else {
+      setDayKinds([]);
+    }
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [departureDate, returnDateValue, buildDayKinds]);
+
+  // Editing the Business days field manually reseeds the grid from the new count.
+  const onBusinessDaysChange = (v: string) => {
+    setBusinessDays(v);
+    if (departureDate && returnDateValue) {
+      setDayKinds(buildDayKinds(departureDate, returnDateValue, parseFloat(v) || 0));
+    }
+  };
+
+  // Tapping a middle day toggles it between Business and Personal and syncs the
+  // business-day count back into the Business days field. The departure and
+  // return days (the endpoints) are the only Travel days and can't be changed —
+  // their position is what makes the first and last nights deductible.
+  const toggleDay = (index: number) => {
+    if (index === 0 || index === dayKinds.length - 1) return;
+    const next = [...dayKinds];
+    next[index] = next[index] === 'business' ? 'personal' : 'business';
+    setDayKinds(next);
+    setBusinessDays(String(next.filter((k) => k === 'business').length));
+  };
+
+  // Whether the day at `index` (counted from the departure date) falls on a
+  // Saturday or Sunday.
+  const isWeekendDay = React.useCallback(
+    (index: number): boolean => {
+      if (!departureDate) return false;
+      const dow = addDaysDate(departureDate, index).getDay();
+      return dow === 0 || dow === 6;
+    },
+    [departureDate],
+  );
+
+  // Fix 2: weekend days (Sat/Sun) that fall BETWEEN business days are deductible
+  // personal days — the taxpayer must remain at the destination over the weekend
+  // because business resumes afterward (the same IRS "sandwiched" rationale).
+  // Flag each such day so the grid can label it distinctly and so the intervening
+  // nights stay deductible even across a two-day weekend. The scan skips over
+  // other sandwiched weekend days, so a Fri-business / Sat+Sun / Mon-business
+  // trip flags BOTH weekend days.
+  const sandwichedWeekends = useMemo(() => {
+    const businessBefore = (i: number): boolean => {
+      for (let j = i - 1; j >= 0; j -= 1) {
+        const k = dayKinds[j];
+        if (k === 'business') return true;
+        if (k === 'travel') return false; // reached the departure endpoint
+        if (k === 'personal' && !isWeekendDay(j)) return false; // a chosen personal day
+        // a weekend personal day → skip and keep scanning outward
+      }
+      return false;
+    };
+    const businessAfter = (i: number): boolean => {
+      for (let j = i + 1; j < dayKinds.length; j += 1) {
+        const k = dayKinds[j];
+        if (k === 'business') return true;
+        if (k === 'travel') return false; // reached the return endpoint
+        if (k === 'personal' && !isWeekendDay(j)) return false;
+      }
+      return false;
+    };
+    return dayKinds.map(
+      (k, i) => k === 'personal' && isWeekendDay(i) && businessBefore(i) && businessAfter(i),
+    );
+  }, [dayKinds, isWeekendDay]);
+
+  // Per-night lodging deductibility (Fix 2). A trip has (total_days − 1) nights;
+  // night i sits between day i and day i+1. A night is deductible when ANY of:
+  //   1. Standard rule — the following day (i+1) is a business or travel day
+  //      (the return travel day counts here, so the last night is deductible).
+  //   2. Sandwiched personal day — day i+1 is personal BUT day i+2 is a business
+  //      day. The taxpayer must remain at the destination because business
+  //      resumes, so the night stays deductible. (A personal day at the *end*,
+  //      before the return travel day, does NOT qualify — day i+2 is travel.)
+  //   3. Sandwiched weekend — day i+1 is a weekend day flagged as sitting between
+  //      business days (see sandwichedWeekends). This extends rule 2 across a
+  //      full Sat+Sun weekend, since business resumes after the weekend.
+  const nights = useMemo(
+    () =>
+      dayKinds.slice(0, -1).map((_, i) => {
+        const nextKind = dayKinds[i + 1];
+        const dayAfter = i + 2 < dayKinds.length ? dayKinds[i + 2] : null;
+        const standard = nextKind === 'business' || nextKind === 'travel';
+        const weekend = nextKind === 'personal' && sandwichedWeekends[i + 1];
+        const sandwiched = nextKind === 'personal' && (dayAfter === 'business' || weekend);
+        return { deductible: standard || sandwiched, sandwiched, weekend };
+      }),
+    [dayKinds, sandwichedWeekends],
+  );
+  const deductibleNights = useMemo(
+    () => nights.filter((n) => n.deductible).length,
+    [nights],
+  );
+  const totalNights = nights.length;
+
+  // "Nov 20→21" (same month) or "Nov 30→Dec 1" (spanning months) label for a
+  // night, derived from the departure date.
+  const nightLabel = (i: number): string => {
+    if (!departureDate) return `Night ${i + 1}`;
+    const from = addDaysDate(departureDate, i);
+    const to = addDaysDate(departureDate, i + 1);
+    const fromStr = `${MONTH_SHORT_BT[from.getMonth()]} ${from.getDate()}`;
+    const toStr =
+      from.getMonth() === to.getMonth()
+        ? String(to.getDate())
+        : `${MONTH_SHORT_BT[to.getMonth()]} ${to.getDate()}`;
+    return `${fromStr}→${toStr}`;
+  };
+
+  const dayCounts = useMemo(() => {
+    let business = 0;
+    let personal = 0;
+    let travel = 0;
+    for (const k of dayKinds) {
+      if (k === 'business') business += 1;
+      else if (k === 'personal') personal += 1;
+      else travel += 1;
+    }
+    return { business, personal, travel };
+  }, [dayKinds]);
+
+  // The date shown on each day cell ("Mon Nov 20"), derived from the departure.
+  const dayDateLabel = (index: number): string => {
+    if (!departureDate) return '';
+    const d = new Date(departureDate);
+    d.setDate(d.getDate() + index);
+    return `${WEEKDAY_SHORT[d.getDay()]} ${MONTH_SHORT_BT[d.getMonth()]} ${d.getDate()}`;
+  };
+
+  // Live deductibility for the breakdown table — recomputed from the current
+  // counts against the compliance_rules snapshot (no hard-coded thresholds).
+  const liveResult = useMemo<DeductibilityResult | null>(() => {
+    const total = parseN(totalDays);
+    if (total <= 0) return null;
+    return evaluateFromCounts({
+      trip_type: tripType,
+      destination: destination || 'Trip',
+      purpose,
+      total_days: total,
+      business_days: parseN(businessDays),
+      countries: countries
+        ? countries.split(',').map((c) => c.trim()).filter(Boolean)
+        : undefined,
+      rules,
+    });
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [tripType, totalDays, businessDays, destination, purpose, countries, rules]);
+
+  const showDayDetail = Boolean(departureDate && returnDateValue && parseN(totalDays) > 0);
+
   const onCalculate = () => {
     const total = parseN(totalDays);
     const biz = parseN(businessDays);
@@ -1017,17 +1227,44 @@ const LogTripTab: React.FC<LogTripTabProps> = ({
       Alert.alert('Destination and total days are required.');
       return;
     }
+    const countriesList = countries
+      ? countries.split(',').map((c) => c.trim()).filter(Boolean)
+      : undefined;
     const result = evaluateFromCounts({
       trip_type: tripType,
       destination,
       purpose,
       total_days: total,
       business_days: biz,
-      countries: countries
-        ? countries.split(',').map((c) => c.trim()).filter(Boolean)
-        : undefined,
+      countries: countriesList,
       rules,
     });
+
+    // Prefer the manual day-by-day grid (built from the entered dates); fall
+    // back to the AI Analyzer's day log when the grid isn't populated.
+    const dayLog: DayLogJson | null =
+      showDayDetail && dayKinds.length > 0
+        ? dayKinds.map((kind, i) => ({
+            date: departureDate ? toISODate(addDaysDate(departureDate, i)) : '',
+            type: kind,
+            description: dayDateLabel(i),
+          }))
+        : prefillDayLog;
+
+    // Structured day-by-day schedule + derived lodging night counts (Fix 2),
+    // saved alongside the lossy summary so a trip can be re-opened with its
+    // exact per-day designations and lodging math intact.
+    const daySchedule: DayScheduleJson | null =
+      showDayDetail && dayKinds.length > 0 && departureDate
+        ? {
+            days: dayKinds.map((kind, i) => ({
+              date: toISODate(addDaysDate(departureDate, i)),
+              type: kind,
+            })),
+            deductible_nights: deductibleNights,
+            total_nights: totalNights,
+          }
+        : null;
 
     try {
       const userId = await requireUserId();
@@ -1036,9 +1273,7 @@ const LogTripTab: React.FC<LogTripTabProps> = ({
         business_id: activeBusinessId,
         trip_type: tripType,
         destination,
-        countries_visited: countries
-          ? countries.split(',').map((c) => c.trim()).filter(Boolean)
-          : null,
+        countries_visited: countriesList ?? null,
         purpose,
         departure_date: departureDate ? toISODate(departureDate) : null,
         return_date: returnDateValue ? toISODate(returnDateValue) : null,
@@ -1047,7 +1282,8 @@ const LogTripTab: React.FC<LogTripTabProps> = ({
         personal_days: result.personal_days,
         business_day_pct: result.business_day_pct,
         transport_deduct_pct: result.breakdown.transportation_pct,
-        day_by_day_log: prefillDayLog,
+        day_by_day_log: dayLog,
+        day_schedule: daySchedule,
         itinerary_transcript: null,
         compliance_verdict: result.verdict,
         compliance_notes: result.rationale,
@@ -1060,6 +1296,35 @@ const LogTripTab: React.FC<LogTripTabProps> = ({
         status: isFutureTrip ? 'draft' : 'logged',
       });
       if (error) throw new Error(error.message);
+
+      // Auto-generate the trip compliance document into the Documents vault.
+      // Best-effort: a document failure must not lose the saved trip.
+      try {
+        await saveTripDocument(
+          {
+            businessId: activeBusinessId,
+            trip_type: tripType,
+            destination,
+            departure_date: departureDate ? toISODate(departureDate) : null,
+            return_date: returnDateValue ? toISODate(returnDateValue) : null,
+            total_days: total,
+            business_days: result.business_days,
+            personal_days: result.personal_days,
+            purpose,
+            countries: countriesList,
+            expenses: {
+              transport: parseN(expTransport),
+              lodging: parseN(expLodging),
+              meals: parseN(expMeals),
+              other: parseN(expOther),
+            },
+          },
+          rules,
+        );
+      } catch (docErr) {
+        console.warn('[travel] trip document generation failed', docErr);
+      }
+
       if (isFutureTrip) {
         Alert.alert(
           'Saved as draft',
@@ -1281,7 +1546,7 @@ const LogTripTab: React.FC<LogTripTabProps> = ({
             placeholder="0"
             keyboardType="numeric"
             value={businessDays}
-            onChangeText={setBusinessDays}
+            onChangeText={onBusinessDaysChange}
             style={styles.flexHalf}
             autofilled={autoFilled}
           />
@@ -1350,6 +1615,118 @@ const LogTripTab: React.FC<LogTripTabProps> = ({
             highlight={autoFilled}
           />
         </View>
+
+        {showDayDetail ? (
+          <>
+            <View style={styles.detailDivider} />
+            <SectionHeader title="Day-by-day analysis" />
+            <Text style={styles.detailHint}>
+              Tap a day to toggle it between Business (blue) and Personal (red).
+              The departure and return days are always Travel (green) and can't
+              be changed. Where a personal day falls changes which nights of
+              lodging are deductible.
+            </Text>
+            <View style={styles.dayGrid}>
+              {dayKinds.map((kind, i) => {
+                // A weekend day sandwiched between business days gets a distinct
+                // amber "Weekend" treatment so the user sees why it's deductible.
+                const isWeekendSandwich = kind === 'personal' && sandwichedWeekends[i];
+                const th = isWeekendSandwich
+                  ? { bg: colors.amberLight, fg: colors.amber, icon: 'calendar' as const }
+                  : dayTheme[kind];
+                // Only the departure/return endpoints are locked as travel days;
+                // every middle day is tappable and toggles business ↔ personal.
+                const isEndpoint = i === 0 || i === dayKinds.length - 1;
+                return (
+                  <TouchableOpacity
+                    key={`${i}-${kind}`}
+                    activeOpacity={isEndpoint ? 1 : 0.7}
+                    onPress={() => toggleDay(i)}
+                    disabled={isEndpoint}
+                    style={[styles.logDayCell, { backgroundColor: th.bg }]}
+                  >
+                    <Text
+                      style={[styles.logDayDate, { color: th.fg }]}
+                      numberOfLines={1}
+                    >
+                      {dayDateLabel(i)}
+                    </Text>
+                    <View style={styles.logDayKindRow}>
+                      <Ionicons name={th.icon} size={11} color={th.fg} />
+                      <Text style={[styles.logDayKind, { color: th.fg }]}>
+                        {kind === 'travel'
+                          ? 'Travel'
+                          : kind === 'business'
+                            ? 'Business'
+                            : isWeekendSandwich
+                              ? 'Weekend'
+                              : 'Personal'}
+                      </Text>
+                    </View>
+                    {isWeekendSandwich ? (
+                      <Text style={[styles.logDaySub, { color: th.fg }]} numberOfLines={1}>
+                        Surrounded by business
+                      </Text>
+                    ) : null}
+                  </TouchableOpacity>
+                );
+              })}
+            </View>
+            <Text style={styles.dayCountLine}>
+              {dayCounts.business} business days / {dayCounts.personal} personal
+              days / {dayCounts.travel} travel days
+            </Text>
+
+            {totalNights > 0 ? (
+              <View
+                style={[
+                  styles.lodgingBox,
+                  deductibleNights < totalNights && styles.lodgingBoxAmber,
+                ]}
+              >
+                <Text style={styles.lodgingTitle}>Lodging deductibility</Text>
+                <Text style={styles.lodgingSummary}>
+                  {deductibleNights} of {totalNights} night
+                  {totalNights === 1 ? '' : 's'} deductible
+                </Text>
+                <View style={styles.lodgingList}>
+                  {nights.map((n, i) => (
+                    <View key={`night-${i}`} style={styles.lodgingRow}>
+                      <Ionicons
+                        name={n.deductible ? 'checkmark-circle' : 'close-circle'}
+                        size={14}
+                        color={n.deductible ? colors.teal : NOT_DEDUCT_RED}
+                      />
+                      <Text style={styles.lodgingRowText}>
+                        Night {i + 1} ({nightLabel(i)}):{' '}
+                        {n.deductible ? 'Deductible' : 'Not deductible'}
+                        {n.sandwiched
+                          ? n.weekend
+                            ? ' (weekend between business days)'
+                            : ' (personal day surrounded by business)'
+                          : ''}
+                      </Text>
+                    </View>
+                  ))}
+                </View>
+              </View>
+            ) : null}
+          </>
+        ) : null}
+
+        {showDayDetail && liveResult ? (
+          <>
+            <View style={styles.detailDivider} />
+            <SectionHeader title="Deductibility breakdown" />
+            <TripBreakdownTable
+              result={liveResult}
+              rules={rules}
+              tripType={tripType}
+              deductibleNights={totalNights > 0 ? deductibleNights : null}
+              totalNights={totalNights > 0 ? totalNights : null}
+            />
+          </>
+        ) : null}
 
         <View style={styles.actionsRow}>
           <TouchableOpacity
@@ -1477,13 +1854,100 @@ const LabeledInput: React.FC<{
   </View>
 );
 
+// Deductibility breakdown table for the Log Trip form (Fix 2). Applies the same
+// IRS rules the AI Analyzer uses; every threshold comes from the live
+// compliance_rules snapshot.
+const TripBreakdownTable: React.FC<{
+  result: DeductibilityResult;
+  rules: ComplianceRules;
+  tripType: TripType;
+  // Actual night counts from the day-by-day grid (Fix 2). When present, the
+  // lodging row reflects the real per-night IRS rule rather than a simple
+  // business-days count.
+  deductibleNights?: number | null;
+  totalNights?: number | null;
+}> = ({ result, rules, tripType, deductibleNights, totalNights }) => {
+  const transportPct = result.breakdown.transportation_pct;
+  const mealsPct = Math.round(rules.mealsDeductionPct * 100);
+
+  const summaryLine = (() => {
+    if (tripType === 'domestic') {
+      return result.verdict === 'not_deductible'
+        ? 'Primary purpose: Personal — transportation NOT deductible'
+        : 'Primary purpose: Business — transportation 100% deductible';
+    }
+    if (transportPct === 100) return 'Transportation 100% deductible';
+    if (transportPct === 0)
+      return 'Primary purpose: Personal — transportation NOT deductible';
+    return `Transportation ${transportPct}% deductible (${result.business_day_pct}% business)`;
+  })();
+
+  const transportColor =
+    transportPct === 100 ? colors.teal : transportPct === 0 ? NOT_DEDUCT_RED : colors.amber;
+
+  return (
+    <View>
+      <Text style={styles.breakdownSummary}>{summaryLine}</Text>
+      <View style={styles.btTable}>
+        <View style={[styles.btRow, styles.btHeadRow]}>
+          <Text style={[styles.btCell, styles.btColExpense, styles.btHeadText]}>Expense</Text>
+          <Text style={[styles.btCell, styles.btColRule, styles.btHeadText]}>Rule Applied</Text>
+          <Text style={[styles.btCell, styles.btColValue, styles.btHeadText]}>Deductible</Text>
+        </View>
+        <View style={styles.btRow}>
+          <Text style={[styles.btCell, styles.btColExpense]}>Transport</Text>
+          <Text style={[styles.btCell, styles.btColRule]}>{result.rule_applied}</Text>
+          <Text style={[styles.btCell, styles.btColValue, { color: transportColor }]}>
+            {transportPct}%
+          </Text>
+        </View>
+        <View style={styles.btRow}>
+          <Text style={[styles.btCell, styles.btColExpense]}>Lodging</Text>
+          <Text style={[styles.btCell, styles.btColRule]}>
+            {typeof totalNights === 'number'
+              ? 'Nights before a business/travel day'
+              : 'Business days only'}
+          </Text>
+          <Text style={[styles.btCell, styles.btColValue, { color: colors.teal }]}>
+            {typeof deductibleNights === 'number' && typeof totalNights === 'number'
+              ? `${deductibleNights} of ${totalNights} nights`
+              : `${result.counted_business_days} of ${result.total_days} nights`}
+          </Text>
+        </View>
+        <View style={[styles.btRow, styles.btLastRow]}>
+          <Text style={[styles.btCell, styles.btColExpense]}>Meals</Text>
+          <Text style={[styles.btCell, styles.btColRule]}>50% on business days</Text>
+          <Text style={[styles.btCell, styles.btColValue, { color: colors.amber }]}>
+            {mealsPct}%
+          </Text>
+        </View>
+      </View>
+    </View>
+  );
+};
+
 // ───────────────────────────── History tab ──────────────────────────────
 
 const HistoryTab: React.FC<{
   trips: TripHistoryEntry[];
   insets: { bottom: number };
+  rules: ComplianceRules;
   onEdit: (row: BusinessTripRow) => void;
-}> = ({ trips, insets, onEdit }) => {
+}> = ({ trips, insets, rules, onEdit }) => {
+  const [exportingId, setExportingId] = useState<string | null>(null);
+
+  const onExport = async (trip: TripHistoryEntry) => {
+    if (exportingId) return;
+    setExportingId(trip.id);
+    try {
+      await exportTripReportPdf(trip.raw, rules);
+    } catch (e) {
+      Alert.alert('Could not export trip report', e instanceof Error ? e.message : String(e));
+    } finally {
+      setExportingId(null);
+    }
+  };
+
   return (
     <ScrollView
       style={styles.scroll}
@@ -1493,6 +1957,7 @@ const HistoryTab: React.FC<{
       ]}
       showsVerticalScrollIndicator={false}
     >
+      <YearSelector style={{ paddingHorizontal: 0, paddingTop: 0 }} />
       {trips.length === 0 ? (
         <Card padded>
           <Text style={styles.emptyText}>
@@ -1501,17 +1966,25 @@ const HistoryTab: React.FC<{
         </Card>
       ) : (
         trips.map((t) => (
-          <TripRow key={t.id} trip={t} onPress={() => onEdit(t.raw)} />
+          <TripRow
+            key={t.id}
+            trip={t}
+            onPress={() => onEdit(t.raw)}
+            onExport={() => onExport(t)}
+            exporting={exportingId === t.id}
+          />
         ))
       )}
     </ScrollView>
   );
 };
 
-const TripRow: React.FC<{ trip: TripHistoryEntry; onPress: () => void }> = ({
-  trip,
-  onPress,
-}) => {
+const TripRow: React.FC<{
+  trip: TripHistoryEntry;
+  onPress: () => void;
+  onExport: () => void;
+  exporting: boolean;
+}> = ({ trip, onPress, onExport, exporting }) => {
   const pillProps = (() => {
     if (trip.verdict === 'full_deduction') {
       return { label: '100% deductible', variant: 'success' as const };
@@ -1529,52 +2002,67 @@ const TripRow: React.FC<{ trip: TripHistoryEntry; onPress: () => void }> = ({
   const isDraft = trip.status === 'draft';
 
   return (
-    <EditableListRow
-      onPress={onPress}
-      style={styles.tripRow}
-      contentStyle={styles.tripRowContent}
-    >
-      <View style={styles.tripIconWrap}>
-        <Ionicons
-          name={
-            trip.trip_type === 'international' ? 'globe-outline' : 'airplane-outline'
-          }
-          size={18}
-          color={colors.midNavy}
-        />
-      </View>
-      <View style={styles.tripRowMain}>
-        <View style={styles.tripRowHeader}>
-          <Text style={styles.tripRowDest} numberOfLines={1}>
-            {trip.destination}
-          </Text>
-          {isDraft ? (
-            <View style={[styles.pillCustom, styles.draftPill]}>
-              <Text style={[styles.pillCustomText, styles.draftPillText]}>
-                Draft
-              </Text>
-            </View>
-          ) : pillBg ? (
-            <View style={[styles.pillCustom, { backgroundColor: pillBg }]}>
-              <Text style={[styles.pillCustomText, { color: pillFg }]}>
-                {pillProps.label}
-              </Text>
-            </View>
-          ) : (
-            <StatusPill label={pillProps.label} variant={pillProps.variant} />
-          )}
+    <View style={styles.tripRowWrap}>
+      <EditableListRow
+        onPress={onPress}
+        style={styles.tripRow}
+        contentStyle={styles.tripRowContent}
+      >
+        <View style={styles.tripIconWrap}>
+          <Ionicons
+            name={
+              trip.trip_type === 'international' ? 'globe-outline' : 'airplane-outline'
+            }
+            size={18}
+            color={colors.midNavy}
+          />
         </View>
-        <Text style={styles.tripRowMeta}>
-          {trip.date_range} · {trip.total_days}d ·{' '}
-          {trip.trip_type === 'international' ? 'International' : 'Domestic'}
-        </Text>
-        {trip.purpose ? (
-          <Text style={styles.tripRowPurpose} numberOfLines={1}>
-            {trip.purpose}
+        <View style={styles.tripRowMain}>
+          <View style={styles.tripRowHeader}>
+            <Text style={styles.tripRowDest} numberOfLines={1}>
+              {trip.destination}
+            </Text>
+            {isDraft ? (
+              <View style={[styles.pillCustom, styles.draftPill]}>
+                <Text style={[styles.pillCustomText, styles.draftPillText]}>
+                  Draft
+                </Text>
+              </View>
+            ) : pillBg ? (
+              <View style={[styles.pillCustom, { backgroundColor: pillBg }]}>
+                <Text style={[styles.pillCustomText, { color: pillFg }]}>
+                  {pillProps.label}
+                </Text>
+              </View>
+            ) : (
+              <StatusPill label={pillProps.label} variant={pillProps.variant} />
+            )}
+          </View>
+          <Text style={styles.tripRowMeta}>
+            {trip.date_range} · {trip.total_days}d ·{' '}
+            {trip.trip_type === 'international' ? 'International' : 'Domestic'}
           </Text>
-        ) : null}
-      </View>
-    </EditableListRow>
+          {trip.purpose ? (
+            <Text style={styles.tripRowPurpose} numberOfLines={1}>
+              {trip.purpose}
+            </Text>
+          ) : null}
+        </View>
+      </EditableListRow>
+      <TouchableOpacity
+        activeOpacity={0.8}
+        onPress={onExport}
+        disabled={exporting}
+        style={styles.exportTripBtn}
+      >
+        {exporting ? (
+          <ActivityIndicator size="small" color={colors.midNavy} />
+        ) : (
+          <Ionicons name="download-outline" size={15} color={colors.midNavy} />
+        )}
+        <Text style={styles.exportTripBtnText}>Export Trip Report</Text>
+      </TouchableOpacity>
+    </View>
   );
 };
 
@@ -2515,6 +3003,154 @@ const styles = StyleSheet.create({
     ...typography.caption,
     color: colors.mutedText,
     fontSize: 11,
+  },
+  // ── Log Trip: day-by-day + breakdown (Fix 2) ──
+  detailDivider: {
+    height: StyleSheet.hairlineWidth,
+    backgroundColor: colors.divider,
+    marginTop: spacing.lg,
+    marginBottom: spacing.md,
+  },
+  detailHint: {
+    ...typography.caption,
+    color: colors.mutedText,
+    fontSize: 12,
+    lineHeight: 17,
+    marginBottom: spacing.sm,
+  },
+  logDayCell: {
+    width: `${100 / 4 - 1.5}%`,
+    borderRadius: 8,
+    paddingVertical: 8,
+    paddingHorizontal: 8,
+    gap: 4,
+  },
+  logDayDate: {
+    ...typography.caption,
+    fontSize: 11,
+    fontWeight: '700',
+  },
+  logDayKindRow: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: 4,
+  },
+  logDayKind: {
+    ...typography.caption,
+    fontSize: 10,
+    fontWeight: '600',
+  },
+  logDaySub: {
+    ...typography.caption,
+    fontSize: 8,
+    fontWeight: '600',
+  },
+  dayCountLine: {
+    ...typography.bodyMedium,
+    color: colors.bodyText,
+    fontSize: 13,
+    fontWeight: '700',
+    marginTop: spacing.md,
+  },
+  lodgingBox: {
+    marginTop: spacing.md,
+    backgroundColor: colors.tealLight,
+    borderRadius: radius.card,
+    padding: spacing.md,
+  },
+  // Amber variant shown when at least one night is not deductible.
+  lodgingBoxAmber: {
+    backgroundColor: DRAFT_BANNER_BG,
+  },
+  lodgingTitle: {
+    ...typography.bodyMedium,
+    color: colors.navy,
+    fontSize: 13,
+    fontWeight: '700',
+  },
+  lodgingSummary: {
+    ...typography.bodyMedium,
+    color: colors.bodyText,
+    fontSize: 13,
+    fontWeight: '600',
+    marginTop: 2,
+    marginBottom: spacing.sm,
+  },
+  lodgingList: {
+    gap: 4,
+  },
+  lodgingRow: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: 6,
+  },
+  lodgingRowText: {
+    ...typography.bodyMedium,
+    color: colors.bodyText,
+    fontSize: 12,
+    flex: 1,
+  },
+  breakdownSummary: {
+    ...typography.bodyMedium,
+    color: colors.bodyText,
+    fontSize: 13,
+    fontWeight: '600',
+    marginBottom: spacing.sm,
+  },
+  btTable: {
+    borderWidth: StyleSheet.hairlineWidth,
+    borderColor: colors.divider,
+    borderRadius: 8,
+    overflow: 'hidden',
+  },
+  btRow: {
+    flexDirection: 'row',
+    borderBottomWidth: StyleSheet.hairlineWidth,
+    borderBottomColor: colors.divider,
+  },
+  btHeadRow: {
+    backgroundColor: colors.tealLight,
+  },
+  btLastRow: {
+    borderBottomWidth: 0,
+  },
+  btCell: {
+    ...typography.caption,
+    fontSize: 11,
+    color: colors.bodyText,
+    paddingVertical: 9,
+    paddingHorizontal: 8,
+  },
+  btHeadText: {
+    fontWeight: '700',
+    color: colors.navy,
+  },
+  btColExpense: { width: '26%' },
+  btColRule: { flex: 1 },
+  btColValue: {
+    width: '26%',
+    textAlign: 'right',
+    fontWeight: '700',
+  },
+  // ── Trip History: export button (Fix 3) ──
+  tripRowWrap: {},
+  exportTripBtn: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    justifyContent: 'center',
+    gap: 6,
+    marginTop: 6,
+    paddingVertical: 9,
+    borderRadius: 8,
+    borderWidth: StyleSheet.hairlineWidth,
+    borderColor: colors.midNavy,
+    backgroundColor: colors.lightBlue,
+  },
+  exportTripBtnText: {
+    ...typography.caption,
+    color: colors.midNavy,
+    fontSize: 12,
+    fontWeight: '700',
   },
   breakdownRow: {
     flexDirection: 'row',

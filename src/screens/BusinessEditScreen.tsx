@@ -1,4 +1,4 @@
-import React, { useEffect, useMemo, useState } from 'react';
+import React, { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import {
   ActivityIndicator,
   Alert,
@@ -13,18 +13,25 @@ import {
   View,
 } from 'react-native';
 import { Ionicons } from '@expo/vector-icons';
-import { useNavigation, useRoute, type RouteProp } from '@react-navigation/native';
+import {
+  useFocusEffect,
+  useNavigation,
+  useRoute,
+  type RouteProp,
+} from '@react-navigation/native';
 import type { NativeStackNavigationProp } from '@react-navigation/native-stack';
-import * as DocumentPicker from 'expo-document-picker';
+import { pickImageWithSource } from '../utils/imagePicker';
 import { colors, radius, spacing, typography } from '../theme';
 import {
   ENTITY_TYPES,
   createBusiness,
   updateBusiness,
+  updateBusinessLogo,
   uploadLogoFromUri,
   type BusinessFormInput,
 } from '../services/businesses';
 import { useBusiness } from '../business/BusinessContext';
+import { useSignedLogoUrl } from '../hooks/useSignedLogoUrls';
 import type { RootStackParamList } from '../navigation/types';
 import type { EntityType } from '../services/supabase';
 
@@ -44,26 +51,61 @@ export const BusinessEditScreen: React.FC = () => {
   const [entityType, setEntityType] = useState<EntityType | null>(existing?.entity_type ?? null);
   const [ein, setEin] = useState(existing?.ein ?? '');
   const [address, setAddress] = useState(existing?.address ?? '');
+  // logoUrl is the STORAGE PATH persisted to the business record (the bucket is
+  // private). localLogoUri is a freshly-picked file:// URI shown instantly while
+  // the upload runs. The thumbnail prefers the local pick, else the stored path.
   const [logoUrl, setLogoUrl] = useState<string | null>(existing?.logo_url ?? null);
+  const [localLogoUri, setLocalLogoUri] = useState<string | null>(null);
   const [uploadingLogo, setUploadingLogo] = useState(false);
   const [saving, setSaving] = useState(false);
+  // A signed URL for the stored logo (or the local file:// pick passed straight
+  // through). Re-minted on focus so an expired signature refreshes.
+  const previewLogo = useSignedLogoUrl(localLogoUri ?? logoUrl);
 
   useEffect(() => {
     navigation.setOptions({ title: editingId ? 'Edit Business' : 'Add Business' });
   }, [editingId, navigation]);
 
+  // Hydrate from the saved logo once the business record loads (businesses may
+  // arrive after mount). Runs a single time so it never clobbers a logo the user
+  // picks while editing.
+  const hydratedLogo = useRef(false);
+  useEffect(() => {
+    if (!hydratedLogo.current && existing?.logo_url) {
+      setLogoUrl(existing.logo_url);
+      hydratedLogo.current = true;
+    }
+  }, [existing]);
+
+  // On focus, pull the latest business record so the saved logo_url is current.
+  useFocusEffect(
+    useCallback(() => {
+      refresh().catch(() => undefined);
+    }, [refresh]),
+  );
+
   const handlePickLogo = async () => {
+    const uri = await pickImageWithSource();
+    if (!uri) return;
+    // Show the local image immediately.
+    setLocalLogoUri(uri);
+    // The logo path is <userId>/<businessId>/logo.jpg, so the upload needs a
+    // business ID. New businesses have no row yet — defer the upload to Save,
+    // which creates the row first and then uploads with the new ID. When editing
+    // an existing business, upload now with the known ID and persist logo_url so
+    // it survives navigating away before Save.
+    if (!editingId) return;
     try {
-      const result = await DocumentPicker.getDocumentAsync({
-        type: 'image/*',
-        copyToCacheDirectory: true,
-      });
-      if (result.canceled || !result.assets?.[0]?.uri) return;
       setUploadingLogo(true);
-      const url = await uploadLogoFromUri(result.assets[0].uri);
-      setLogoUrl(url);
+      const path = await uploadLogoFromUri(uri, editingId);
+      setLogoUrl(path);
+      // Two success checks: storage upload AND the DB write.
+      await updateBusinessLogo(editingId, path);
+      await refresh();
     } catch (err) {
-      Alert.alert('Logo upload failed', err instanceof Error ? err.message : String(err));
+      const e = err as { message?: string };
+      console.error('[Business Logo] upload failed:', e?.message ?? err);
+      Alert.alert('Logo upload failed', e?.message || 'Could not upload the logo. Please try again.');
     } finally {
       setUploadingLogo(false);
     }
@@ -79,7 +121,10 @@ export const BusinessEditScreen: React.FC = () => {
       entity_type: entityType,
       ein: ein || null,
       address: address || null,
-      logo_url: logoUrl,
+      // For a new business the logo is uploaded after the row exists (below), so
+      // it can use the new business ID in its path. Existing businesses already
+      // have logo_url persisted from handlePickLogo.
+      logo_url: editingId ? logoUrl : null,
     };
     setSaving(true);
     try {
@@ -87,6 +132,12 @@ export const BusinessEditScreen: React.FC = () => {
         await updateBusiness(editingId, payload);
       } else {
         const created = await createBusiness(payload);
+        // Now that the business row exists, upload the picked logo using the new
+        // ID so it lands at <userId>/<businessId>/logo.jpg, then persist the path.
+        if (localLogoUri) {
+          const path = await uploadLogoFromUri(localLogoUri, created.id);
+          await updateBusinessLogo(created.id, path);
+        }
         // Auto-activate a newly-created business so users immediately work in it.
         setActiveBusinessId(created.id);
       }
@@ -155,8 +206,12 @@ export const BusinessEditScreen: React.FC = () => {
 
         <Text style={styles.label}>Logo</Text>
         <View style={styles.logoBlock}>
-          {logoUrl ? (
-            <Image source={{ uri: logoUrl }} style={styles.logoPreview} resizeMode="cover" />
+          {previewLogo ? (
+            <Image
+              source={{ uri: previewLogo }}
+              style={styles.logoPreview}
+              resizeMode="cover"
+            />
           ) : (
             <View style={styles.logoPlaceholder}>
               <Ionicons name="image-outline" size={32} color={colors.subtleText} />
@@ -173,7 +228,9 @@ export const BusinessEditScreen: React.FC = () => {
             ) : (
               <>
                 <Ionicons name="cloud-upload-outline" size={16} color={colors.white} />
-                <Text style={styles.logoBtnText}>{logoUrl ? 'Replace logo' : 'Upload logo'}</Text>
+                <Text style={styles.logoBtnText}>
+                  {localLogoUri || logoUrl ? 'Replace logo' : 'Upload logo'}
+                </Text>
               </>
             )}
           </TouchableOpacity>
