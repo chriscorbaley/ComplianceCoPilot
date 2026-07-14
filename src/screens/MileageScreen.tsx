@@ -216,6 +216,7 @@ const MileageScreenInner: React.FC = () => {
             rules={rules}
             vehicles={activeVehicles}
             insets={insets}
+            businessId={activeBusinessId}
             onGoToVehicles={() => setTab('vehicles')}
             onSaved={async () => {
               await loadTrips();
@@ -350,9 +351,10 @@ const LogMilesTab: React.FC<{
   rules: ComplianceRules | null;
   vehicles: VehicleRow[];
   insets: { bottom: number };
+  businessId: string | null;
   onGoToVehicles: () => void;
   onSaved: () => Promise<void> | void;
-}> = ({ year, rules, vehicles, insets, onGoToVehicles, onSaved }) => {
+}> = ({ year, rules, vehicles, insets, businessId, onGoToVehicles, onSaved }) => {
   const [vehicleId, setVehicleId] = useState<string | null>(null);
   const [tripType, setTripType] = useState<MileageTripType>('business');
   const [tripDate, setTripDate] = useState<Date>(new Date());
@@ -410,6 +412,7 @@ const LogMilesTab: React.FC<{
       const userId = await requireUserId();
       const { error } = await supabase.from('mileage_log').insert({
         user_id: userId,
+        business_id: businessId,
         vehicle_id: vehicleId,
         trip_date: toISODate(tripDate),
         start_odometer: override.trim() === '' ? parseNum(startOdo) || null : null,
