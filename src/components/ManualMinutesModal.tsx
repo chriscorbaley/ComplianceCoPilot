@@ -15,6 +15,7 @@ import {
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
 import { Ionicons } from '@expo/vector-icons';
 import { colors, radius, spacing, typography } from '../theme';
+import { scaled } from '../constants/layout';
 import { DateInputField } from './DateInputField';
 import {
   MANUAL_MINUTES_META,
@@ -383,7 +384,8 @@ const styles = StyleSheet.create({
     borderWidth: 0.5,
     borderColor: colors.cardBorder,
     paddingHorizontal: spacing.md,
-    paddingVertical: 12,
+    paddingVertical: scaled(12),
+    minHeight: scaled(44),
     fontSize: 14,
     color: colors.bodyText,
   },
@@ -409,7 +411,8 @@ const styles = StyleSheet.create({
   },
   rateInput: {
     flex: 1,
-    paddingVertical: 12,
+    paddingVertical: scaled(12),
+    minHeight: scaled(44),
     fontSize: 14,
     color: colors.bodyText,
   },
@@ -417,7 +420,8 @@ const styles = StyleSheet.create({
     marginTop: spacing.xl,
     backgroundColor: colors.navy,
     borderRadius: 10,
-    paddingVertical: 15,
+    paddingVertical: scaled(15),
+    minHeight: scaled(44),
     alignItems: 'center',
   },
   generateBtnDisabled: {

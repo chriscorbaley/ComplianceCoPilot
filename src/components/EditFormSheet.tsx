@@ -13,6 +13,7 @@ import {
 } from 'react-native';
 import { Ionicons } from '@expo/vector-icons';
 import { colors, radius, spacing, typography } from '../theme';
+import { scaled } from '../constants/layout';
 
 interface EditFormSheetProps {
   title: string;
@@ -196,7 +197,8 @@ const styles = StyleSheet.create({
     gap: spacing.xs + 2,
     backgroundColor: colors.navy,
     borderRadius: radius.card,
-    paddingVertical: 14,
+    paddingVertical: scaled(14),
+    minHeight: scaled(44),
   },
   saveBtnText: {
     ...typography.bodyMedium,

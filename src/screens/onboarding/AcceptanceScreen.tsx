@@ -13,6 +13,7 @@ import {
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
 import { Ionicons } from '@expo/vector-icons';
 import { colors } from '../../theme';
+import { contentContainerStyle } from '../../constants/layout';
 
 interface AcceptanceScreenProps {
   title: string;
@@ -62,7 +63,9 @@ export const AcceptanceScreen: React.FC<AcceptanceScreenProps> = ({
           contentContainerStyle={styles.scrollContent}
           showsVerticalScrollIndicator={false}
         >
-          <Text style={styles.bodyText}>{body}</Text>
+          <View style={contentContainerStyle}>
+            <Text style={styles.bodyText}>{body}</Text>
+          </View>
         </ScrollView>
         <View style={styles.progressTrack}>
           <View style={[styles.progressFill, { width: `${Math.round(scrollPct * 100)}%` }]} />

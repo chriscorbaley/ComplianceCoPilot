@@ -14,6 +14,7 @@ import { useSafeAreaInsets } from 'react-native-safe-area-context';
 import { Audio } from 'expo-av';
 import { CommonActions, useNavigation } from '@react-navigation/native';
 import { colors, radius, spacing, shadow, typography } from '../theme';
+import { scaled } from '../constants/layout';
 import {
   classifyFromRecording,
   ensureMicPermission,
@@ -217,7 +218,7 @@ const styles = StyleSheet.create({
     borderRadius: radius.card,
     borderWidth: 0.5,
     borderColor: colors.cardBorder,
-    paddingVertical: spacing.sm,
+    paddingVertical: scaled(10),
     paddingHorizontal: spacing.sm,
     gap: spacing.md,
     ...shadow.raised,

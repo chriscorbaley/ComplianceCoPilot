@@ -21,6 +21,7 @@ import { colors } from '../../theme';
 import { supabase, type PropertyRow } from '../../services/supabase';
 import { MP_TEST_INT } from '../../services/properties';
 import { useAuth } from '../../auth/AuthContext';
+import { contentContainerStyle } from '../../constants/layout';
 import type { OnboardingStackParamList } from '../../navigation/types';
 
 type Route = RouteProp<OnboardingStackParamList, 'RealEstateComplete'>;
@@ -137,6 +138,7 @@ export const RealEstateCompleteScreen: React.FC = () => {
           { paddingBottom: insets.bottom + 24 },
         ]}
       >
+        <View style={[contentContainerStyle, { gap: 16 }]}>
         <Image
           source={require('../../../assets/logo.png')}
           style={styles.logo}
@@ -171,6 +173,7 @@ export const RealEstateCompleteScreen: React.FC = () => {
           {params.grouping !== null ? (
             <SummaryRow label="Grouping" value={params.grouping ? 'Yes' : 'No'} />
           ) : null}
+        </View>
         </View>
       </ScrollView>
 

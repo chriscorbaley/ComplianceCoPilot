@@ -12,6 +12,7 @@ import { useNavigation, useRoute, type RouteProp } from '@react-navigation/nativ
 import type { NativeStackNavigationProp } from '@react-navigation/native-stack';
 import { Ionicons } from '@expo/vector-icons';
 import { colors } from '../../theme';
+import { contentContainerStyle } from '../../constants/layout';
 import type {
   OnboardingStackParamList,
   RePropertyTypeKey,
@@ -67,6 +68,7 @@ export const RealEstateTypeScreen: React.FC = () => {
   return (
     <View style={[styles.root, { paddingTop: insets.top + 24 }]}>
       <ScrollView contentContainerStyle={[styles.content, { paddingBottom: insets.bottom + 120 }]}>
+        <View style={[contentContainerStyle, { gap: 12 }]}>
         <Text style={styles.title}>
           What is your Real Estate portfolio property type?
         </Text>
@@ -93,6 +95,7 @@ export const RealEstateTypeScreen: React.FC = () => {
             </Pressable>
           );
         })}
+        </View>
       </ScrollView>
 
       <View style={[styles.footer, { paddingBottom: insets.bottom + 12 }]}>

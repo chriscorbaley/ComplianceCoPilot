@@ -3,6 +3,12 @@ import { Platform, StyleSheet } from 'react-native';
 import { createBottomTabNavigator } from '@react-navigation/bottom-tabs';
 import { Ionicons } from '@expo/vector-icons';
 import { colors, typography } from '../theme';
+import {
+  isTablet,
+  scaled,
+  CONTENT_MAX_WIDTH,
+  SCREEN_WIDTH,
+} from '../constants/layout';
 import { DashboardScreen } from '../screens/DashboardScreen';
 import { HoursScreen } from '../screens/HoursScreen';
 import { BusinessTravelScreen } from '../screens/BusinessTravelScreen';
@@ -39,13 +45,13 @@ export const BottomTabs: React.FC = () => {
         headerShown: false,
         tabBarActiveTintColor: colors.navy,
         tabBarInactiveTintColor: colors.subtleText,
-        tabBarStyle: styles.tabBar,
+        tabBarStyle: isTablet ? [styles.tabBar, styles.tabBarTablet] : styles.tabBar,
         tabBarLabelStyle: styles.label,
         tabBarItemStyle: styles.item,
         tabBarIcon: ({ focused, color, size }) => (
           <Ionicons
             name={iconFor(route.name as keyof TabParamList, focused)}
-            size={size ?? 22}
+            size={scaled(size ?? 22)}
             color={color}
           />
         ),
@@ -72,6 +78,15 @@ const styles = StyleSheet.create({
     borderTopColor: colors.divider,
     height: Platform.select({ ios: 84, android: 64, default: 64 }),
     paddingTop: 8,
+  },
+  // On tablets, constrain the tab bar to the 600px content column and center it
+  // so the tabs align with the content instead of stretching across the screen.
+  // alignSelf + maxWidth handle the centering; SCREEN_WIDTH/CONTENT_MAX_WIDTH are
+  // referenced here to keep the math self-documenting.
+  tabBarTablet: {
+    maxWidth: CONTENT_MAX_WIDTH,
+    width: SCREEN_WIDTH >= CONTENT_MAX_WIDTH ? '100%' : SCREEN_WIDTH,
+    alignSelf: 'center',
   },
   label: {
     ...typography.micro,

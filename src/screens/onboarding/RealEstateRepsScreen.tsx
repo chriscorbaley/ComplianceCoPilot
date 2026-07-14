@@ -19,6 +19,7 @@ import {
   subscribeToRules,
   type ComplianceRules,
 } from '../../services/complianceRules';
+import { contentContainerStyle } from '../../constants/layout';
 import type { OnboardingStackParamList } from '../../navigation/types';
 
 type Nav = NativeStackNavigationProp<OnboardingStackParamList, 'RealEstateReps'>;
@@ -89,6 +90,7 @@ export const RealEstateRepsScreen: React.FC = () => {
         keyboardShouldPersistTaps="handled"
         contentContainerStyle={[styles.content, { paddingBottom: insets.bottom + 120 }]}
       >
+        <View style={[contentContainerStyle, { gap: 12 }]}>
         <Text style={styles.title}>
           Real Estate Professional Status (REPS) Qualification
         </Text>
@@ -165,6 +167,7 @@ export const RealEstateRepsScreen: React.FC = () => {
             </Text>
           </View>
         ) : null}
+        </View>
       </ScrollView>
 
       <View style={[styles.footer, { paddingBottom: insets.bottom + 12 }]}>

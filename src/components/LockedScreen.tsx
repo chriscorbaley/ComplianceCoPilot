@@ -3,6 +3,7 @@ import { Alert, StyleSheet, Text, TouchableOpacity, View } from 'react-native';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
 import { Ionicons } from '@expo/vector-icons';
 import { colors } from '../theme';
+import { scaled } from '../constants/layout';
 
 interface LockedScreenProps {
   title: string;
@@ -75,7 +76,8 @@ const styles = StyleSheet.create({
     marginTop: 24,
     backgroundColor: '#BA7517',
     borderRadius: 10,
-    paddingVertical: 14,
+    paddingVertical: scaled(14),
+    minHeight: scaled(44),
     paddingHorizontal: 32,
     alignSelf: 'stretch',
     alignItems: 'center',

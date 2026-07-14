@@ -9,6 +9,7 @@ import {
 } from 'react-native';
 import { Ionicons } from '@expo/vector-icons';
 import { colors } from '../theme';
+import { scaled } from '../constants/layout';
 import { EditFormSheet } from './EditFormSheet';
 import {
   supabase,
@@ -321,7 +322,7 @@ const styles = StyleSheet.create({
     borderRadius: 12,
     borderWidth: 1.5,
     borderColor: colors.navy,
-    paddingVertical: 14,
+    paddingVertical: scaled(14),
     paddingHorizontal: 16,
   },
   toggleActive: { backgroundColor: colors.navy, borderColor: colors.navy },
@@ -365,6 +366,9 @@ const styles = StyleSheet.create({
     borderWidth: 0.5,
     borderColor: '#CCCCCC',
     padding: 16,
+    // Tablet touch-target scaling: overrides top/bottom padding only; the
+    // `padding` shorthand still supplies horizontal padding. No-op on phones.
+    paddingVertical: scaled(16),
     gap: 8,
   },
   mpCardActive: {
@@ -388,7 +392,7 @@ const styles = StyleSheet.create({
     flexDirection: 'row',
     alignItems: 'center',
     gap: 10,
-    paddingVertical: 4,
+    paddingVertical: scaled(10),
   },
   checkbox: {
     width: 22,
@@ -407,7 +411,8 @@ const styles = StyleSheet.create({
     borderWidth: 1,
     borderColor: colors.divider,
     paddingHorizontal: 14,
-    paddingVertical: 12,
+    paddingVertical: scaled(12),
+    minHeight: scaled(44),
     fontSize: 16,
     color: colors.bodyText,
   },

@@ -16,6 +16,7 @@ import {
 } from 'react-native';
 import { Ionicons } from '@expo/vector-icons';
 import { colors, radius, shadow, spacing, typography } from '../theme';
+import { scaled } from '../constants/layout';
 import { SignaturePad } from './SignaturePad';
 import {
   generateAccountablePlan,
@@ -42,6 +43,8 @@ export const AccountablePlanModal: React.FC<Props> = ({
   const [signerName, setSignerName] = useState(defaultSignerName);
   const [signerTitle, setSignerTitle] = useState('Owner / Shareholder');
   const [generating, setGenerating] = useState(false);
+  // Locked while the user draws in the signature pad so strokes don't scroll.
+  const [scrollEnabled, setScrollEnabled] = useState(true);
   const today = new Date();
 
   useEffect(() => {
@@ -49,6 +52,7 @@ export const AccountablePlanModal: React.FC<Props> = ({
       setSignerName(defaultSignerName);
       setSignerTitle('Owner / Shareholder');
       setGenerating(false);
+      setScrollEnabled(true);
     }
   }, [visible, defaultSignerName]);
 
@@ -95,6 +99,7 @@ export const AccountablePlanModal: React.FC<Props> = ({
             style={styles.scroll}
             contentContainerStyle={styles.scrollContent}
             showsVerticalScrollIndicator={false}
+            scrollEnabled={scrollEnabled}
             keyboardShouldPersistTaps="handled"
           >
             <View style={styles.docCard}>
@@ -139,6 +144,8 @@ export const AccountablePlanModal: React.FC<Props> = ({
               onConfirm={onConfirm}
               confirming={generating}
               confirmLabel="Adopt & generate"
+              onDrawStart={() => setScrollEnabled(false)}
+              onDrawEnd={() => setScrollEnabled(true)}
             />
           </ScrollView>
         </View>
@@ -222,7 +229,8 @@ const styles = StyleSheet.create({
     borderColor: colors.cardBorder,
     borderRadius: 10,
     paddingHorizontal: spacing.md,
-    paddingVertical: 12,
+    paddingVertical: scaled(12),
+    minHeight: scaled(44),
     ...typography.body,
     color: colors.bodyText,
     fontSize: 14,

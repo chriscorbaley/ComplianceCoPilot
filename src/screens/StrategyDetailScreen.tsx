@@ -19,6 +19,7 @@ import {
 import type { NativeStackNavigationProp } from '@react-navigation/native-stack';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
 import { colors, radius, shadow, spacing, typography } from '../theme';
+import { contentContainerStyle } from '../constants/layout';
 import { ProgressBar } from '../components/ProgressBar';
 import { StatusPill } from '../components/StatusPill';
 import { AugustaActivityModal } from '../components/AugustaActivityModal';
@@ -118,6 +119,7 @@ export const StrategyDetailScreen: React.FC = () => {
       contentContainerStyle={[styles.content, { paddingBottom: 32 + insets.bottom }]}
       showsVerticalScrollIndicator={false}
     >
+      <View style={[contentContainerStyle, { gap: spacing.lg }]}>
       {showProperties ? (
         <View style={styles.reportRow}>
           <TouchableOpacity
@@ -346,6 +348,7 @@ export const StrategyDetailScreen: React.FC = () => {
           onClose={() => setSettingsOpen(false)}
         />
       ) : null}
+      </View>
     </ScrollView>
   );
 };

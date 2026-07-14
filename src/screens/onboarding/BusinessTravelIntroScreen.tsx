@@ -7,6 +7,7 @@ import { Ionicons } from '@expo/vector-icons';
 import { colors } from '../../theme';
 import { useAuth } from '../../auth/AuthContext';
 import type { OnboardingStackParamList } from '../../navigation/types';
+import { contentContainerStyle } from '../../constants/layout';
 
 type Nav = NativeStackNavigationProp<OnboardingStackParamList, 'BusinessTravelIntro'>;
 
@@ -69,6 +70,7 @@ export const BusinessTravelIntroScreen: React.FC = () => {
         contentContainerStyle={{ paddingBottom: insets.bottom + 24 }}
         showsVerticalScrollIndicator={false}
       >
+        <View style={contentContainerStyle}>
         <View style={[styles.hero, { paddingTop: insets.top + 28 }]}>
           <Ionicons name="airplane" size={48} color={colors.amber} style={styles.planeIcon} />
           <Text style={styles.title}>Don't Leave Money on the Table</Text>
@@ -142,6 +144,7 @@ export const BusinessTravelIntroScreen: React.FC = () => {
               </TouchableOpacity>
             </>
           )}
+        </View>
         </View>
       </ScrollView>
     </View>

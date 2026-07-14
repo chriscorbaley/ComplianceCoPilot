@@ -4,6 +4,7 @@ import { Ionicons } from '@expo/vector-icons';
 import { useNavigation } from '@react-navigation/native';
 import type { NativeStackNavigationProp } from '@react-navigation/native-stack';
 import { colors } from '../theme';
+import { scaled } from '../constants/layout';
 import type { RootStackParamList } from '../navigation/types';
 
 interface VoiceUpgradeSheetProps {
@@ -135,7 +136,8 @@ const styles = StyleSheet.create({
   },
   cta: {
     borderRadius: 10,
-    paddingVertical: 14,
+    paddingVertical: scaled(14),
+    minHeight: scaled(44),
     alignItems: 'center',
   },
   ctaCore: {

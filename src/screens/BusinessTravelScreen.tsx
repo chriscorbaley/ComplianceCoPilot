@@ -16,6 +16,7 @@ import { Ionicons } from '@expo/vector-icons';
 import { Audio } from 'expo-av';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
 import { colors, radius, shadow, spacing, typography } from '../theme';
+import { contentContainerStyle } from '../constants/layout';
 import { DateInputField, DatePickerModal } from '../components/DateInputField';
 import { useStrategyAccess } from '../hooks/useStrategyAccess';
 import { BusinessTravelLockedScreen } from '../components/BusinessTravelLockedScreen';
@@ -590,6 +591,7 @@ const AnalyzerTab: React.FC<AnalyzerTabProps> = ({ rules, insets, onLogTrip }) =
       ]}
       showsVerticalScrollIndicator={false}
     >
+      <View style={[contentContainerStyle, { gap: spacing.lg }]}>
       <Card padded>
         <Text style={styles.sectionLabel}>Spoken itinerary</Text>
         <Text style={styles.helperText}>
@@ -716,6 +718,7 @@ const AnalyzerTab: React.FC<AnalyzerTabProps> = ({ rules, insets, onLogTrip }) =
           onLogTrip={onLogTrip}
         />
       ) : null}
+      </View>
     </ScrollView>
   );
 };
@@ -1376,6 +1379,7 @@ const LogTripTab: React.FC<LogTripTabProps> = ({
       showsVerticalScrollIndicator={false}
       keyboardShouldPersistTaps="handled"
     >
+      <View style={[contentContainerStyle, { gap: spacing.lg }]}>
       <Card padded>
         {autoFilled ? (
           <View style={styles.prefillNote}>
@@ -1783,6 +1787,7 @@ const LogTripTab: React.FC<LogTripTabProps> = ({
           </Text>
         </View>
       ) : null}
+      </View>
     </ScrollView>
   );
 };
@@ -1957,6 +1962,7 @@ const HistoryTab: React.FC<{
       ]}
       showsVerticalScrollIndicator={false}
     >
+      <View style={[contentContainerStyle, { gap: spacing.lg }]}>
       <YearSelector style={{ paddingHorizontal: 0, paddingTop: 0 }} />
       {trips.length === 0 ? (
         <Card padded>
@@ -1975,6 +1981,7 @@ const HistoryTab: React.FC<{
           />
         ))
       )}
+      </View>
     </ScrollView>
   );
 };
@@ -2612,6 +2619,7 @@ const RulesTab: React.FC<{
       ]}
       showsVerticalScrollIndicator={false}
     >
+      <View style={[contentContainerStyle, { gap: spacing.lg }]}>
       <RuleSection
         title="Domestic"
         subtitle="IRC §162 — Ordinary and necessary business expenses"
@@ -2636,6 +2644,7 @@ const RulesTab: React.FC<{
           These rules update automatically when your tax firm administrator
           approves changes.
         </Text>
+      </View>
       </View>
     </ScrollView>
   );

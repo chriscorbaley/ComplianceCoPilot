@@ -16,6 +16,7 @@ import {
 } from 'react-native';
 import { Ionicons } from '@expo/vector-icons';
 import { colors, radius, shadow, spacing, typography } from '../theme';
+import { scaled } from '../constants/layout';
 import { SignaturePad } from './SignaturePad';
 import { generateAugustaDocuments } from '../services/augustaDocuments';
 import { shareHtmlAsPdf } from '../services/pdfDocuments';
@@ -52,6 +53,8 @@ export const AugustaDocsModal: React.FC<Props> = ({
   const [ownerSig, setOwnerSig] = useState<string | null>(null);
   const [tenantSig, setTenantSig] = useState<string | null>(null);
   const [generating, setGenerating] = useState(false);
+  // Locked while the user draws in either signature pad so strokes don't scroll.
+  const [scrollEnabled, setScrollEnabled] = useState(true);
   // Live step label shown on the button while the two PDFs are built in
   // sequence ("Generating lease agreement…" → "Generating invoice…").
   const [progress, setProgress] = useState<string | null>(null);
@@ -65,6 +68,7 @@ export const AugustaDocsModal: React.FC<Props> = ({
       setOwnerSig(null);
       setTenantSig(null);
       setGenerating(false);
+      setScrollEnabled(true);
       setProgress(null);
     }
   }, [visible, context, defaultOwnerName]);
@@ -154,6 +158,7 @@ export const AugustaDocsModal: React.FC<Props> = ({
             style={styles.scroll}
             contentContainerStyle={styles.scrollContent}
             showsVerticalScrollIndicator={false}
+            scrollEnabled={scrollEnabled}
             keyboardShouldPersistTaps="handled"
           >
             <Text style={styles.blurb}>
@@ -189,7 +194,12 @@ export const AugustaDocsModal: React.FC<Props> = ({
                 </TouchableOpacity>
               </View>
             ) : (
-              <SignaturePad onConfirm={setOwnerSig} confirmLabel="Save owner signature" />
+              <SignaturePad
+                onConfirm={setOwnerSig}
+                confirmLabel="Save owner signature"
+                onDrawStart={() => setScrollEnabled(false)}
+                onDrawEnd={() => setScrollEnabled(true)}
+              />
             )}
 
             <Text style={styles.label}>Tenant representative name</Text>
@@ -219,7 +229,12 @@ export const AugustaDocsModal: React.FC<Props> = ({
                 </TouchableOpacity>
               </View>
             ) : (
-              <SignaturePad onConfirm={setTenantSig} confirmLabel="Save tenant signature" />
+              <SignaturePad
+                onConfirm={setTenantSig}
+                confirmLabel="Save tenant signature"
+                onDrawStart={() => setScrollEnabled(false)}
+                onDrawEnd={() => setScrollEnabled(true)}
+              />
             )}
 
             <TouchableOpacity
@@ -302,7 +317,8 @@ const styles = StyleSheet.create({
     borderColor: colors.cardBorder,
     borderRadius: 10,
     paddingHorizontal: spacing.md,
-    paddingVertical: 12,
+    paddingVertical: scaled(12),
+    minHeight: scaled(44),
     ...typography.body,
     color: colors.bodyText,
     fontSize: 14,
@@ -335,7 +351,8 @@ const styles = StyleSheet.create({
     gap: spacing.sm,
     backgroundColor: colors.navy,
     borderRadius: 10,
-    paddingVertical: 15,
+    paddingVertical: scaled(15),
+    minHeight: scaled(44),
     marginTop: spacing.xl,
     ...shadow.raised,
   },

@@ -9,31 +9,35 @@ import {
   View,
 } from 'react-native';
 import { Ionicons } from '@expo/vector-icons';
-import { CommonActions, useNavigation, useRoute, type RouteProp } from '@react-navigation/native';
+import { useNavigation, useRoute, type RouteProp } from '@react-navigation/native';
 import type { NativeStackNavigationProp } from '@react-navigation/native-stack';
 import SignatureCanvas, { type SignatureViewRef } from 'react-native-signature-canvas';
-import { colors, radius, spacing, typography } from '../theme';
-import type { RootStackParamList } from '../navigation/types';
+import { colors, radius, spacing } from '../theme';
 import {
   completeCancellation,
   deletionDateFromNow,
   formatDeletionDate,
 } from '../services/cancellation';
 import { useAuth } from '../auth/AuthContext';
+import type { RootStackParamList } from '../navigation/types';
 
-const DANGER_RED = '#C0392B';
-const DANGER_RED_BG = '#FDECEA';
+// Spec colors for the cancellation flow.
+const RED = '#A32D2D';
+const RED_BG = '#FCEBEB';
 
 export const CancelWarning2Screen: React.FC = () => {
   const navigation = useNavigation<NativeStackNavigationProp<RootStackParamList>>();
   const route = useRoute<RouteProp<RootStackParamList, 'CancelWarning2'>>();
   const { signature1, documentCount } = route.params;
-  const { signOut } = useAuth();
+  const { refreshProfile } = useAuth();
 
   const sigRef = useRef<SignatureViewRef>(null);
-  const [hasSignature, setHasSignature] = useState(false);
   const [signature2, setSignature2] = useState<string | null>(null);
+  const [hasDrawn, setHasDrawn] = useState(false);
   const [submitting, setSubmitting] = useState(false);
+  // Locked while the user draws so vertical strokes draw instead of scroll.
+  const [scrollEnabled, setScrollEnabled] = useState(true);
+  const [strokeEnded, setStrokeEnded] = useState(false);
 
   // Captured once on mount so the displayed date stays stable across re-renders.
   const deletionDate = useMemo(() => deletionDateFromNow(), []);
@@ -49,35 +53,43 @@ export const CancelWarning2Screen: React.FC = () => {
     [],
   );
 
-  const handleSignatureOK = (sig: string) => {
-    setSignature2(sig);
-    setHasSignature(true);
-  };
-
+  const handleSignatureOK = (sig: string) => setSignature2(sig);
   const handleSignatureEmpty = () => {
-    setHasSignature(false);
     setSignature2(null);
+    setHasDrawn(false);
   };
-
+  // onBegin fires on touch — lock scrolling immediately. onEnd fires on lift —
+  // re-enable scrolling and read the captured signature.
   const handleSignatureBegin = () => {
-    setHasSignature(true);
+    setHasDrawn(true);
+    setScrollEnabled(false);
   };
-
   const handleSignatureEnd = () => {
+    setScrollEnabled(true);
+    setStrokeEnded(true);
     sigRef.current?.readSignature();
   };
 
   const handleClearSignature = () => {
     sigRef.current?.clearSignature();
-    setHasSignature(false);
     setSignature2(null);
+    setHasDrawn(false);
+    setStrokeEnded(false);
+    setScrollEnabled(true);
+  };
+
+  const handleConfirmSignature = () => {
+    if (hasDrawn) sigRef.current?.readSignature();
+  };
+
+  const handleGoBack = () => {
+    if (submitting) return;
+    // Back to Settings without cancelling anything.
+    navigation.navigate('Settings');
   };
 
   const handleCancelSubscription = useCallback(async () => {
-    if (!signature2) {
-      sigRef.current?.readSignature();
-      return;
-    }
+    if (!signature2 || submitting) return;
     setSubmitting(true);
     try {
       const result = await completeCancellation({
@@ -85,58 +97,44 @@ export const CancelWarning2Screen: React.FC = () => {
         signature2DataUrl: signature2,
         documentCount,
       });
-
-      const messageLines = [
-        `Your subscription has been cancelled.`,
-        `All documents will be permanently deleted on ${formatDeletionDate(new Date(result.deletionScheduledFor))}.`,
-      ];
-      if (!result.stripeCancelled) {
-        messageLines.push('Note: Stripe cancellation could not be confirmed — our team will follow up.');
+      // Re-read the (now downgraded) profile so gating re-locks paid features.
+      try {
+        await refreshProfile();
+      } catch {
+        // non-fatal; Dashboard refreshes on focus anyway
       }
-      if (!result.emailSent) {
-        messageLines.push('Note: confirmation email could not be sent — please contact support if you don\'t receive it.');
-      }
-
-      Alert.alert('Subscription Cancelled', messageLines.join('\n\n'), [
-        {
-          text: 'OK',
-          onPress: async () => {
-            try {
-              await signOut();
-            } catch {
-              // ignore; user will land on auth screen anyway via state change
-            }
-            navigation.dispatch(CommonActions.reset({ index: 0, routes: [{ name: 'Tabs' }] }));
-          },
-        },
-      ]);
+      navigation.replace('CancelSuccess', {
+        deletionDate: formatDeletionDate(new Date(result.deletionScheduledFor)),
+        emailSent: result.emailSent,
+      });
     } catch (err) {
       Alert.alert('Cancellation failed', err instanceof Error ? err.message : String(err));
-    } finally {
       setSubmitting(false);
     }
-  }, [documentCount, navigation, signature1, signature2, signOut]);
+  }, [documentCount, navigation, refreshProfile, signature1, signature2, submitting]);
 
   return (
-    <ScrollView style={styles.root} contentContainerStyle={styles.content}>
-      <View style={styles.headerBlock}>
-        <Ionicons name="alert-circle" size={28} color={DANGER_RED} />
-        <Text style={styles.header}>Final Confirmation</Text>
-      </View>
+    <ScrollView
+      style={styles.root}
+      contentContainerStyle={styles.content}
+      scrollEnabled={scrollEnabled}
+      keyboardShouldPersistTaps="handled"
+    >
+      <Text style={styles.title}>Final Confirmation Required</Text>
 
       <View style={styles.dateCard}>
         <Text style={styles.dateLabel}>Your documents will be permanently deleted on</Text>
         <Text style={styles.dateValue}>{formattedDate}</Text>
       </View>
 
-      <View style={styles.warningCard}>
-        <Text style={styles.warningBody}>
-          This action cannot be undone. There are no exceptions to this policy.
-        </Text>
-      </View>
+      <Text style={styles.warningBody}>
+        This action cannot be undone. There are no exceptions to this policy regardless of
+        circumstances.
+      </Text>
 
       <Text style={styles.sigLabel}>
-        Sign here to confirm you accept permanent deletion of all your compliance documents
+        Sign below to confirm you accept permanent and irrecoverable deletion of all your compliance
+        documents
       </Text>
 
       <View style={styles.sigCard}>
@@ -150,21 +148,59 @@ export const CancelWarning2Screen: React.FC = () => {
             descriptionText=""
             webStyle={webStyle}
             backgroundColor={colors.white}
-            penColor={colors.bodyText}
+            penColor={colors.navy}
             autoClear={false}
             imageType="image/png"
           />
         </View>
-        <TouchableOpacity onPress={handleClearSignature} style={styles.clearBtn}>
-          <Ionicons name="refresh" size={14} color={colors.mutedText} />
-          <Text style={styles.clearText}>Clear</Text>
-        </TouchableOpacity>
+        <View style={styles.sigActions}>
+          <TouchableOpacity
+            onPress={handleClearSignature}
+            style={styles.clearBtn}
+            activeOpacity={0.8}
+            disabled={submitting}
+          >
+            <Ionicons name="refresh" size={14} color={colors.navy} />
+            <Text style={styles.clearText}>Clear</Text>
+          </TouchableOpacity>
+          <TouchableOpacity
+            onPress={handleConfirmSignature}
+            style={[styles.sigConfirmBtn, (!hasDrawn || submitting) && styles.btnDisabled]}
+            disabled={!hasDrawn || submitting}
+            activeOpacity={0.85}
+          >
+            <Text style={styles.sigConfirmText}>Confirm Signature</Text>
+          </TouchableOpacity>
+        </View>
       </View>
 
+      <View>
+        <Text style={styles.sigHintMain}>Draw your signature above</Text>
+        <Text style={styles.sigHintSub}>
+          {strokeEnded ? 'Scroll to continue' : 'Scrolling is paused while you sign'}
+        </Text>
+      </View>
+
+      {submitting ? (
+        <View style={styles.processingRow}>
+          <ActivityIndicator color={colors.navy} />
+          <Text style={styles.processingText}>Processing…</Text>
+        </View>
+      ) : null}
+
       <TouchableOpacity
-        style={[styles.cancelBtn, (!hasSignature || submitting) && styles.btnDisabled]}
+        style={[styles.goBackBtn, submitting && styles.btnDisabled]}
+        onPress={handleGoBack}
+        activeOpacity={0.85}
+        disabled={submitting}
+      >
+        <Text style={styles.goBackText}>Go Back — Keep My Subscription</Text>
+      </TouchableOpacity>
+
+      <TouchableOpacity
+        style={[styles.cancelBtn, (!signature2 || submitting) && styles.btnDisabled]}
         onPress={handleCancelSubscription}
-        disabled={!hasSignature || submitting}
+        disabled={!signature2 || submitting}
         activeOpacity={0.85}
       >
         {submitting ? (
@@ -172,18 +208,9 @@ export const CancelWarning2Screen: React.FC = () => {
         ) : (
           <>
             <Ionicons name="close-circle" size={18} color={colors.white} />
-            <Text style={styles.cancelText}>Cancel Subscription</Text>
+            <Text style={styles.cancelText}>Cancel My Subscription</Text>
           </>
         )}
-      </TouchableOpacity>
-
-      <TouchableOpacity
-        style={styles.keepBtn}
-        onPress={() => navigation.goBack()}
-        activeOpacity={0.85}
-        disabled={submitting}
-      >
-        <Text style={styles.keepText}>Go Back</Text>
       </TouchableOpacity>
     </ScrollView>
   );
@@ -192,90 +219,137 @@ export const CancelWarning2Screen: React.FC = () => {
 const styles = StyleSheet.create({
   root: {
     flex: 1,
-    backgroundColor: colors.background,
+    backgroundColor: colors.white,
   },
   content: {
     padding: spacing.lg,
     gap: spacing.lg,
     paddingBottom: spacing.xxxl,
   },
-  headerBlock: {
-    flexDirection: 'row',
-    alignItems: 'center',
-    gap: spacing.sm,
-  },
-  header: {
-    ...typography.h1,
-    color: DANGER_RED,
-    flex: 1,
+  title: {
+    fontSize: 20,
+    fontWeight: '700',
+    color: RED,
+    textAlign: 'center',
   },
   dateCard: {
-    backgroundColor: colors.white,
+    backgroundColor: RED_BG,
     borderRadius: radius.card,
     padding: spacing.lg,
     borderWidth: 1,
-    borderColor: DANGER_RED,
+    borderColor: RED,
     alignItems: 'center',
-    gap: spacing.xs,
+    gap: spacing.sm,
   },
   dateLabel: {
-    ...typography.caption,
-    color: colors.mutedText,
+    fontSize: 14,
+    color: colors.bodyText,
     textAlign: 'center',
   },
   dateValue: {
-    ...typography.h1,
-    color: DANGER_RED,
+    fontSize: 22,
+    fontWeight: '700',
+    color: RED,
     textAlign: 'center',
   },
-  warningCard: {
-    backgroundColor: DANGER_RED_BG,
-    borderRadius: radius.card,
-    padding: spacing.lg,
-    borderLeftWidth: 4,
-    borderLeftColor: DANGER_RED,
-  },
   warningBody: {
-    ...typography.bodyMedium,
+    fontSize: 15,
+    fontWeight: '600',
     color: colors.bodyText,
-    lineHeight: 20,
+    lineHeight: 21,
   },
   sigLabel: {
-    ...typography.bodyMedium,
+    fontSize: 15,
+    fontWeight: '500',
     color: colors.bodyText,
-    marginTop: spacing.sm,
   },
   sigCard: {
     backgroundColor: colors.white,
-    borderRadius: radius.card,
-    borderWidth: StyleSheet.hairlineWidth,
-    borderColor: colors.cardBorder,
+    borderRadius: 10,
+    borderWidth: 1.5,
+    borderColor: colors.navy,
     overflow: 'hidden',
   },
   sigCanvasWrap: {
     height: 200,
     backgroundColor: colors.white,
   },
+  sigActions: {
+    flexDirection: 'row',
+    borderTopWidth: 1.5,
+    borderTopColor: colors.navy,
+  },
   clearBtn: {
     flexDirection: 'row',
     alignItems: 'center',
-    justifyContent: 'flex-end',
+    justifyContent: 'center',
     gap: spacing.xs,
-    paddingHorizontal: spacing.md,
-    paddingVertical: spacing.sm,
-    borderTopWidth: StyleSheet.hairlineWidth,
-    borderTopColor: colors.divider,
+    paddingVertical: spacing.md,
+    flex: 1,
+    borderRightWidth: 1.5,
+    borderRightColor: colors.navy,
   },
   clearText: {
-    ...typography.caption,
-    color: colors.mutedText,
+    fontSize: 14,
+    fontWeight: '700',
+    color: colors.navy,
+  },
+  sigConfirmBtn: {
+    alignItems: 'center',
+    justifyContent: 'center',
+    paddingVertical: spacing.md,
+    flex: 1.6,
+    backgroundColor: colors.navy,
+  },
+  sigConfirmText: {
+    fontSize: 14,
+    fontWeight: '700',
+    color: colors.white,
+  },
+  sigHintMain: {
+    fontSize: 11,
+    fontStyle: 'italic',
+    color: '#888888',
+    textAlign: 'center',
+  },
+  sigHintSub: {
+    fontSize: 11,
+    fontStyle: 'italic',
+    color: '#888888',
+    textAlign: 'center',
+    marginTop: 2,
+  },
+  processingRow: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    justifyContent: 'center',
+    gap: spacing.sm,
+  },
+  processingText: {
+    fontSize: 14,
+    fontWeight: '600',
+    color: colors.navy,
+  },
+  goBackBtn: {
+    alignItems: 'center',
+    justifyContent: 'center',
+    paddingVertical: 14,
+    borderRadius: 8,
+    borderWidth: 1.5,
+    borderColor: colors.navy,
+    backgroundColor: colors.white,
+  },
+  goBackText: {
+    color: colors.navy,
+    fontSize: 15,
+    fontWeight: '700',
   },
   cancelBtn: {
     flexDirection: 'row',
     alignItems: 'center',
     justifyContent: 'center',
     gap: spacing.sm,
-    backgroundColor: DANGER_RED,
+    backgroundColor: RED,
     borderRadius: 8,
     paddingVertical: 14,
   },
@@ -283,16 +357,6 @@ const styles = StyleSheet.create({
     color: colors.white,
     fontSize: 15,
     fontWeight: '700',
-  },
-  keepBtn: {
-    alignItems: 'center',
-    justifyContent: 'center',
-    paddingVertical: 12,
-  },
-  keepText: {
-    ...typography.bodyMedium,
-    color: colors.midNavy,
-    fontWeight: '600',
   },
   btnDisabled: {
     opacity: 0.4,

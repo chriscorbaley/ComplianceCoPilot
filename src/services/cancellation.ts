@@ -5,6 +5,26 @@ import { File, Paths } from 'expo-file-system';
 import * as Sharing from 'expo-sharing';
 import { decode as decodeBase64 } from 'base64-arraybuffer';
 import { supabase, requireUserId, type DocumentRow } from './supabase';
+import { renderHtmlToPdfUri } from './pdfDocuments';
+
+// Escape user text for safe embedding in the generated PDF's <pre> block.
+function escapeHtml(s: string): string {
+  return s
+    .replace(/&/g, '&amp;')
+    .replace(/</g, '&lt;')
+    .replace(/>/g, '&gt;');
+}
+
+// Generated documents (minutes, signed docs, invoices) store their content
+// directly in file_url rather than a storage URL. Some are already full HTML;
+// plain-text ones (e.g. meeting minutes) need to be wrapped before printing.
+function contentToPdfHtml(content: string): string {
+  const looksLikeHtml = /<(!doctype|html|body|div|table|section|p)\b/i.test(content);
+  if (looksLikeHtml) return content;
+  return `<html><head><meta charset="utf-8" /></head><body><pre style="white-space:pre-wrap;word-wrap:break-word;font-family:-apple-system,Helvetica,Arial,sans-serif;font-size:13px;line-height:1.5;color:#1A1A1A;padding:24px;">${escapeHtml(
+    content,
+  )}</pre></body></html>`;
+}
 
 const SIGNATURE_BUCKET = 'cancellations';
 const RETENTION_DAYS = 30;
@@ -41,28 +61,63 @@ export async function fetchDocumentCount(userId: string): Promise<number> {
   return count ?? 0;
 }
 
-// Download each document to the device's cache directory and invoke the system
-// share sheet so the user can save them (Files app, email, drive, etc).
-// Documents without a file_url are silently skipped.
-export async function downloadAllDocuments(docs: DocumentSnapshot[]): Promise<{ downloaded: number; skipped: number }> {
+// Download / export every document and invoke the system share sheet so the
+// user can save them (Files app, email, drive, etc). Handles ALL document
+// types, not just real storage files:
+//   • file_url is a real storage URL (starts with http) → download the file
+//     and share it.
+//   • file_url holds document content (meeting minutes text, generated HTML) →
+//     render it to a PDF with expo-print and share that.
+// Only documents with no file_url at all are skipped. onProgress fires before
+// each document is processed so the UI can show "Downloading document X of Y…".
+export async function downloadAllDocuments(
+  docs: DocumentSnapshot[],
+  onProgress?: (current: number, total: number) => void,
+): Promise<{ downloaded: number; skipped: number }> {
   let downloaded = 0;
   let skipped = 0;
   const sharingAvailable = await Sharing.isAvailableAsync();
-  for (const doc of docs) {
+  for (let i = 0; i < docs.length; i += 1) {
+    onProgress?.(i + 1, docs.length);
+    const doc = docs[i];
+    console.log(
+      '[Download] attempting:',
+      doc.name,
+      'type:',
+      doc.fileType,
+      'url starts with:',
+      doc.fileUrl?.substring(0, 20),
+    );
     if (!doc.fileUrl) {
+      console.log('[Download] skipped (no file_url):', doc.name);
       skipped += 1;
       continue;
     }
     try {
-      const safeName = doc.name.replace(/[^a-zA-Z0-9._-]/g, '_');
-      const ext = doc.fileType && !safeName.includes('.') ? `.${doc.fileType}` : '';
-      const targetFile = new File(Paths.cache, `${safeName}${ext}`);
-      const downloaded_file = await File.downloadFileAsync(doc.fileUrl, targetFile);
-      if (sharingAvailable) {
-        await Sharing.shareAsync(downloaded_file.uri, { dialogTitle: doc.name });
+      if (doc.fileUrl.startsWith('http')) {
+        // Real file in storage — download it, then share.
+        const safeName = doc.name.replace(/[^a-zA-Z0-9._-]/g, '_');
+        const ext = doc.fileType && !safeName.includes('.') ? `.${doc.fileType}` : '';
+        const targetFile = new File(Paths.cache, `${safeName}${ext}`);
+        const downloadedFile = await File.downloadFileAsync(doc.fileUrl, targetFile);
+        if (sharingAvailable) {
+          await Sharing.shareAsync(downloadedFile.uri, { dialogTitle: doc.name });
+        }
+      } else {
+        // Text / HTML content stored inline (minutes, generated docs) — render
+        // to a PDF and share it.
+        const uri = await renderHtmlToPdfUri(contentToPdfHtml(doc.fileUrl));
+        if (sharingAvailable) {
+          await Sharing.shareAsync(uri, {
+            mimeType: 'application/pdf',
+            dialogTitle: doc.name,
+            UTI: 'com.adobe.pdf',
+          });
+        }
       }
       downloaded += 1;
-    } catch {
+    } catch (err) {
+      console.error('[Download] failed for', doc.name, JSON.stringify(err));
       skipped += 1;
     }
   }
@@ -92,9 +147,9 @@ export function deletionDateFromNow(now: Date = new Date()): Date {
   return d;
 }
 
+// Spec format: "Month DD, YYYY" (no weekday), e.g. "August 12, 2026".
 export function formatDeletionDate(date: Date): string {
   return date.toLocaleDateString('en-US', {
-    weekday: 'long',
     month: 'long',
     day: 'numeric',
     year: 'numeric',
@@ -150,6 +205,15 @@ export async function completeCancellation(
     throw insertErr ?? new Error('Failed to record cancellation');
   }
   const cancellationId = (inserted as { id: string }).id;
+
+  // Downgrade the account immediately: mark cancelled and drop to the free
+  // ("starter") tier. Documents stay readable until the scheduled purge date;
+  // gating (useStrategyAccess) re-locks paid strategies on the next render.
+  const { error: userUpdateErr } = await supabase
+    .from('users')
+    .update({ subscription_status: 'cancelled', subscription_tier: 'starter' })
+    .eq('id', userId);
+  if (userUpdateErr) throw userUpdateErr;
 
   let stripeCancelled = false;
   try {

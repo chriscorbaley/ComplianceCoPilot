@@ -26,6 +26,7 @@ import { useSafeAreaInsets } from 'react-native-safe-area-context';
 import { useFocusEffect } from '@react-navigation/native';
 import * as DocumentPicker from 'expo-document-picker';
 import { colors, radius, shadow, spacing, typography } from '../../theme';
+import { contentContainerStyle } from '../../constants/layout';
 import { ProgressBar } from '../../components/ProgressBar';
 import { DocumentUploadRow } from '../../components/DocumentUploadRow';
 import { ManualMinutesModal } from '../../components/ManualMinutesModal';
@@ -233,6 +234,7 @@ export const FamilyMgmtComplianceScreen: React.FC = () => {
       contentContainerStyle={[styles.content, { paddingBottom: 32 + insets.bottom }]}
       showsVerticalScrollIndicator={false}
     >
+      <View style={[contentContainerStyle, { gap: spacing.lg }]}>
       <View style={styles.header}>
         <Text style={styles.title}>Family Management Company Compliance</Text>
         <Text style={styles.subtitle}>
@@ -366,6 +368,7 @@ export const FamilyMgmtComplianceScreen: React.FC = () => {
         onClose={() => setManualOpen(false)}
         onSaved={refresh}
       />
+      </View>
     </ScrollView>
   );
 };

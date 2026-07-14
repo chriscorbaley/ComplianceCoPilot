@@ -37,7 +37,6 @@ function json(body: unknown, status = 200): Response {
 
 function formatDate(iso: string): string {
   return new Date(iso).toLocaleDateString('en-US', {
-    weekday: 'long',
     month: 'long',
     day: 'numeric',
     year: 'numeric',
@@ -47,10 +46,10 @@ function formatDate(iso: string): string {
 function buildEmailHtml(args: { name: string; deletionDate: string; documentCount: number }): string {
   return `
 <!doctype html><html><body style="font-family: -apple-system, system-ui, sans-serif; color: #1a1a2e; max-width: 560px; margin: 0 auto; padding: 24px;">
-  <h1 style="color: #C0392B; margin-bottom: 8px;">Subscription Cancelled</h1>
+  <h1 style="color: #A32D2D; margin-bottom: 8px;">Subscription Cancelled</h1>
   <p>Hi ${args.name},</p>
   <p>This email confirms that your Compliance Co-Pilot subscription has been cancelled. You signed two acknowledgments before this took effect.</p>
-  <div style="background:#FDECEA;border-left:4px solid #C0392B;padding:16px;border-radius:8px;margin:24px 0;">
+  <div style="background:#FCEBEB;border-left:4px solid #A32D2D;padding:16px;border-radius:8px;margin:24px 0;">
     <p style="margin:0;"><strong>Your ${args.documentCount} compliance document${args.documentCount === 1 ? '' : 's'} will be permanently deleted on ${args.deletionDate}.</strong></p>
     <p style="margin:8px 0 0;">After that date, the documents cannot be recovered.</p>
   </div>

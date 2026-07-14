@@ -14,6 +14,7 @@ import { Ionicons } from '@expo/vector-icons';
 import { colors } from '../../theme';
 import { requestNotificationPermission } from '../../services/notifications';
 import type { OnboardingStackParamList } from '../../navigation/types';
+import { contentContainerStyle } from '../../constants/layout';
 
 type Nav = NativeStackNavigationProp<OnboardingStackParamList, 'NotificationsPermission'>;
 
@@ -53,6 +54,7 @@ export const NotificationsPermissionScreen: React.FC = () => {
       </View>
 
       <View style={styles.body}>
+        <View style={[contentContainerStyle, { gap: 14, alignItems: 'center' }]}>
         <View style={styles.iconWrap}>
           <Ionicons name="notifications" size={40} color={colors.amber} />
         </View>
@@ -61,6 +63,7 @@ export const NotificationsPermissionScreen: React.FC = () => {
           Allow notifications so we can remind you about document deadlines and
           compliance milestones.
         </Text>
+        </View>
       </View>
 
       <View style={styles.actions}>

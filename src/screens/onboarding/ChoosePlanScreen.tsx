@@ -19,6 +19,7 @@ import { colors } from '../../theme';
 import { supabase, type SubscriptionTier } from '../../services/supabase';
 import { useAuth } from '../../auth/AuthContext';
 import type { OnboardingStackParamList, RootStackParamList } from '../../navigation/types';
+import { contentContainerStyle } from '../../constants/layout';
 
 type Nav = NativeStackNavigationProp<OnboardingStackParamList, 'ChoosePlan'>;
 type Route = NativeStackScreenProps<OnboardingStackParamList, 'ChoosePlan'>['route'];
@@ -180,6 +181,7 @@ export const ChoosePlanScreen: React.FC = () => {
           },
         ]}
       >
+        <View style={contentContainerStyle}>
         <View style={styles.brand}>
           <Image
             source={require('../../../assets/logo.png')}
@@ -243,6 +245,7 @@ export const ChoosePlanScreen: React.FC = () => {
             {codeApplied ? 'TAXLAB code applied ✓' : 'Already have a code?'}
           </Text>
         </TouchableOpacity>
+        </View>
       </ScrollView>
 
       <Modal visible={codeOpen} transparent animationType="fade" onRequestClose={() => setCodeOpen(false)}>

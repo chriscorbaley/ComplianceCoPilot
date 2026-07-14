@@ -22,6 +22,7 @@ import type { BarChartProps } from 'react-native-chart-kit/dist/BarChart';
 
 const BarChart = RawBarChart as unknown as React.ComponentType<BarChartProps>;
 import { colors, radius, shadow, spacing, typography } from '../theme';
+import { contentContainerStyle } from '../constants/layout';
 import { Header } from '../components/Header';
 import { YearSelector } from '../components/YearSelector';
 import { useYear } from '../context/YearContext';
@@ -835,6 +836,7 @@ const HoursScreenInner: React.FC = () => {
         ]}
         showsVerticalScrollIndicator={false}
       >
+        <View style={[contentContainerStyle, { gap: spacing.xl }]}>
         <AlertBanner
           title={`${hoursRemaining} hours remaining to goal`}
           detail={`Log ${hoursRemaining} more hours by Dec 31 to hit your ${goalHours}-hour material participation threshold.`}
@@ -1224,6 +1226,7 @@ const HoursScreenInner: React.FC = () => {
               })
             )}
           </Card>
+        </View>
         </View>
       </ScrollView>
 

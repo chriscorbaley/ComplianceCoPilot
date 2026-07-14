@@ -5,6 +5,7 @@ import { useFocusEffect, useNavigation, useRoute, CommonActions } from '@react-n
 import type { NativeStackNavigationProp } from '@react-navigation/native-stack';
 import { Ionicons } from '@expo/vector-icons';
 import { colors, spacing } from '../theme';
+import { contentContainerStyle } from '../constants/layout';
 import { Header } from '../components/Header';
 import { AlertBanner } from '../components/AlertBanner';
 import { AnnouncementBanner } from '../components/AnnouncementBanner';
@@ -626,6 +627,7 @@ export const DashboardScreen: React.FC = () => {
         ]}
         showsVerticalScrollIndicator={false}
       >
+        <View style={[contentContainerStyle, styles.contentInner]}>
         {propertyAlertTitle && propertyAlertDetail ? (
           <AlertBanner
             title={propertyAlertTitle}
@@ -835,6 +837,7 @@ export const DashboardScreen: React.FC = () => {
             ))}
           </Card>
         </View>
+        </View>
       </ScrollView>
 
       <View style={styles.voiceWrap}>
@@ -860,6 +863,12 @@ const styles = StyleSheet.create({
   },
   content: {
     padding: spacing.lg,
+    gap: spacing.xl,
+  },
+  // The tablet max-width wrapper is a single child of the ScrollView content, so
+  // the content container's `gap` no longer spaces the real children — the
+  // wrapper reproduces that spacing itself. No-op difference on phones.
+  contentInner: {
     gap: spacing.xl,
   },
   metricsGrid: {

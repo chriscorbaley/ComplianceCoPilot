@@ -19,6 +19,7 @@ import { useSafeAreaInsets } from 'react-native-safe-area-context';
 import { useFocusEffect } from '@react-navigation/native';
 import * as DocumentPicker from 'expo-document-picker';
 import { colors, radius, shadow, spacing, typography } from '../../theme';
+import { contentContainerStyle } from '../../constants/layout';
 import { ProgressBar } from '../../components/ProgressBar';
 import { DocumentUploadRow } from '../../components/DocumentUploadRow';
 import { AccountablePlanModal } from '../../components/AccountablePlanModal';
@@ -180,6 +181,7 @@ export const SCorpComplianceScreen: React.FC = () => {
       contentContainerStyle={[styles.content, { paddingBottom: 32 + insets.bottom }]}
       showsVerticalScrollIndicator={false}
     >
+      <View style={[contentContainerStyle, { gap: spacing.lg }]}>
       <View style={styles.header}>
         <Text style={styles.title}>S-Corp Compliance Documents</Text>
         <Text style={styles.subtitle}>
@@ -295,6 +297,7 @@ export const SCorpComplianceScreen: React.FC = () => {
         onClose={() => setManualOpen(false)}
         onSaved={refresh}
       />
+      </View>
     </ScrollView>
   );
 };

@@ -33,6 +33,7 @@ import { createBusiness, updateBusinessLogo, uploadLogoFromUri } from '../../ser
 import { useAuth } from '../../auth/AuthContext';
 import { useBusiness } from '../../business/BusinessContext';
 import type { RootStackParamList } from '../../navigation/types';
+import { contentContainerStyle } from '../../constants/layout';
 
 type Nav = NativeStackNavigationProp<RootStackParamList, 'BusinessSetup'>;
 
@@ -138,6 +139,7 @@ export const BusinessSetupScreen: React.FC = () => {
         showsVerticalScrollIndicator={false}
         keyboardShouldPersistTaps="handled"
       >
+        <View style={contentContainerStyle}>
         <Text style={styles.title}>Tell us about your business</Text>
         <Text style={styles.subtitle}>
           This information helps personalize your compliance tracking
@@ -213,6 +215,7 @@ export const BusinessSetupScreen: React.FC = () => {
             You can add your business info in Settings at any time
           </Text>
         </TouchableOpacity>
+        </View>
       </ScrollView>
 
       <View style={[styles.footer, { paddingBottom: insets.bottom + 12 }]}>

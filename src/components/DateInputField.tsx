@@ -13,6 +13,7 @@ import {
 import { Ionicons } from '@expo/vector-icons';
 import DateTimePicker from '@react-native-community/datetimepicker';
 import { colors, typography } from '../theme';
+import { scaled } from '../constants/layout';
 
 interface DateInputFieldProps {
   label: string;
@@ -380,7 +381,8 @@ const styles = StyleSheet.create({
     color: colors.bodyText,
     fontSize: 14,
     paddingHorizontal: 12,
-    paddingVertical: Platform.select({ ios: 12, default: 10 }),
+    paddingVertical: scaled(Platform.select({ ios: 12, default: 10 }) as number),
+    minHeight: scaled(44),
   },
   // 44×44 tappable calendar button, separated by an internal left divider only.
   calendarButton: {

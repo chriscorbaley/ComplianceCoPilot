@@ -6,6 +6,7 @@ import type { NativeStackNavigationProp } from '@react-navigation/native-stack';
 import { Ionicons } from '@expo/vector-icons';
 import { colors } from '../../theme';
 import { useAuth } from '../../auth/AuthContext';
+import { contentContainerStyle } from '../../constants/layout';
 import type { OnboardingStackParamList } from '../../navigation/types';
 import type { SubscriptionTier } from '../../services/supabase';
 
@@ -67,6 +68,7 @@ export const UpgradeTeaserScreen: React.FC = () => {
       </View>
 
       <View style={styles.body}>
+        <View style={[contentContainerStyle, { gap: 12 }]}>
         <Text style={styles.headline}>{content.headline}</Text>
         <Text style={styles.subhead}>{content.subhead}</Text>
 
@@ -77,6 +79,7 @@ export const UpgradeTeaserScreen: React.FC = () => {
               <Text style={styles.featureText}>{f}</Text>
             </View>
           ))}
+        </View>
         </View>
       </View>
 

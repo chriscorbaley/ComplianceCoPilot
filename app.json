@@ -12,7 +12,8 @@
       "backgroundColor": "#042C53"
     },
     "ios": {
-      "supportsTablet": false,
+      "supportsTablet": true,
+      "requiresFullScreen": true,
       "bundleIdentifier": "com.compliancecopilot.app",
       "merchantIdentifier": "merchant.com.compliancecopilot.app",
       "infoPlist": {

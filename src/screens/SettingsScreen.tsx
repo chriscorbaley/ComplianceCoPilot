@@ -102,7 +102,7 @@ export const SettingsScreen: React.FC = () => {
             onPress={() => navigation.navigate('CancelWarning1')}
             style={styles.cancelSubBtn}
           >
-            <Ionicons name="close-circle-outline" size={18} color="#C0392B" />
+            <Ionicons name="close-circle-outline" size={18} color="#A32D2D" />
             <Text style={styles.cancelSubText}>Cancel Subscription</Text>
           </TouchableOpacity>
         </View>
@@ -187,10 +187,10 @@ const styles = StyleSheet.create({
     borderRadius: 8,
     paddingVertical: 14,
     borderWidth: 1,
-    borderColor: '#C0392B',
+    borderColor: '#A32D2D',
   },
   cancelSubText: {
-    color: '#C0392B',
+    color: '#A32D2D',
     fontSize: 14,
     fontWeight: '700',
   },

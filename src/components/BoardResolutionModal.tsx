@@ -17,6 +17,7 @@ import {
 } from 'react-native';
 import { Ionicons } from '@expo/vector-icons';
 import { colors, radius, shadow, spacing, typography } from '../theme';
+import { scaled } from '../constants/layout';
 import { DatePickerModal } from './DateInputField';
 import { SignaturePad } from './SignaturePad';
 import {
@@ -55,6 +56,8 @@ export const BoardResolutionModal: React.FC<Props> = ({
   const [unanimous, setUnanimous] = useState(true);
   const [signerName, setSignerName] = useState(defaultSignerName);
   const [generating, setGenerating] = useState(false);
+  // Locked while the user draws in the signature pad so strokes don't scroll.
+  const [scrollEnabled, setScrollEnabled] = useState(true);
 
   const [datePickerOpen, setDatePickerOpen] = useState(false);
   const [subjectPickerOpen, setSubjectPickerOpen] = useState(false);
@@ -71,6 +74,7 @@ export const BoardResolutionModal: React.FC<Props> = ({
       setUnanimous(true);
       setSignerName(defaultSignerName);
       setGenerating(false);
+      setScrollEnabled(true);
     }
   }, [visible, businessName, defaultSignerName]);
 
@@ -136,6 +140,7 @@ export const BoardResolutionModal: React.FC<Props> = ({
             style={styles.scroll}
             contentContainerStyle={styles.scrollContent}
             showsVerticalScrollIndicator={false}
+            scrollEnabled={scrollEnabled}
             keyboardShouldPersistTaps="handled"
           >
             <Text style={styles.label}>Meeting date</Text>
@@ -236,6 +241,8 @@ export const BoardResolutionModal: React.FC<Props> = ({
               onConfirm={onConfirm}
               confirming={generating}
               confirmLabel="Adopt & generate"
+              onDrawStart={() => setScrollEnabled(false)}
+              onDrawEnd={() => setScrollEnabled(true)}
             />
           </ScrollView>
         </View>
@@ -335,13 +342,14 @@ const styles = StyleSheet.create({
     borderColor: colors.cardBorder,
     borderRadius: 10,
     paddingHorizontal: spacing.md,
-    paddingVertical: 12,
+    paddingVertical: scaled(12),
+    minHeight: scaled(44),
     ...typography.body,
     color: colors.bodyText,
     fontSize: 14,
   },
   inputMulti: {
-    minHeight: 110,
+    minHeight: scaled(110),
     textAlignVertical: 'top',
   },
   selectField: {

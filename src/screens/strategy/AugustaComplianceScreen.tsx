@@ -25,6 +25,7 @@ import { useSafeAreaInsets } from 'react-native-safe-area-context';
 import { useFocusEffect } from '@react-navigation/native';
 import { pickImageWithSource } from '../../utils/imagePicker';
 import { colors, radius, shadow, spacing, typography } from '../../theme';
+import { contentContainerStyle } from '../../constants/layout';
 import { useBusiness } from '../../business/BusinessContext';
 import {
   listAugustaProperties,
@@ -393,6 +394,7 @@ export const AugustaComplianceScreen: React.FC = () => {
       showsVerticalScrollIndicator={false}
       keyboardShouldPersistTaps="handled"
     >
+      <View style={[contentContainerStyle, { gap: spacing.lg }]}>
       <View style={styles.headerBlock}>
         <Text style={styles.title}>Rental Rate Comparables</Text>
         <Text style={styles.subtitle}>
@@ -542,6 +544,7 @@ export const AugustaComplianceScreen: React.FC = () => {
         }}
         onClose={() => setYearPickerOpen(false)}
       />
+      </View>
     </ScrollView>
   );
 };

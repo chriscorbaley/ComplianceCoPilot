@@ -20,6 +20,7 @@ import * as DocumentPicker from 'expo-document-picker';
 import * as Print from 'expo-print';
 import * as Sharing from 'expo-sharing';
 import { colors, radius, shadow, spacing, typography } from '../theme';
+import { contentContainerStyle } from '../constants/layout';
 import type { RootStackParamList } from '../navigation/types';
 import { DocumentViewer } from '../components/DocumentViewer';
 import { HtmlDocViewer } from '../components/HtmlDocViewer';
@@ -768,6 +769,7 @@ export const DocsScreen: React.FC = () => {
         ]}
         showsVerticalScrollIndicator={false}
       >
+        <View style={contentContainerStyle}>
         {searchActive ? (
           <Text style={styles.resultCount}>
             {filtered.length === 1
@@ -928,6 +930,7 @@ export const DocsScreen: React.FC = () => {
           </TouchableOpacity>
         </View>
         )}
+        </View>
       </ScrollView>
 
       {viewerDoc ? (

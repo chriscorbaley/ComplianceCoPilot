@@ -12,7 +12,7 @@ import { Ionicons } from '@expo/vector-icons';
 import { useNavigation } from '@react-navigation/native';
 import type { NativeStackNavigationProp } from '@react-navigation/native-stack';
 import SignatureCanvas, { type SignatureViewRef } from 'react-native-signature-canvas';
-import { colors, radius, spacing, typography } from '../theme';
+import { colors, radius, spacing } from '../theme';
 import { useAuth } from '../auth/AuthContext';
 import type { RootStackParamList } from '../navigation/types';
 import {
@@ -21,8 +21,9 @@ import {
   type DocumentSnapshot,
 } from '../services/cancellation';
 
-const DANGER_RED = '#C0392B';
-const DANGER_RED_BG = '#FDECEA';
+// Spec colors for the cancellation flow.
+const RED = '#A32D2D';
+const RED_BG = '#FCEBEB';
 
 export const CancelWarning1Screen: React.FC = () => {
   const navigation = useNavigation<NativeStackNavigationProp<RootStackParamList>>();
@@ -33,8 +34,12 @@ export const CancelWarning1Screen: React.FC = () => {
   const [docs, setDocs] = useState<DocumentSnapshot[] | null>(null);
   const [loadingDocs, setLoadingDocs] = useState(true);
   const [downloading, setDownloading] = useState(false);
-  const [hasSignature, setHasSignature] = useState(false);
+  const [downloadLabel, setDownloadLabel] = useState<string | null>(null);
   const [signatureData, setSignatureData] = useState<string | null>(null);
+  const [hasDrawn, setHasDrawn] = useState(false);
+  // Locked while the user draws so vertical strokes draw instead of scroll.
+  const [scrollEnabled, setScrollEnabled] = useState(true);
+  const [strokeEnded, setStrokeEnded] = useState(false);
 
   useEffect(() => {
     if (!userId) return;
@@ -57,6 +62,8 @@ export const CancelWarning1Screen: React.FC = () => {
     };
   }, [userId]);
 
+  const documentCount = docs?.length ?? 0;
+
   const handleDownloadAll = useCallback(async () => {
     if (!docs || docs.length === 0) {
       Alert.alert('Nothing to download', 'You have no documents stored.');
@@ -64,7 +71,9 @@ export const CancelWarning1Screen: React.FC = () => {
     }
     setDownloading(true);
     try {
-      const result = await downloadAllDocuments(docs);
+      const result = await downloadAllDocuments(docs, (current, total) => {
+        setDownloadLabel(`Downloading document ${current} of ${total}…`);
+      });
       Alert.alert(
         'Download complete',
         `${result.downloaded} document${result.downloaded === 1 ? '' : 's'} downloaded.` +
@@ -74,48 +83,48 @@ export const CancelWarning1Screen: React.FC = () => {
       Alert.alert('Download failed', err instanceof Error ? err.message : String(err));
     } finally {
       setDownloading(false);
+      setDownloadLabel(null);
     }
   }, [docs]);
 
-  const handleClearSignature = () => {
-    sigRef.current?.clearSignature();
-    setHasSignature(false);
-    setSignatureData(null);
-  };
-
-  // SignatureCanvas fires onOK when the user lifts their finger; we use it to
-  // mark "drawn" and stash the base64 PNG for the next screen.
-  const handleSignatureOK = (sig: string) => {
-    setSignatureData(sig);
-    setHasSignature(true);
-  };
-
+  // SignatureCanvas fires onOK when we call readSignature(); we stash the base64
+  // PNG to hand to Screen 2 and to enable the Continue button.
+  const handleSignatureOK = (sig: string) => setSignatureData(sig);
   const handleSignatureEmpty = () => {
-    setHasSignature(false);
     setSignatureData(null);
+    setHasDrawn(false);
   };
-
+  // onBegin fires on touch — lock scrolling immediately. onEnd fires on lift —
+  // re-enable scrolling and read the captured signature.
   const handleSignatureBegin = () => {
-    // Trigger a read once the user finishes a stroke.
-    setHasSignature(true);
+    setHasDrawn(true);
+    setScrollEnabled(false);
   };
-
   const handleSignatureEnd = () => {
+    setScrollEnabled(true);
+    setStrokeEnded(true);
     sigRef.current?.readSignature();
   };
 
-  const handleContinue = () => {
-    if (!signatureData) {
-      sigRef.current?.readSignature();
-      return;
-    }
-    navigation.navigate('CancelWarning2', {
-      signature1: signatureData,
-      documentCount: docs?.length ?? 0,
-    });
+  const handleClearSignature = () => {
+    sigRef.current?.clearSignature();
+    setSignatureData(null);
+    setHasDrawn(false);
+    setStrokeEnded(false);
+    setScrollEnabled(true);
   };
 
-  const documentCount = docs?.length ?? 0;
+  const handleConfirmSignature = () => {
+    if (hasDrawn) sigRef.current?.readSignature();
+  };
+
+  const handleContinue = () => {
+    if (!signatureData) return;
+    navigation.navigate('CancelWarning2', {
+      signature1: signatureData,
+      documentCount,
+    });
+  };
 
   const webStyle = useMemo(
     () => `
@@ -128,17 +137,19 @@ export const CancelWarning1Screen: React.FC = () => {
   );
 
   return (
-    <ScrollView style={styles.root} contentContainerStyle={styles.content}>
-      <View style={styles.headerBlock}>
-        <Ionicons name="warning" size={28} color={DANGER_RED} />
-        <Text style={styles.header}>Important — Read Before Cancelling</Text>
-      </View>
+    <ScrollView
+      style={styles.root}
+      contentContainerStyle={styles.content}
+      scrollEnabled={scrollEnabled}
+      keyboardShouldPersistTaps="handled"
+    >
+      <Text style={styles.title}>Important — Read Before Cancelling</Text>
 
       <View style={styles.warningCard}>
         <Text style={styles.warningBody}>
-          When you cancel your subscription your compliance documents will be permanently deleted{' '}
-          <Text style={styles.warningBold}>30 days after cancellation</Text>. After that date there
-          is no way to recover them. Download all documents before cancelling.
+          When you cancel your subscription, all of your compliance documents will be permanently
+          deleted 30 days after cancellation. After that date there is no way to recover them.
+          Download all documents before cancelling.
         </Text>
       </View>
 
@@ -157,24 +168,29 @@ export const CancelWarning1Screen: React.FC = () => {
         )}
       </View>
 
-      <TouchableOpacity
-        style={[styles.downloadBtn, (downloading || loadingDocs || documentCount === 0) && styles.btnDisabled]}
-        onPress={handleDownloadAll}
-        disabled={downloading || loadingDocs || documentCount === 0}
-        activeOpacity={0.85}
-      >
-        {downloading ? (
-          <ActivityIndicator color={colors.white} />
-        ) : (
-          <>
-            <Ionicons name="download-outline" size={18} color={colors.white} />
-            <Text style={styles.downloadText}>Download All Documents</Text>
-          </>
-        )}
-      </TouchableOpacity>
+      <View>
+        <TouchableOpacity
+          style={[styles.downloadBtn, (downloading || loadingDocs || documentCount === 0) && styles.btnDisabled]}
+          onPress={handleDownloadAll}
+          disabled={downloading || loadingDocs || documentCount === 0}
+          activeOpacity={0.85}
+        >
+          {downloading ? (
+            <ActivityIndicator color={colors.white} />
+          ) : (
+            <>
+              <Ionicons name="download-outline" size={18} color={colors.white} />
+              <Text style={styles.downloadText}>Download All My Documents</Text>
+            </>
+          )}
+        </TouchableOpacity>
+        {downloading && downloadLabel ? (
+          <Text style={styles.progressText}>{downloadLabel}</Text>
+        ) : null}
+      </View>
 
       <Text style={styles.sigLabel}>
-        Sign here to confirm you have read and understand the above warning
+        Sign below to confirm you have read and understand the above warning
       </Text>
 
       <View style={styles.sigCard}>
@@ -188,33 +204,42 @@ export const CancelWarning1Screen: React.FC = () => {
             descriptionText=""
             webStyle={webStyle}
             backgroundColor={colors.white}
-            penColor={colors.bodyText}
+            penColor={colors.navy}
             autoClear={false}
             imageType="image/png"
           />
         </View>
-        <TouchableOpacity onPress={handleClearSignature} style={styles.clearBtn}>
-          <Ionicons name="refresh" size={14} color={colors.mutedText} />
-          <Text style={styles.clearText}>Clear</Text>
-        </TouchableOpacity>
+        <View style={styles.sigActions}>
+          <TouchableOpacity onPress={handleClearSignature} style={styles.clearBtn} activeOpacity={0.8}>
+            <Ionicons name="refresh" size={14} color={colors.navy} />
+            <Text style={styles.clearText}>Clear</Text>
+          </TouchableOpacity>
+          <TouchableOpacity
+            onPress={handleConfirmSignature}
+            style={[styles.sigConfirmBtn, !hasDrawn && styles.btnDisabled]}
+            disabled={!hasDrawn}
+            activeOpacity={0.85}
+          >
+            <Text style={styles.sigConfirmText}>Confirm Signature</Text>
+          </TouchableOpacity>
+        </View>
+      </View>
+
+      <View>
+        <Text style={styles.sigHintMain}>Draw your signature above</Text>
+        <Text style={styles.sigHintSub}>
+          {strokeEnded ? 'Scroll to continue' : 'Scrolling is paused while you sign'}
+        </Text>
       </View>
 
       <TouchableOpacity
-        style={[styles.continueBtn, !hasSignature && styles.btnDisabled]}
+        style={[styles.continueBtn, !signatureData && styles.btnDisabled]}
         onPress={handleContinue}
-        disabled={!hasSignature}
+        disabled={!signatureData}
         activeOpacity={0.85}
       >
-        <Text style={styles.continueText}>Continue to Confirmation</Text>
+        <Text style={styles.continueText}>Continue to Final Confirmation</Text>
         <Ionicons name="arrow-forward" size={18} color={colors.white} />
-      </TouchableOpacity>
-
-      <TouchableOpacity
-        style={styles.keepBtn}
-        onPress={() => navigation.goBack()}
-        activeOpacity={0.85}
-      >
-        <Text style={styles.keepText}>Keep My Subscription</Text>
       </TouchableOpacity>
     </ScrollView>
   );
@@ -223,56 +248,47 @@ export const CancelWarning1Screen: React.FC = () => {
 const styles = StyleSheet.create({
   root: {
     flex: 1,
-    backgroundColor: colors.background,
+    backgroundColor: colors.white,
   },
   content: {
     padding: spacing.lg,
     gap: spacing.lg,
     paddingBottom: spacing.xxxl,
   },
-  headerBlock: {
-    flexDirection: 'row',
-    alignItems: 'center',
-    gap: spacing.sm,
-  },
-  header: {
-    ...typography.h1,
-    color: DANGER_RED,
-    flex: 1,
+  title: {
+    fontSize: 20,
+    fontWeight: '700',
+    color: RED,
+    textAlign: 'center',
   },
   warningCard: {
-    backgroundColor: DANGER_RED_BG,
+    backgroundColor: RED_BG,
     borderRadius: radius.card,
-    padding: spacing.lg,
-    borderLeftWidth: 4,
-    borderLeftColor: DANGER_RED,
+    padding: 16,
+    borderWidth: 1,
+    borderColor: RED,
   },
   warningBody: {
-    ...typography.body,
+    fontSize: 15,
     color: colors.bodyText,
-    lineHeight: 20,
-  },
-  warningBold: {
-    fontWeight: '700',
-    color: DANGER_RED,
+    lineHeight: 21,
   },
   countCard: {
-    backgroundColor: colors.white,
+    backgroundColor: colors.lightBlue,
     borderRadius: radius.card,
     padding: spacing.lg,
-    borderWidth: StyleSheet.hairlineWidth,
-    borderColor: colors.cardBorder,
     flexDirection: 'row',
     alignItems: 'center',
     gap: spacing.sm,
   },
   countText: {
-    ...typography.body,
+    fontSize: 15,
     color: colors.bodyText,
     flex: 1,
   },
   countNumber: {
-    ...typography.h2,
+    fontSize: 18,
+    fontWeight: '700',
     color: colors.navy,
   },
   downloadBtn: {
@@ -280,7 +296,7 @@ const styles = StyleSheet.create({
     alignItems: 'center',
     justifyContent: 'center',
     gap: spacing.sm,
-    backgroundColor: colors.midNavy,
+    backgroundColor: colors.navy,
     borderRadius: 8,
     paddingVertical: 14,
   },
@@ -289,42 +305,79 @@ const styles = StyleSheet.create({
     fontSize: 15,
     fontWeight: '700',
   },
-  sigLabel: {
-    ...typography.bodyMedium,
-    color: colors.bodyText,
+  progressText: {
     marginTop: spacing.sm,
+    fontSize: 13,
+    color: colors.mutedText,
+    textAlign: 'center',
+  },
+  sigLabel: {
+    fontSize: 15,
+    fontWeight: '500',
+    color: colors.bodyText,
   },
   sigCard: {
     backgroundColor: colors.white,
-    borderRadius: radius.card,
-    borderWidth: StyleSheet.hairlineWidth,
-    borderColor: colors.cardBorder,
+    borderRadius: 10,
+    borderWidth: 1.5,
+    borderColor: colors.navy,
     overflow: 'hidden',
   },
   sigCanvasWrap: {
     height: 200,
     backgroundColor: colors.white,
   },
+  sigActions: {
+    flexDirection: 'row',
+    borderTopWidth: 1.5,
+    borderTopColor: colors.navy,
+  },
   clearBtn: {
     flexDirection: 'row',
     alignItems: 'center',
-    justifyContent: 'flex-end',
+    justifyContent: 'center',
     gap: spacing.xs,
-    paddingHorizontal: spacing.md,
-    paddingVertical: spacing.sm,
-    borderTopWidth: StyleSheet.hairlineWidth,
-    borderTopColor: colors.divider,
+    paddingVertical: spacing.md,
+    flex: 1,
+    borderRightWidth: 1.5,
+    borderRightColor: colors.navy,
   },
   clearText: {
-    ...typography.caption,
-    color: colors.mutedText,
+    fontSize: 14,
+    fontWeight: '700',
+    color: colors.navy,
+  },
+  sigConfirmBtn: {
+    alignItems: 'center',
+    justifyContent: 'center',
+    paddingVertical: spacing.md,
+    flex: 1.6,
+    backgroundColor: colors.navy,
+  },
+  sigConfirmText: {
+    fontSize: 14,
+    fontWeight: '700',
+    color: colors.white,
+  },
+  sigHintMain: {
+    fontSize: 11,
+    fontStyle: 'italic',
+    color: '#888888',
+    textAlign: 'center',
+  },
+  sigHintSub: {
+    fontSize: 11,
+    fontStyle: 'italic',
+    color: '#888888',
+    textAlign: 'center',
+    marginTop: 2,
   },
   continueBtn: {
     flexDirection: 'row',
     alignItems: 'center',
     justifyContent: 'center',
     gap: spacing.sm,
-    backgroundColor: DANGER_RED,
+    backgroundColor: RED,
     borderRadius: 8,
     paddingVertical: 14,
   },
@@ -332,16 +385,6 @@ const styles = StyleSheet.create({
     color: colors.white,
     fontSize: 15,
     fontWeight: '700',
-  },
-  keepBtn: {
-    alignItems: 'center',
-    justifyContent: 'center',
-    paddingVertical: 12,
-  },
-  keepText: {
-    ...typography.bodyMedium,
-    color: colors.midNavy,
-    fontWeight: '600',
   },
   btnDisabled: {
     opacity: 0.4,

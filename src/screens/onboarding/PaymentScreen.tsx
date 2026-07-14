@@ -18,6 +18,7 @@ import { colors } from '../../theme';
 import { supabase, type SubscriptionTier } from '../../services/supabase';
 import { useAuth } from '../../auth/AuthContext';
 import type { OnboardingStackParamList } from '../../navigation/types';
+import { contentContainerStyle } from '../../constants/layout';
 
 type Nav = NativeStackNavigationProp<OnboardingStackParamList, 'Payment'>;
 
@@ -110,6 +111,7 @@ export const PaymentScreen: React.FC = () => {
         contentContainerStyle={[styles.scroll, { paddingBottom: insets.bottom + 24 }]}
         keyboardShouldPersistTaps="handled"
       >
+        <View style={contentContainerStyle}>
         <View style={styles.brand}>
           <Image
             source={require('../../../assets/logo.png')}
@@ -197,6 +199,7 @@ export const PaymentScreen: React.FC = () => {
         </TouchableOpacity>
 
         <Text style={styles.footnote}>You won't be charged today. Cancel anytime during the trial.</Text>
+        </View>
       </ScrollView>
     </View>
   );

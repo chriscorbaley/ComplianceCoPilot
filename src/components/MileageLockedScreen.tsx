@@ -5,6 +5,7 @@ import { useNavigation } from '@react-navigation/native';
 import type { NativeStackNavigationProp } from '@react-navigation/native-stack';
 import { Ionicons } from '@expo/vector-icons';
 import { colors } from '../theme';
+import { scaled } from '../constants/layout';
 import type { RootStackParamList } from '../navigation/types';
 
 // Shared marketing copy for the Mileage upsell — reused by the in-app locked
@@ -178,7 +179,8 @@ const styles = StyleSheet.create({
   cta: {
     backgroundColor: colors.amber,
     borderRadius: 10,
-    paddingVertical: 15,
+    paddingVertical: scaled(15),
+    minHeight: scaled(44),
     alignItems: 'center',
   },
   ctaText: { color: colors.white, fontSize: 15, fontWeight: '700' },

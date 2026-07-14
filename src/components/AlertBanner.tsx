@@ -2,6 +2,7 @@ import React from 'react';
 import { View, Text, StyleSheet, TouchableOpacity } from 'react-native';
 import { Ionicons } from '@expo/vector-icons';
 import { colors, radius, spacing, typography } from '../theme';
+import { scaled } from '../constants/layout';
 
 interface AlertBannerProps {
   title: string;
@@ -45,6 +46,9 @@ const styles = StyleSheet.create({
     borderWidth: 0.5,
     borderColor: 'rgba(231, 111, 44, 0.25)',
     padding: spacing.md,
+    // Tablet touch-target scaling: overrides top/bottom padding only; the
+    // `padding` shorthand still supplies horizontal padding. No-op on phones.
+    paddingVertical: scaled(spacing.md),
     gap: spacing.md,
   },
   chevron: {

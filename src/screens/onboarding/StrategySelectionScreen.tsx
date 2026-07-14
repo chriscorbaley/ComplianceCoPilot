@@ -17,6 +17,7 @@ import { Ionicons } from '@expo/vector-icons';
 import { colors } from '../../theme';
 import { supabase, type SubscriptionTier } from '../../services/supabase';
 import { useAuth } from '../../auth/AuthContext';
+import { contentContainerStyle } from '../../constants/layout';
 import type { OnboardingStackParamList } from '../../navigation/types';
 
 type Nav = NativeStackNavigationProp<OnboardingStackParamList, 'StrategySelection'>;
@@ -146,6 +147,7 @@ export const StrategySelectionScreen: React.FC = () => {
         contentContainerStyle={[styles.scrollContent, { paddingBottom: insets.bottom + 120 }]}
         showsVerticalScrollIndicator={false}
       >
+        <View style={[contentContainerStyle, { gap: 10 }]}>
         {STRATEGIES.map((s) => {
           const sel = isSelected(s.key);
           const locked = !sel && limitReached && tier !== 'pro';
@@ -185,6 +187,7 @@ export const StrategySelectionScreen: React.FC = () => {
             </Pressable>
           );
         })}
+        </View>
       </ScrollView>
 
       <View style={[styles.footer, { paddingBottom: insets.bottom + 12 }]}>

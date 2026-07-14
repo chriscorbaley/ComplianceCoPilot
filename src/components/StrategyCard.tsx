@@ -2,6 +2,7 @@ import React from 'react';
 import { View, Text, StyleSheet, TouchableOpacity } from 'react-native';
 import { Ionicons } from '@expo/vector-icons';
 import { colors, radius, spacing, shadow, typography } from '../theme';
+import { scaled } from '../constants/layout';
 import { ProgressBar } from './ProgressBar';
 import { StatusPill, StatusVariant } from './StatusPill';
 
@@ -79,6 +80,10 @@ const styles = StyleSheet.create({
     borderWidth: 0.5,
     borderColor: colors.cardBorder,
     padding: spacing.lg,
+    // Tablet touch-target scaling: overrides top/bottom padding only (the
+    // `padding` shorthand above still supplies horizontal padding). No-op on
+    // phones — scaled(spacing.lg) === spacing.lg there.
+    paddingVertical: scaled(spacing.lg),
     ...shadow.card,
   },
   header: {

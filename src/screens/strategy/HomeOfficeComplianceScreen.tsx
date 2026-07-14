@@ -27,6 +27,7 @@ import { useSafeAreaInsets } from 'react-native-safe-area-context';
 import { useFocusEffect } from '@react-navigation/native';
 import * as DocumentPicker from 'expo-document-picker';
 import { colors, radius, shadow, spacing, typography } from '../../theme';
+import { contentContainerStyle } from '../../constants/layout';
 import { ProgressBar } from '../../components/ProgressBar';
 import { DocumentUploadRow } from '../../components/DocumentUploadRow';
 import { ComplianceReportButton } from '../../components/ComplianceReportButton';
@@ -493,6 +494,7 @@ export const HomeOfficeComplianceScreen: React.FC = () => {
       showsVerticalScrollIndicator={false}
       keyboardShouldPersistTaps="handled"
     >
+      <View style={[contentContainerStyle, { gap: spacing.lg }]}>
       <View style={styles.header}>
         <Text style={styles.title}>Home Office Compliance Documents</Text>
         <Text style={styles.subtitle}>
@@ -913,6 +915,7 @@ export const HomeOfficeComplianceScreen: React.FC = () => {
           </View>
         </TouchableOpacity>
       </Modal>
+      </View>
     </ScrollView>
   );
 };

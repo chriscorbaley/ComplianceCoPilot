@@ -26,6 +26,7 @@ import {
   type ComplianceRules,
 } from '../../services/complianceRules';
 import type { OnboardingStackParamList } from '../../navigation/types';
+import { contentContainerStyle } from '../../constants/layout';
 import { supabase, type MpTestKey, type PropertyType } from '../../services/supabase';
 
 // The properties.mp_test_selected column is an integer in Postgres, while the
@@ -243,6 +244,7 @@ export const RealEstatePropertiesScreen: React.FC = () => {
         keyboardShouldPersistTaps="handled"
         contentContainerStyle={[styles.content, { paddingBottom: insets.bottom + 120 }]}
       >
+        <View style={[contentContainerStyle, { gap: 16 }]}>
         <Text style={styles.title}>Add your rental properties</Text>
         <Text style={styles.subtitle}>Add each property you want to track</Text>
 
@@ -267,6 +269,7 @@ export const RealEstatePropertiesScreen: React.FC = () => {
           <Ionicons name="add-circle-outline" size={20} color={colors.midNavy} />
           <Text style={styles.addBtnText}>Add Another Property</Text>
         </TouchableOpacity>
+        </View>
       </ScrollView>
 
       <View style={[styles.footer, { paddingBottom: insets.bottom + 12 }]}>

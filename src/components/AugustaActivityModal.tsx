@@ -20,6 +20,7 @@ import {
 import { Ionicons } from '@expo/vector-icons';
 import { Audio } from 'expo-av';
 import { colors, radius, shadow, spacing, typography } from '../theme';
+import { scaled } from '../constants/layout';
 import {
   AUGUSTA_MEETING_TYPES,
   saveAugustaActivity,
@@ -672,13 +673,14 @@ const styles = StyleSheet.create({
     borderColor: colors.cardBorder,
     borderRadius: 10,
     paddingHorizontal: spacing.md,
-    paddingVertical: Platform.select({ ios: 12, default: 10 }),
+    paddingVertical: scaled(Platform.select({ ios: 12, default: 10 }) as number),
+    minHeight: scaled(44),
     ...typography.body,
     color: colors.bodyText,
     fontSize: 14,
   },
   inputMulti: {
-    minHeight: 80,
+    minHeight: scaled(80),
     textAlignVertical: 'top',
   },
   selectField: {
@@ -716,7 +718,8 @@ const styles = StyleSheet.create({
   },
   rateInput: {
     flex: 1,
-    paddingVertical: Platform.select({ ios: 12, default: 10 }),
+    paddingVertical: scaled(Platform.select({ ios: 12, default: 10 }) as number),
+    minHeight: scaled(44),
     ...typography.body,
     color: colors.bodyText,
     fontSize: 14,
@@ -728,7 +731,8 @@ const styles = StyleSheet.create({
     gap: spacing.sm,
     backgroundColor: colors.navy,
     borderRadius: 10,
-    paddingVertical: 15,
+    paddingVertical: scaled(15),
+    minHeight: scaled(44),
     marginTop: spacing.xl,
     ...shadow.raised,
   },
@@ -866,7 +870,8 @@ const picker = StyleSheet.create({
     flex: 1.4,
     alignItems: 'center',
     justifyContent: 'center',
-    paddingVertical: 14,
+    paddingVertical: scaled(14),
+    minHeight: scaled(44),
     borderRadius: 8,
     backgroundColor: colors.navy,
   },

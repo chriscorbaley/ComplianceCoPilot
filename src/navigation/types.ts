@@ -109,6 +109,12 @@ export type RootStackParamList = {
     signature1: string;
     documentCount: number;
   };
+  CancelSuccess: {
+    // Pre-formatted "Month DD, YYYY" deletion date shown to the user.
+    deletionDate: string;
+    // false when the confirmation email could not be sent.
+    emailSent?: boolean;
+  };
   Businesses: undefined;
   BusinessEdit: { businessId?: string } | undefined;
   // Post-onboarding business profile setup, shown once when the user has no

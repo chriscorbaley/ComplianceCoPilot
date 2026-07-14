@@ -19,6 +19,7 @@ import {
   type ComplianceRules,
 } from '../../services/complianceRules';
 import type { MpTestKey, PropertyType } from '../../services/supabase';
+import { contentContainerStyle } from '../../constants/layout';
 import type {
   OnboardingStackParamList,
   RePropertyTypeKey,
@@ -108,6 +109,7 @@ export const RealEstateMpTestScreen: React.FC = () => {
   return (
     <View style={[styles.root, { paddingTop: insets.top + 24 }]}>
       <ScrollView contentContainerStyle={[styles.content, { paddingBottom: insets.bottom + 120 }]}>
+        <View style={[contentContainerStyle, { gap: 12 }]}>
         <Text style={styles.title}>Select Your Material Participation Test</Text>
         <Text style={styles.subtitle}>
           Choose the test your tax advisor has recommended for your rental
@@ -138,6 +140,7 @@ export const RealEstateMpTestScreen: React.FC = () => {
             </Pressable>
           );
         })}
+        </View>
       </ScrollView>
 
       <View style={[styles.footer, { paddingBottom: insets.bottom + 12 }]}>

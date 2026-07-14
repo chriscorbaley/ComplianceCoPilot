@@ -10,6 +10,7 @@ import {
   MILEAGE_STATS,
 } from '../../components/MileageLockedScreen';
 import type { OnboardingStackParamList } from '../../navigation/types';
+import { contentContainerStyle } from '../../constants/layout';
 
 type Nav = NativeStackNavigationProp<OnboardingStackParamList, 'MileageIntro'>;
 
@@ -26,6 +27,7 @@ export const MileageIntroScreen: React.FC = () => {
         contentContainerStyle={{ paddingBottom: insets.bottom + 24 }}
         showsVerticalScrollIndicator={false}
       >
+        <View style={contentContainerStyle}>
         <View style={[styles.hero, { paddingTop: insets.top + 28 }]}>
           <Ionicons name="speedometer" size={48} color={colors.amber} style={styles.icon} />
           <Text style={styles.title}>Track Every Mile, Maximize Every Deduction</Text>
@@ -75,6 +77,7 @@ export const MileageIntroScreen: React.FC = () => {
           >
             <Text style={styles.ctaOutlineText}>Continue with Core</Text>
           </TouchableOpacity>
+        </View>
         </View>
       </ScrollView>
     </View>

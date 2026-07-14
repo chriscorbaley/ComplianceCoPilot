@@ -18,6 +18,7 @@ import SignatureScreen, {
   type SignatureViewRef,
 } from 'react-native-signature-canvas';
 import { colors, spacing } from '../theme';
+import { scaled } from '../constants/layout';
 
 interface SignaturePadProps {
   // Fired with the base64 PNG data URL when the user taps Confirm.
@@ -26,6 +27,10 @@ interface SignaturePadProps {
   confirming?: boolean;
   // Confirm button label (default "Confirm signature").
   confirmLabel?: string;
+  // Fired the moment a stroke starts / ends so the parent can lock/unlock the
+  // enclosing ScrollView (vertical strokes would otherwise scroll the page).
+  onDrawStart?: () => void;
+  onDrawEnd?: () => void;
 }
 
 // Hide the library's own footer/border; we draw our own controls below.
@@ -40,18 +45,37 @@ export const SignaturePad: React.FC<SignaturePadProps> = ({
   onConfirm,
   confirming,
   confirmLabel,
+  onDrawStart,
+  onDrawEnd,
 }) => {
   const ref = useRef<SignatureViewRef>(null);
   const [hasDrawn, setHasDrawn] = useState(false);
+  // Flips to true once the user lifts their finger; drives the scroll hint.
+  const [strokeEnded, setStrokeEnded] = useState(false);
 
   const handleOK = (signature: string) => {
     // signature is already a data URL: "data:image/png;base64,...."
     onConfirm(signature);
   };
 
+  // onBegin fires the instant a finger touches the pad — lock scrolling now so
+  // vertical strokes draw instead of scroll the form.
+  const handleBegin = () => {
+    setHasDrawn(true);
+    onDrawStart?.();
+  };
+
+  // onEnd fires when the finger lifts — re-enable scrolling.
+  const handleEnd = () => {
+    setStrokeEnded(true);
+    onDrawEnd?.();
+  };
+
   const handleClear = () => {
     ref.current?.clearSignature();
     setHasDrawn(false);
+    setStrokeEnded(false);
+    onDrawEnd?.();
   };
 
   const handleConfirm = () => {
@@ -66,7 +90,8 @@ export const SignaturePad: React.FC<SignaturePadProps> = ({
         <SignatureScreen
           ref={ref}
           onOK={handleOK}
-          onBegin={() => setHasDrawn(true)}
+          onBegin={handleBegin}
+          onEnd={handleEnd}
           onEmpty={() => setHasDrawn(false)}
           webStyle={WEB_STYLE}
           backgroundColor="#FFFFFF"
@@ -75,6 +100,11 @@ export const SignaturePad: React.FC<SignaturePadProps> = ({
           autoClear={false}
         />
       </View>
+
+      <Text style={styles.hintMain}>Draw your signature above</Text>
+      <Text style={styles.hintSub}>
+        {strokeEnded ? 'Scroll to continue' : 'Scrolling is paused while you sign'}
+      </Text>
 
       <View style={styles.actions}>
         <TouchableOpacity
@@ -117,6 +147,20 @@ const styles = StyleSheet.create({
     borderRadius: 10,
     overflow: 'hidden',
   },
+  hintMain: {
+    marginTop: spacing.sm,
+    color: '#888888',
+    fontStyle: 'italic',
+    fontSize: 11,
+    textAlign: 'center',
+  },
+  hintSub: {
+    marginTop: 2,
+    color: '#888888',
+    fontStyle: 'italic',
+    fontSize: 11,
+    textAlign: 'center',
+  },
   actions: {
     flexDirection: 'row',
     gap: spacing.md,
@@ -140,7 +184,8 @@ const styles = StyleSheet.create({
     flex: 1.6,
     alignItems: 'center',
     justifyContent: 'center',
-    paddingVertical: 13,
+    paddingVertical: scaled(13),
+    minHeight: scaled(44),
     borderRadius: 10,
     backgroundColor: colors.navy,
   },

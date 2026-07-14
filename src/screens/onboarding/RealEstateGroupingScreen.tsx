@@ -12,6 +12,7 @@ import { useNavigation, useRoute, type RouteProp } from '@react-navigation/nativ
 import type { NativeStackNavigationProp } from '@react-navigation/native-stack';
 import { Ionicons } from '@expo/vector-icons';
 import { colors } from '../../theme';
+import { contentContainerStyle } from '../../constants/layout';
 import type { OnboardingStackParamList } from '../../navigation/types';
 
 type Nav = NativeStackNavigationProp<OnboardingStackParamList, 'RealEstateGrouping'>;
@@ -43,6 +44,7 @@ export const RealEstateGroupingScreen: React.FC = () => {
   return (
     <View style={[styles.root, { paddingTop: insets.top + 24 }]}>
       <ScrollView contentContainerStyle={[styles.content, { paddingBottom: insets.bottom + 120 }]}>
+        <View style={[contentContainerStyle, { gap: 12 }]}>
         <Text style={styles.title}>Rental Property Grouping Election</Text>
         <Text style={styles.question}>
           Has your tax advisor instructed you to group all your rental
@@ -68,6 +70,7 @@ export const RealEstateGroupingScreen: React.FC = () => {
           icon="help-circle-outline"
           onPress={() => setPick('unsure')}
         />
+        </View>
       </ScrollView>
 
       <View style={[styles.footer, { paddingBottom: insets.bottom + 12 }]}>

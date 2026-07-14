@@ -1,7 +1,11 @@
 import React, { useEffect, useState } from 'react';
 import { StatusBar } from 'expo-status-bar';
+import * as ScreenOrientation from 'expo-screen-orientation';
 import { NavigationContainer, DefaultTheme } from '@react-navigation/native';
 import { SafeAreaProvider } from 'react-native-safe-area-context';
+// Imported for its startup side effect: logs SCREEN_WIDTH / isTablet on launch
+// and guarantees the layout module loads at app start.
+import './src/constants/layout';
 import { RootStack } from './src/navigation/RootStack';
 import { OnboardingStack } from './src/navigation/OnboardingStack';
 import { colors } from './src/theme';
@@ -63,6 +67,15 @@ const Gate: React.FC = () => {
 };
 
 export default function App() {
+  // Lock the whole app to portrait/vertical orientation on both phones and
+  // tablets. Landscape is never supported. (app.json also sets portrait +
+  // requiresFullScreen; this is the runtime belt-and-suspenders lock.)
+  useEffect(() => {
+    ScreenOrientation.lockAsync(
+      ScreenOrientation.OrientationLock.PORTRAIT_UP,
+    ).catch(() => undefined);
+  }, []);
+
   return (
     <SafeAreaProvider>
       <StatusBar style="light" backgroundColor={colors.navy} translucent={false} />

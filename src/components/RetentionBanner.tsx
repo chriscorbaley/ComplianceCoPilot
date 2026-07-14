@@ -8,6 +8,7 @@ import {
 } from 'react-native';
 import { Ionicons } from '@expo/vector-icons';
 import { colors, radius, spacing, typography } from '../theme';
+import { scaled } from '../constants/layout';
 import type { RetentionWarning } from '../services/documentRetention';
 
 const DARK_AMBER_TEXT = '#633806';
@@ -126,7 +127,8 @@ const styles = StyleSheet.create({
     alignItems: 'center',
     gap: 6,
     paddingHorizontal: 12,
-    paddingVertical: 7,
+    paddingVertical: scaled(12),
+    minHeight: scaled(44),
     borderRadius: radius.pill,
   },
   downloadBtnEarly: { backgroundColor: colors.white },

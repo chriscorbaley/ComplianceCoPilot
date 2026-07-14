@@ -23,6 +23,7 @@ import * as Print from 'expo-print';
 import { useFocusEffect, useNavigation } from '@react-navigation/native';
 import type { NativeStackNavigationProp } from '@react-navigation/native-stack';
 import { colors, radius, shadow, spacing, typography } from '../theme';
+import { contentContainerStyle } from '../constants/layout';
 import type { RootStackParamList } from '../navigation/types';
 import { Header } from '../components/Header';
 import { YearSelector } from '../components/YearSelector';
@@ -736,6 +737,7 @@ const MinutesScreenInner: React.FC = () => {
         keyboardShouldPersistTaps="handled"
         showsVerticalScrollIndicator={false}
       >
+        <View style={[contentContainerStyle, { gap: spacing.lg }]}>
         <View>
           <Text style={styles.label}>Meeting Type</Text>
           <TouchableOpacity
@@ -1014,6 +1016,7 @@ const MinutesScreenInner: React.FC = () => {
               ))
             )}
           </Card>
+        </View>
         </View>
       </ScrollView>
 

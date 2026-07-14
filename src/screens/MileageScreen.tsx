@@ -18,6 +18,7 @@ import { Ionicons } from '@expo/vector-icons';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
 import { useFocusEffect } from '@react-navigation/native';
 import { colors, radius, shadow, spacing, typography } from '../theme';
+import { contentContainerStyle } from '../constants/layout';
 import { Header } from '../components/Header';
 import { YearSelector } from '../components/YearSelector';
 import { DateInputField, DatePickerModal } from '../components/DateInputField';
@@ -413,6 +414,7 @@ const LogMilesTab: React.FC<{
       keyboardShouldPersistTaps="handled"
       showsVerticalScrollIndicator={false}
     >
+      <View style={contentContainerStyle}>
       <View style={styles.card}>
         <Text style={styles.fieldLabel}>Vehicle</Text>
         {vehicles.length === 0 ? (
@@ -544,6 +546,7 @@ const LogMilesTab: React.FC<{
           )}
         </TouchableOpacity>
       </View>
+      </View>
     </ScrollView>
     </KeyboardAvoidingView>
   );
@@ -608,6 +611,7 @@ const TripHistoryTab: React.FC<{
       contentContainerStyle={[styles.content, { paddingBottom: 40 + insets.bottom }]}
       showsVerticalScrollIndicator={false}
     >
+      <View style={contentContainerStyle}>
       <View style={styles.historyHeaderRow}>
         <Text style={styles.summaryTitle}>{year} Summary</Text>
         <TouchableOpacity
@@ -697,6 +701,7 @@ const TripHistoryTab: React.FC<{
           );
         })
       )}
+      </View>
     </ScrollView>
   );
 };
@@ -756,6 +761,7 @@ const VehiclesTab: React.FC<{
       contentContainerStyle={[styles.content, { paddingBottom: 40 + insets.bottom }]}
       showsVerticalScrollIndicator={false}
     >
+      <View style={contentContainerStyle}>
       <View style={styles.historyHeaderRow}>
         <Text style={styles.summaryTitle}>Vehicles</Text>
         <TouchableOpacity activeOpacity={0.85} onPress={onAdd} style={styles.reportBtn}>
@@ -798,6 +804,7 @@ const VehiclesTab: React.FC<{
           </View>
         ))
       )}
+      </View>
     </ScrollView>
   );
 };

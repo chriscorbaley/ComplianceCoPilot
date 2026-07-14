@@ -15,6 +15,7 @@ import { UpgradeStrategySelectScreen } from '../screens/UpgradeStrategySelectScr
 import { MinutesDocumentScreen } from '../screens/MinutesDocumentScreen';
 import { CancelWarning1Screen } from '../screens/CancelWarning1Screen';
 import { CancelWarning2Screen } from '../screens/CancelWarning2Screen';
+import { CancelSuccessScreen } from '../screens/CancelSuccessScreen';
 import { BusinessesScreen } from '../screens/BusinessesScreen';
 import { BusinessEditScreen } from '../screens/BusinessEditScreen';
 import { BusinessSetupScreen } from '../screens/onboarding/BusinessSetupScreen';
@@ -134,7 +135,12 @@ export const RootStack: React.FC = () => {
       <Stack.Screen
         name="CancelWarning2"
         component={CancelWarning2Screen}
-        options={{ title: 'Confirm Cancellation', gestureEnabled: false }}
+        options={{ title: 'Final Confirmation', gestureEnabled: false }}
+      />
+      <Stack.Screen
+        name="CancelSuccess"
+        component={CancelSuccessScreen}
+        options={{ title: 'Cancelled', headerLeft: () => null, gestureEnabled: false }}
       />
       <Stack.Screen
         name="Businesses"

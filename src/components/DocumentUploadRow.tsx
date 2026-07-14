@@ -8,6 +8,7 @@ import React from 'react';
 import { StyleSheet, Text, TouchableOpacity, View } from 'react-native';
 import { Ionicons } from '@expo/vector-icons';
 import { colors, typography } from '../theme';
+import { scaled } from '../constants/layout';
 
 const MONTHS = ['Jan','Feb','Mar','Apr','May','Jun','Jul','Aug','Sep','Oct','Nov','Dec'];
 
@@ -109,7 +110,7 @@ const styles = StyleSheet.create({
     borderWidth: 1.5,
     borderStyle: 'dashed',
     borderColor: '#CCCCCC',
-    paddingVertical: 22,
+    paddingVertical: scaled(22),
     alignItems: 'center',
     justifyContent: 'center',
   },
@@ -127,7 +128,7 @@ const styles = StyleSheet.create({
     borderWidth: 1,
     borderColor: colors.tealLight,
     backgroundColor: colors.tealLight,
-    paddingVertical: 12,
+    paddingVertical: scaled(12),
     paddingHorizontal: 12,
     flexDirection: 'row',
     alignItems: 'center',

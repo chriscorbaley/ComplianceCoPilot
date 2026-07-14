@@ -14,6 +14,7 @@ import {
 import { Ionicons } from '@expo/vector-icons';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
 import { colors, radius, spacing, typography } from '../theme';
+import { scaled } from '../constants/layout';
 
 export interface ViewerDocument {
   name: string;
@@ -358,6 +359,7 @@ const styles = StyleSheet.create({
     lineHeight: 22,
     paddingHorizontal: spacing.xl,
     paddingTop: spacing.lg,
+    minHeight: scaled(44),
     textAlignVertical: 'top',
   },
   footer: {
@@ -376,6 +378,7 @@ const styles = StyleSheet.create({
   },
   btnPrimary: {
     backgroundColor: colors.navy,
+    minHeight: scaled(44),
   },
   btnPrimaryText: {
     ...typography.bodyMedium,

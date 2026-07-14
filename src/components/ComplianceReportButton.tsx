@@ -8,6 +8,7 @@ import {
 } from 'react-native';
 import { Ionicons } from '@expo/vector-icons';
 import { colors, spacing, typography, shadow } from '../theme';
+import { scaled } from '../constants/layout';
 
 interface ComplianceReportButtonProps {
   // Generates and shares the report PDF. Receives no args — close over data
@@ -63,7 +64,8 @@ const styles = StyleSheet.create({
     gap: spacing.sm,
     backgroundColor: colors.navy,
     borderRadius: 10,
-    paddingVertical: 13,
+    paddingVertical: scaled(13),
+    minHeight: scaled(44),
     ...shadow.card,
   },
   btnDisabled: {

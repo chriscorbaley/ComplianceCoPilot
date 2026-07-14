@@ -2,6 +2,7 @@ import React from 'react';
 import { View, Text, StyleSheet, TouchableOpacity } from 'react-native';
 import { Ionicons } from '@expo/vector-icons';
 import { colors, radius, spacing, typography } from '../theme';
+import { scaled } from '../constants/layout';
 import { StatusPill, StatusVariant } from './StatusPill';
 
 export interface DocumentRow {
@@ -50,7 +51,7 @@ const styles = StyleSheet.create({
   row: {
     flexDirection: 'row',
     alignItems: 'center',
-    paddingVertical: spacing.md,
+    paddingVertical: scaled(spacing.md),
     gap: spacing.md,
   },
   borderBottom: {

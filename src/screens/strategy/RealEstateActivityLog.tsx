@@ -17,6 +17,7 @@ import { Ionicons } from '@expo/vector-icons';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
 import { useFocusEffect } from '@react-navigation/native';
 import { colors, radius, shadow, spacing, typography } from '../../theme';
+import { contentContainerStyle } from '../../constants/layout';
 import { ActivityLogTable } from '../../components/ActivityLogTable';
 import { StatusPill } from '../../components/StatusPill';
 import { useAuth } from '../../auth/AuthContext';
@@ -162,6 +163,7 @@ export const RealEstateActivityLog: React.FC = () => {
       contentContainerStyle={[styles.content, { paddingBottom: 32 + insets.bottom }]}
       showsVerticalScrollIndicator={false}
     >
+      <View style={[contentContainerStyle, { gap: spacing.md }]}>
       <View style={styles.introCard}>
         <Text style={styles.introTitle}>Activity Log</Text>
         <Text style={styles.introBody}>
@@ -261,6 +263,7 @@ export const RealEstateActivityLog: React.FC = () => {
           setPicker(null);
         }}
       />
+      </View>
     </ScrollView>
   );
 };
