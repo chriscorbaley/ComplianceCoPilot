@@ -162,7 +162,7 @@ export const ChoosePlanScreen: React.FC = () => {
   const applyCode = () => {
     if (code.trim().toUpperCase() === 'TAXLAB') {
       setCodeApplied(true);
-      Alert.alert('Code applied', 'TAXLAB discount will be applied at checkout.');
+      Alert.alert('Code applied', 'Your discount will be applied at checkout.');
     } else {
       Alert.alert('Invalid code', 'That code is not recognized.');
     }
@@ -200,7 +200,7 @@ export const ChoosePlanScreen: React.FC = () => {
             features={[
               { text: '1 tax strategy' },
               { text: 'AI document generator' },
-              { text: 'AI voice-to-doc fill' },
+              { text: 'Strategy-specific compliance checklists' },
               { text: 'Document storage' },
             ]}
             highlighted={highlight === 'starter'}
@@ -242,7 +242,7 @@ export const ChoosePlanScreen: React.FC = () => {
 
         <TouchableOpacity onPress={() => setCodeOpen(true)} style={styles.codeWrap}>
           <Text style={styles.codeText}>
-            {codeApplied ? 'TAXLAB code applied ✓' : 'Already have a code?'}
+            {codeApplied ? 'Code applied ✓' : 'Already have a code?'}
           </Text>
         </TouchableOpacity>
         </View>
@@ -256,7 +256,7 @@ export const ChoosePlanScreen: React.FC = () => {
               style={styles.codeInput}
               value={code}
               onChangeText={setCode}
-              placeholder="e.g. TAXLAB"
+              placeholder="Enter code"
               placeholderTextColor={colors.subtleText}
               autoCapitalize="characters"
               autoCorrect={false}

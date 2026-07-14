@@ -288,14 +288,21 @@ export const DatePickerModal: React.FC<DatePickerModalProps> = ({
   onConfirm,
   onCancel,
 }) => {
-  const [tempDate, setTempDate] = useState<Date>(
-    value ?? fallback ?? new Date(),
-  );
+  // Seed the spinner with the current value (or fallback), but never with a
+  // null/epoch date — that would open the picker on Dec 31 1969. Default to today.
+  const seedDate = (): Date => {
+    const candidate = value ?? fallback;
+    if (candidate && !Number.isNaN(candidate.getTime()) && candidate.getTime() > 0) {
+      return candidate;
+    }
+    return new Date();
+  };
+  const [tempDate, setTempDate] = useState<Date>(seedDate);
 
   // Each time the sheet opens, copy the current value into the temp state so
   // the spinner starts where the field currently is (or at the fallback).
   useEffect(() => {
-    if (visible) setTempDate(value ?? fallback ?? new Date());
+    if (visible) setTempDate(seedDate());
     // Only re-seed on open; live scrolling updates tempDate directly.
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [visible]);
@@ -333,7 +340,14 @@ export const DatePickerModal: React.FC<DatePickerModalProps> = ({
                 mode="date"
                 display="spinner"
                 onChange={(_event, date) => {
-                  if (date) setTempDate(date);
+                  // Guard against a null/epoch timestamp: on some Android
+                  // interactions the picker emits a 0 (or invalid) date, which
+                  // would snap the spinner to Dec 31 1969 (Unix epoch in a
+                  // negative-offset timezone) and appear to "revert". Ignore
+                  // those so the current selection (defaulting to today) holds.
+                  if (date && !Number.isNaN(date.getTime()) && date.getTime() > 0) {
+                    setTempDate(date);
+                  }
                 }}
                 minimumDate={minimumDate}
                 maximumDate={maximumDate}

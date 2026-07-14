@@ -61,6 +61,21 @@ const MONTH_SHORT = [
 
 const MIN_TRIP_DATE = new Date('2020-01-01');
 
+// A raw Supabase PostgrestError is a plain object, not an Error instance, so
+// `String(err)` / `err instanceof Error ? err.message : String(err)` renders the
+// useless "[object Object]". Pull the readable parts (message/details/hint) so
+// the user — and the Metro console — see the actual cause.
+const describeError = (err: unknown): string => {
+  if (err instanceof Error) return err.message;
+  const e = (err ?? {}) as {
+    message?: string;
+    details?: string;
+    hint?: string;
+    code?: string;
+  };
+  return e.message || e.details || e.hint || JSON.stringify(err);
+};
+
 const parseISODate = (iso: string | null): Date | null => {
   if (!iso) return null;
   const m = /^(\d{4})-(\d{2})-(\d{2})/.exec(iso);
@@ -123,7 +138,14 @@ const MileageScreenInner: React.FC = () => {
       if (error) throw error;
       setVehicles((data ?? []) as VehicleRow[]);
     } catch (e) {
-      Alert.alert('Could not load vehicles', e instanceof Error ? e.message : String(e));
+      const err = (e ?? {}) as { message?: string; code?: string; hint?: string; details?: string };
+      console.error('[Mileage] load vehicles failed:', {
+        message: err.message,
+        code: err.code,
+        hint: err.hint,
+        details: err.details,
+      });
+      Alert.alert('Could not load vehicles', `Could not load vehicles: ${describeError(e)}`);
     }
   }, [activeBusinessId]);
 
@@ -139,7 +161,14 @@ const MileageScreenInner: React.FC = () => {
       if (error) throw error;
       setTrips((data ?? []) as MileageLogRow[]);
     } catch (e) {
-      Alert.alert('Could not load trips', e instanceof Error ? e.message : String(e));
+      const err = (e ?? {}) as { message?: string; code?: string; hint?: string; details?: string };
+      console.error('[Mileage] load trips failed:', {
+        message: err.message,
+        code: err.code,
+        hint: err.hint,
+        details: err.details,
+      });
+      Alert.alert('Could not load trips', `Could not load trips: ${describeError(e)}`);
     }
   }, [activeBusinessId, year]);
 

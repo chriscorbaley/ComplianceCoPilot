@@ -22,7 +22,7 @@ interface TeaserContent {
 }
 
 const STARTER_TEASER: TeaserContent = {
-  headline: "You're one step away from total compliance coverage",
+  headline: "You're one step away from better compliance coverage",
   subhead: 'Core members track 3 strategies and never miss a deadline',
   lockedFeatures: ['Additional strategies', 'Strategy progress dashboard', 'Priority support'],
   upgradeLabel: 'Upgrade to Core — $99/mo',
@@ -31,7 +31,7 @@ const STARTER_TEASER: TeaserContent = {
 };
 
 const CORE_TEASER: TeaserContent = {
-  headline: "You're one step away from total compliance coverage",
+  headline: "You're one step away from better compliance coverage",
   subhead: 'Pro members track every strategy with the full audit trail',
   lockedFeatures: ['All tax strategies', 'AI voice meeting minutes', 'Complete audit trail'],
   upgradeLabel: 'Upgrade to Pro — $199/mo',

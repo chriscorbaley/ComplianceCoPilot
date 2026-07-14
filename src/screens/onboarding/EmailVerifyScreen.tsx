@@ -96,15 +96,19 @@ export const EmailVerifyScreen: React.FC = () => {
     }
   };
 
+  // Beta bypass: Supabase's free tier rate-limits verification emails to 3/hour,
+  // so the link often never arrives during testing. Refresh the session first in
+  // case the email WAS confirmed (so downstream has the freshest JWT), then
+  // proceed to Terms regardless so testing isn't blocked.
+  // TODO(pre-launch): remove the unconditional advance once a production email
+  // provider (Resend/SendGrid) is configured.
   const onManualCheck = async () => {
     setChecking(true);
     try {
-      const ok = await checkVerified();
-      if (!ok) {
-        Alert.alert('Not verified yet', 'Tap the link in the email and try again.');
-      }
+      await checkVerified();
     } finally {
       setChecking(false);
+      nav.replace('Terms');
     }
   };
 
@@ -136,6 +140,10 @@ export const EmailVerifyScreen: React.FC = () => {
       </View>
 
       <View style={styles.actions}>
+        <Text style={styles.note}>
+          If you don't receive the email, tap "Already verified? Continue" to proceed.
+        </Text>
+
         <TouchableOpacity
           activeOpacity={0.85}
           onPress={onResend}
@@ -152,7 +160,7 @@ export const EmailVerifyScreen: React.FC = () => {
         <TouchableOpacity activeOpacity={0.7} onPress={onManualCheck} disabled={checking} style={styles.manualWrap}>
           <Text style={styles.manualText}>
             Already verified?{' '}
-            <Text style={styles.manualEmphasis}>{checking ? 'Checking…' : 'Tap here to continue'}</Text>
+            <Text style={styles.manualEmphasis}>{checking ? 'Checking…' : 'Continue'}</Text>
           </Text>
         </TouchableOpacity>
       </View>
@@ -230,6 +238,13 @@ const styles = StyleSheet.create({
     color: colors.white,
     fontSize: 14,
     fontWeight: '700',
+  },
+  note: {
+    color: 'rgba(255,255,255,0.6)',
+    fontSize: 12,
+    lineHeight: 17,
+    textAlign: 'center',
+    marginBottom: 4,
   },
   manualWrap: {
     alignItems: 'center',

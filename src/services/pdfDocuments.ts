@@ -14,6 +14,7 @@ import * as Print from 'expo-print';
 import { Asset } from 'expo-asset';
 import { File } from 'expo-file-system';
 import { supabase, requireUserId } from './supabase';
+import { getCurrentUserLogoBase64 } from '../utils/logoUtils';
 
 // ── Shared escaping ─────────────────────────────────────────────────────────
 
@@ -50,10 +51,17 @@ async function getLogoDataUri(): Promise<string | null> {
   }
 }
 
-// Replaces the __LOGO_SRC__ placeholder with the real data URI just before the
-// HTML is rendered. If the logo can't load, the <img> is stripped entirely.
+// Replaces the __LOGO_SRC__ placeholder with a real base64 data URI just before
+// the HTML is rendered. Prefers the user's OWN business logo (so exported PDFs
+// carry their branding), falling back to the bundled Compliance Co-Pilot brand
+// mark, then stripping the <img> entirely if neither can load — so a PDF never
+// shows a broken-image icon. Both logos are inlined as base64 because expo-print
+// has no network stack at render time and cannot fetch a remote/signed URL.
 export async function hydrateLogo(html: string): Promise<string> {
-  const logo = await getLogoDataUri();
+  // Fast path: nothing to hydrate.
+  if (!html.includes(LOGO_PLACEHOLDER)) return html;
+  const businessLogo = await getCurrentUserLogoBase64();
+  const logo = businessLogo ?? (await getLogoDataUri());
   if (logo) return html.split(LOGO_PLACEHOLDER).join(logo);
   return html.replace(/<img class="brandLogo"[^>]*>/g, '');
 }

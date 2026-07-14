@@ -21,8 +21,8 @@ import * as Print from 'expo-print';
 import { colors, spacing, typography } from '../theme';
 import type { RootStackParamList } from '../navigation/types';
 import { useBusiness } from '../business/BusinessContext';
-import { getSignedLogoUrl } from '../services/businesses';
 import { useSignedLogoUrl } from '../hooks/useSignedLogoUrls';
+import { logoUrlToBase64 } from '../utils/logoUtils';
 import type { BusinessRow } from '../services/supabase';
 
 type Route = RouteProp<RootStackParamList, 'MinutesDocument'>;
@@ -105,8 +105,9 @@ const escapeHtml = (s: string): string =>
 // PDF. Pulls the active business name, entity, address, and logo so that an
 // auditor sees who the document belongs to. Returns empty string when no
 // business is active so the document still renders cleanly.
-// logoUrl is a pre-resolved signed URL (the 'business-logos' bucket is private,
-// so business.logo_url holds only a storage path that <img> cannot fetch).
+// logoUrl is a pre-resolved base64 data URI (the 'business-logos' bucket is
+// private AND expo-print can't fetch remote images, so a live/signed URL would
+// render as a broken image in the exported PDF — see logoUrlToBase64).
 const buildBusinessHeaderHtml = (business: BusinessRow | null, logoUrl: string | null): string => {
   if (!business) return '';
   const lines = [
@@ -251,8 +252,10 @@ export const MinutesDocumentScreen: React.FC = () => {
         Alert.alert('Sharing not available', 'This device cannot share files.');
         return;
       }
-      // Mint a signed URL for the private-bucket logo so it renders in the PDF.
-      const logoUrl = await getSignedLogoUrl(activeBusiness?.logo_url);
+      // Inline the private-bucket logo as base64 — expo-print has no network at
+      // render time, so a signed URL would resolve to a broken image in the PDF
+      // even though it renders fine in the in-app preview.
+      const logoUrl = await logoUrlToBase64(activeBusiness?.logo_url);
       const html = buildHtmlForPdf(
         document,
         meetingType,

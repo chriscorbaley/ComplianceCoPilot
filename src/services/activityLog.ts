@@ -9,6 +9,7 @@
 import * as Sharing from 'expo-sharing';
 import * as Print from 'expo-print';
 import { supabase } from './supabase';
+import { hydrateLogo, LOGO_PLACEHOLDER } from './pdfDocuments';
 import { loadComplianceRules } from './complianceRules';
 import { readThresholds } from './realEstate';
 
@@ -350,6 +351,19 @@ export function buildExportHtml(params: BuildExportParams): string {
     padding: 20px 24px;
     border-radius: 8px;
     margin-bottom: 24px;
+    display: flex;
+    align-items: center;
+    gap: 16px;
+  }
+  .brandLogo {
+    width: 54px;
+    height: 54px;
+    object-fit: contain;
+    background: #FFFFFF;
+    border-radius: 8px;
+    padding: 5px;
+    box-sizing: border-box;
+    flex-shrink: 0;
   }
   .header h1 {
     font-size: 20px;
@@ -434,10 +448,13 @@ export function buildExportHtml(params: BuildExportParams): string {
 </head>
 <body>
   <div class="header">
-    <h1>Real Estate Activity Log</h1>
-    <p>${client}</p>
-    <p>Tax Year: ${year}</p>
-    <p>Generated: ${escapeHtml(generatedDate)}</p>
+    <img class="brandLogo" src="${LOGO_PLACEHOLDER}" />
+    <div class="headerText">
+      <h1>Real Estate Activity Log</h1>
+      <p>${client}</p>
+      <p>Tax Year: ${year}</p>
+      <p>Generated: ${escapeHtml(generatedDate)}</p>
+    </div>
   </div>
 ${propertyBlocks}
   <div class="grand-total">
@@ -465,7 +482,10 @@ export async function shareActivityLogPdf(html: string): Promise<void> {
   if (!available) {
     throw new Error('Sharing is not available on this device.');
   }
-  const { uri } = await Print.printToFileAsync({ html, base64: false });
+  // Inline the (business or brand) logo before printing — expo-print can't fetch
+  // a remote image at render time.
+  const hydrated = await hydrateLogo(html);
+  const { uri } = await Print.printToFileAsync({ html: hydrated, base64: false });
   await Sharing.shareAsync(uri, {
     mimeType: 'application/pdf',
     dialogTitle: 'Export Activity Log',

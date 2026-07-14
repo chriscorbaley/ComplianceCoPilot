@@ -7,6 +7,7 @@
 import * as Sharing from 'expo-sharing';
 import * as Print from 'expo-print';
 import { supabase, type HoursLogRow, type PropertyRow } from './supabase';
+import { hydrateLogo, LOGO_PLACEHOLDER } from './pdfDocuments';
 import { listProperties, MP_TEST_FROM_INT, MP_TEST_SHORT_LABEL } from './properties';
 import { loadComplianceRules } from './complianceRules';
 import {
@@ -584,6 +585,19 @@ export function buildRealEstateReportHtml(d: RealEstateReportData): string {
     padding: 20px 24px;
     border-radius: 8px;
     margin-bottom: 24px;
+    display: flex;
+    align-items: center;
+    gap: 16px;
+  }
+  .brandLogo {
+    width: 54px;
+    height: 54px;
+    object-fit: contain;
+    background: #FFFFFF;
+    border-radius: 8px;
+    padding: 5px;
+    box-sizing: border-box;
+    flex-shrink: 0;
   }
   .header h1 {
     font-size: 22px;
@@ -678,11 +692,14 @@ export function buildRealEstateReportHtml(d: RealEstateReportData): string {
 <body>
 
 <div class="header">
-  <h1>Real Estate Compliance Report</h1>
-  <p>${client}</p>
-  <p>Tax Year: ${d.year}</p>
-  <p>Generated: ${escapeHtml(d.generatedDate)}</p>
-  <p>Strategy: ${escapeHtml(d.strategyLabel)}</p>
+  <img class="brandLogo" src="${LOGO_PLACEHOLDER}" />
+  <div class="headerText">
+    <h1>Real Estate Compliance Report</h1>
+    <p>${client}</p>
+    <p>Tax Year: ${d.year}</p>
+    <p>Generated: ${escapeHtml(d.generatedDate)}</p>
+    <p>Strategy: ${escapeHtml(d.strategyLabel)}</p>
+  </div>
 </div>
 ${repsSection(d)}
 ${longTermSection(d)}
@@ -706,7 +723,10 @@ export async function shareRealEstateReportPdf(html: string): Promise<void> {
   if (!available) {
     throw new Error('Sharing is not available on this device.');
   }
-  const { uri } = await Print.printToFileAsync({ html, base64: false });
+  // Inline the (business or brand) logo before printing — expo-print can't fetch
+  // a remote image at render time.
+  const hydrated = await hydrateLogo(html);
+  const { uri } = await Print.printToFileAsync({ html: hydrated, base64: false });
   await Sharing.shareAsync(uri, {
     mimeType: 'application/pdf',
     dialogTitle: 'Real Estate Compliance Report',

@@ -20,6 +20,7 @@ import { useSafeAreaInsets } from 'react-native-safe-area-context';
 import { Audio } from 'expo-av';
 import * as Sharing from 'expo-sharing';
 import * as Print from 'expo-print';
+import { hydrateLogo, LOGO_PLACEHOLDER } from '../services/pdfDocuments';
 import { useFocusEffect, useNavigation } from '@react-navigation/native';
 import type { NativeStackNavigationProp } from '@react-navigation/native-stack';
 import { colors, radius, shadow, spacing, typography } from '../theme';
@@ -1118,12 +1119,14 @@ const buildMinutesHtml = (
 <style>
   @page { margin: 48px; }
   body { font-family: -apple-system, Helvetica, Arial, sans-serif; color: #1A1A2E; font-size: 12pt; line-height: 1.5; }
+  .brandLogo { height: 48px; width: auto; object-fit: contain; margin-bottom: 12px; }
   .hdr { border-bottom: 2px solid #042C53; padding-bottom: 12px; margin-bottom: 20px; }
   .hdr h1 { color: #042C53; margin: 0 0 6px 0; font-size: 20pt; }
   .hdr .meta { color: #6B7280; font-size: 10.5pt; }
   h1 { color: #042C53; font-size: 16pt; } h2 { color: #042C53; font-size: 14pt; }
   h3 { color: #1A1A2E; font-size: 12pt; } p { margin: 4px 0 8px 0; } li { margin: 2px 0; }
 </style></head><body>
+  <img class="brandLogo" src="${LOGO_PLACEHOLDER}" />
   <div class="hdr"><h1>Meeting Minutes</h1>
   <div class="meta">${escapeHtmlMinutes(meetingType)} · ${escapeHtmlMinutes(meetingDate)} · ${escapeHtmlMinutes(location || '—')}</div></div>
   ${body}
@@ -1139,7 +1142,10 @@ const shareMinutesAsPdf = async (
   const available = await Sharing.isAvailableAsync();
   if (!available) throw new Error('Sharing is not available on this device.');
   const html = buildMinutesHtml(doc, meetingType, meetingDate, location);
-  const { uri } = await Print.printToFileAsync({ html, base64: false });
+  // Inline the business (or brand) logo before printing — expo-print can't fetch
+  // a remote image at render time.
+  const hydrated = await hydrateLogo(html);
+  const { uri } = await Print.printToFileAsync({ html: hydrated, base64: false });
   await Sharing.shareAsync(uri, {
     mimeType: 'application/pdf',
     UTI: 'com.adobe.pdf',
