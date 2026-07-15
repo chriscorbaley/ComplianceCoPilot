@@ -19,6 +19,7 @@ import { VoiceLogStrip } from '../components/VoiceLogStrip';
 import { Card } from '../components/Card';
 import { LockedStrategySheet } from '../components/LockedStrategySheet';
 import { useStrategyAccess, DASHBOARD_STRATEGY_KEYS } from '../hooks/useStrategyAccess';
+import { useFeatureFlags } from '../context/FeatureFlagContext';
 import type { RootStackParamList } from '../navigation/types';
 import {
   supabase,
@@ -168,6 +169,9 @@ export const DashboardScreen: React.FC = () => {
   const [announcement, setAnnouncement] = useState<AnnouncementRow | null>(null);
   const [dismissedIds, setDismissedIds] = useState<Set<string>>(() => new Set());
   const access = useStrategyAccess();
+  // Global feature-flag layer. A strategy/feature turned off here is hidden
+  // entirely (on top of tier gating), and its cards never render.
+  const { isEnabled: featureEnabled } = useFeatureFlags();
   const [lockedSheet, setLockedSheet] = useState<{ name: string } | null>(null);
 
   // STEP 4 of the upgrade flow: when we return from UpgradeStrategySelect with
@@ -570,7 +574,7 @@ export const DashboardScreen: React.FC = () => {
     <View style={styles.root}>
       <Header year={2026} />
 
-      {retention.warning ? (
+      {featureEnabled('document_retention_warnings') && retention.warning ? (
         <RetentionBanner
           warning={retention.warning}
           onDownloadAll={retention.downloadAll}
@@ -705,7 +709,13 @@ export const DashboardScreen: React.FC = () => {
             }
           />
           <View style={styles.strategyList}>
-            {strategies.map((s) => {
+            {strategies
+              .filter((s) => {
+                // Hide a strategy card entirely when its global flag is off.
+                const key = DASHBOARD_STRATEGY_KEYS[s.id];
+                return !key || featureEnabled(key);
+              })
+              .map((s) => {
               const stratKey = DASHBOARD_STRATEGY_KEYS[s.id];
               // Business Travel is unlocked by tier (Core/Pro), not by an
               // explicit active_strategies entry — it activates automatically.
@@ -750,7 +760,9 @@ export const DashboardScreen: React.FC = () => {
         <View style={styles.section}>
           <SectionHeader title="Compliance Documents" />
           <View style={styles.complianceList}>
-            {complianceCards.map((card) => {
+            {complianceCards
+              .filter((card) => featureEnabled(card.strategyKey))
+              .map((card) => {
               const pct = card.total === 0 ? 0 : Math.round((card.completed / card.total) * 100);
               const done = card.completed === card.total && card.total > 0;
               // Document generator cards follow the same gating as the strategy

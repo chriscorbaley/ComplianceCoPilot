@@ -33,9 +33,11 @@ import {
   ProxyUnreachableError,
 } from '../services/openai';
 import { useStrategyAccess } from '../hooks/useStrategyAccess';
+import { useFeatureFlag } from '../context/FeatureFlagContext';
 import { useBusiness } from '../business/BusinessContext';
 import { useAuth } from '../auth/AuthContext';
 import { AugustaDocsModal, type AugustaDocsContext } from './AugustaDocsModal';
+import { VoiceUnavailableNotice } from './VoiceUnavailableNotice';
 import { VoiceUpgradeSheet } from './VoiceUpgradeSheet';
 
 const MONTHS = [
@@ -72,6 +74,8 @@ export const AugustaActivityModal: React.FC<AugustaActivityModalProps> = ({
 }) => {
   const { activeBusinessId, activeBusiness } = useBusiness();
   const { canUseVoice } = useStrategyAccess();
+  // Global voice kill-switch, independent of tier gating.
+  const voiceFeaturesEnabled = useFeatureFlag('voice_features');
   const { fullName } = useAuth();
 
   // After minutes are saved we offer to generate the lease + invoice. The
@@ -288,29 +292,33 @@ export const AugustaActivityModal: React.FC<AugustaActivityModalProps> = ({
             showsVerticalScrollIndicator={false}
             keyboardShouldPersistTaps="handled"
           >
-            <TouchableOpacity
-              activeOpacity={0.85}
-              onPress={canUseVoice ? onVoicePress : () => setShowVoiceUpgrade(true)}
-              disabled={canUseVoice && voicePhase === 'processing'}
-              style={[
-                styles.voiceBtn,
-                !canUseVoice && styles.voiceBtnLocked,
-                canUseVoice && voicePhase === 'recording' && styles.voiceBtnRecording,
-              ]}
-            >
-              {canUseVoice && voicePhase === 'processing' ? (
-                <ActivityIndicator size="small" color={colors.white} />
-              ) : (
-                <Ionicons
-                  name={canUseVoice && voicePhase === 'recording' ? 'stop' : 'mic'}
-                  size={18}
-                  color={colors.white}
-                />
-              )}
-              <Text style={styles.voiceBtnText}>
-                {canUseVoice ? voiceLabel : 'Fill from voice'}
-              </Text>
-            </TouchableOpacity>
+            {voiceFeaturesEnabled ? (
+              <TouchableOpacity
+                activeOpacity={0.85}
+                onPress={canUseVoice ? onVoicePress : () => setShowVoiceUpgrade(true)}
+                disabled={canUseVoice && voicePhase === 'processing'}
+                style={[
+                  styles.voiceBtn,
+                  !canUseVoice && styles.voiceBtnLocked,
+                  canUseVoice && voicePhase === 'recording' && styles.voiceBtnRecording,
+                ]}
+              >
+                {canUseVoice && voicePhase === 'processing' ? (
+                  <ActivityIndicator size="small" color={colors.white} />
+                ) : (
+                  <Ionicons
+                    name={canUseVoice && voicePhase === 'recording' ? 'stop' : 'mic'}
+                    size={18}
+                    color={colors.white}
+                  />
+                )}
+                <Text style={styles.voiceBtnText}>
+                  {canUseVoice ? voiceLabel : 'Fill from voice'}
+                </Text>
+              </TouchableOpacity>
+            ) : (
+              <VoiceUnavailableNotice />
+            )}
 
             {/* Meeting date */}
             <Text style={styles.label}>Meeting date</Text>

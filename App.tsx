@@ -13,6 +13,7 @@ import { colors } from './src/theme';
 import { AuthProvider, useAuth } from './src/auth/AuthContext';
 import { BusinessProvider } from './src/business/BusinessContext';
 import { YearProvider } from './src/context/YearContext';
+import { FeatureFlagProvider } from './src/context/FeatureFlagContext';
 import { LoginScreen } from './src/screens/LoginScreen';
 import { SignUpScreen } from './src/screens/SignUpScreen';
 import { SplashScreen } from './src/screens/SplashScreen';
@@ -103,7 +104,9 @@ export default function App() {
     <SafeAreaProvider>
       <StatusBar style="light" backgroundColor={colors.navy} translucent={false} />
       <AuthProvider>
-        <Gate />
+        <FeatureFlagProvider>
+          <Gate />
+        </FeatureFlagProvider>
       </AuthProvider>
     </SafeAreaProvider>
   );

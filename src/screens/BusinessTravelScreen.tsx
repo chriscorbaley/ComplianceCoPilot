@@ -19,6 +19,8 @@ import { colors, radius, shadow, spacing, typography } from '../theme';
 import { contentContainerStyle } from '../constants/layout';
 import { DateInputField, DatePickerModal } from '../components/DateInputField';
 import { useStrategyAccess } from '../hooks/useStrategyAccess';
+import { useFeatureFlag } from '../context/FeatureFlagContext';
+import { VoiceUnavailableNotice } from '../components/VoiceUnavailableNotice';
 import { BusinessTravelLockedScreen } from '../components/BusinessTravelLockedScreen';
 import { Header } from '../components/Header';
 import { YearSelector } from '../components/YearSelector';
@@ -389,6 +391,8 @@ interface AnalyzerTabProps {
 }
 
 const AnalyzerTab: React.FC<AnalyzerTabProps> = ({ rules, insets, onLogTrip }) => {
+  // Global voice kill-switch for the spoken-itinerary mic (typing still works).
+  const voiceFeaturesEnabled = useFeatureFlag('voice_features');
   const [recording, setRecording] = useState<Audio.Recording | null>(null);
   const [isRecording, setIsRecording] = useState(false);
   const [transcribing, setTranscribing] = useState(false);
@@ -599,6 +603,7 @@ const AnalyzerTab: React.FC<AnalyzerTabProps> = ({ rules, insets, onLogTrip }) =
           classify each day and the deduction.
         </Text>
 
+        {voiceFeaturesEnabled ? (
         <View style={styles.micRow}>
           <TouchableOpacity
             activeOpacity={0.85}
@@ -648,12 +653,17 @@ const AnalyzerTab: React.FC<AnalyzerTabProps> = ({ rules, insets, onLogTrip }) =
             </Text>
           </View>
         </View>
+        ) : (
+          <VoiceUnavailableNotice style={styles.micRow} />
+        )}
 
-        <AnimatedWaveform
-          active={isRecording}
-          height={48}
-          style={styles.waveform}
-        />
+        {voiceFeaturesEnabled ? (
+          <AnimatedWaveform
+            active={isRecording}
+            height={48}
+            style={styles.waveform}
+          />
+        ) : null}
 
         <Text style={styles.sectionLabel}>Transcript</Text>
         <TextInput

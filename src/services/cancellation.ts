@@ -157,10 +157,16 @@ export function formatDeletionDate(date: Date): string {
 }
 
 export interface CompleteCancellationInput {
-  signature1DataUrl: string;
-  signature2DataUrl: string;
+  // Optional: the double-signature flow supplies both; the simple-confirmation
+  // flow (feature flag `cancellation_signature` off) supplies neither.
+  signature1DataUrl?: string;
+  signature2DataUrl?: string;
   documentCount: number;
 }
+
+// Sentinel written to the NOT NULL signature columns when the account is
+// cancelled via the simple confirmation dialog rather than hand signatures.
+const NO_SIGNATURE_MARKER = 'simple-confirmation';
 
 export interface CancellationResult {
   cancellationId: string;
@@ -174,10 +180,15 @@ export async function completeCancellation(
 ): Promise<CancellationResult> {
   const userId = await requireUserId();
 
-  const [sig1Path, sig2Path] = await Promise.all([
-    uploadSignature(userId, 1, input.signature1DataUrl),
-    uploadSignature(userId, 2, input.signature2DataUrl),
-  ]);
+  // Upload signatures only when the signature flow supplied them; otherwise
+  // record the simple-confirmation sentinel in the NOT NULL columns.
+  const [sig1Path, sig2Path] =
+    input.signature1DataUrl && input.signature2DataUrl
+      ? await Promise.all([
+          uploadSignature(userId, 1, input.signature1DataUrl),
+          uploadSignature(userId, 2, input.signature2DataUrl),
+        ])
+      : [NO_SIGNATURE_MARKER, NO_SIGNATURE_MARKER];
 
   const deletionScheduledFor = deletionDateFromNow().toISOString();
 

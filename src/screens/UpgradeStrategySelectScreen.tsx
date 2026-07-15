@@ -30,6 +30,7 @@ import { Ionicons } from '@expo/vector-icons';
 import { colors } from '../theme';
 import { supabase } from '../services/supabase';
 import { useAuth } from '../auth/AuthContext';
+import { useFeatureFlags } from '../context/FeatureFlagContext';
 import type { RootStackParamList } from '../navigation/types';
 
 type Nav = NativeStackNavigationProp<RootStackParamList, 'UpgradeStrategySelect'>;
@@ -59,6 +60,12 @@ export const UpgradeStrategySelectScreen: React.FC = () => {
   const nav = useNavigation<Nav>();
   const route = useRoute<Route>();
   const { session, activeStrategies, refreshProfile } = useAuth();
+  // Globally-disabled strategies are hidden from the upgrade picker too.
+  const { isEnabled } = useFeatureFlags();
+  const visibleStrategies = useMemo(
+    () => STRATEGIES.filter((s) => isEnabled(s.key)),
+    [isEnabled],
+  );
 
   const tier = route.params.tier;
   const label = TIER_LABEL[tier];
@@ -163,7 +170,7 @@ export const UpgradeStrategySelectScreen: React.FC = () => {
           </View>
         </View>
 
-        {STRATEGIES.map((s) => {
+        {visibleStrategies.map((s) => {
           const isOwned = owned.has(s.key);
           const isNew = newSelected.includes(s.key);
           const selected = isOwned || isNew;

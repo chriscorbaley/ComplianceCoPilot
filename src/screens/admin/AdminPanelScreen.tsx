@@ -22,6 +22,7 @@ import { AnnouncementPublisher } from './AnnouncementPublisher';
 import { RegulatoryAlertsInbox } from './RegulatoryAlertsInbox';
 import { LegalDocumentsEditor } from './LegalDocumentsEditor';
 import { PricingEditor } from './PricingEditor';
+import { FeatureFlagsEditor } from './FeatureFlagsEditor';
 
 type AdminRoute = RouteProp<RootStackParamList, 'AdminPanel'>;
 
@@ -38,6 +39,7 @@ const TABS: TabSpec[] = [
   { key: 'IRC',        label: 'IRC',           icon: 'book-outline' },
   { key: 'Strategies', label: 'Strategies',    icon: 'toggle-outline' },
   { key: 'Pricing',    label: 'Pricing',       icon: 'pricetags-outline' },
+  { key: 'Flags',      label: 'Flags',         icon: 'flag-outline' },
   { key: 'Announce',   label: 'Announce',      icon: 'megaphone-outline' },
   { key: 'Inbox',      label: 'Inbox',         icon: 'mail-outline' },
   { key: 'Legal',      label: 'Legal',         icon: 'shield-outline' },
@@ -143,6 +145,7 @@ export const AdminPanelScreen: React.FC = () => {
         {tab === 'IRC' && <IrcReferencesEditor />}
         {tab === 'Strategies' && <StrategiesToggle />}
         {tab === 'Pricing' && <PricingEditor />}
+        {tab === 'Flags' && <FeatureFlagsEditor />}
         {tab === 'Announce' && <AnnouncementPublisher />}
         {tab === 'Legal' && <LegalDocumentsEditor />}
         {tab === 'Inbox' && <RegulatoryAlertsInbox onJumpToRules={(keys, values) => {

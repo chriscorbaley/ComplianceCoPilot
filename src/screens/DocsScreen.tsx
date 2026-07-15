@@ -37,6 +37,7 @@ import { YearSelector } from '../components/YearSelector';
 import { RetentionBanner } from '../components/RetentionBanner';
 import { useDocumentRetention } from '../hooks/useDocumentRetention';
 import { useStrategyAccess } from '../hooks/useStrategyAccess';
+import { useFeatureFlags } from '../context/FeatureFlagContext';
 import { LockedStrategySheet } from '../components/LockedStrategySheet';
 import {
   listAllStrategyDocuments,
@@ -367,10 +368,27 @@ export const DocsScreen: React.FC = () => {
   const { startIso, endIso } = useYear();
   const retention = useDocumentRetention(activeBusinessId);
   const access = useStrategyAccess();
+  // Global feature-flag layer: hide a strategy's filter chip when its flag is
+  // off, and suppress retention banners when that flag is off.
+  const { isEnabled: featureEnabled } = useFeatureFlags();
+  const visibleFilters = useMemo(
+    () =>
+      FILTERS.filter((f) => {
+        if (f === 'All') return true;
+        const key = STRATEGY_DB_KEY[f];
+        return !key || featureEnabled(key);
+      }),
+    [featureEnabled],
+  );
   // Non-selected strategy chips are locked: tapping shows the upgrade sheet
   // instead of filtering. `lockedSheet` holds the tapped strategy's name.
   const [lockedSheet, setLockedSheet] = useState<{ name: string } | null>(null);
   const [filter, setFilter] = useState<ChipFilter>('All');
+  // If the active filter's strategy is turned off firm-wide, fall back to All so
+  // the user is never stuck on a chip that has disappeared.
+  useEffect(() => {
+    if (!visibleFilters.includes(filter)) setFilter('All');
+  }, [visibleFilters, filter]);
   const [docs, setDocs] = useState<DocEntry[]>([]);
   const [complianceRows, setComplianceRows] = useState<StrategyDocumentRow[]>([]);
   // `search` is the raw, instantly-reflected input value; `debouncedSearch`
@@ -665,7 +683,7 @@ export const DocsScreen: React.FC = () => {
         <Text style={styles.subtitle}>Your private compliance document vault</Text>
       </View>
 
-      {retention.warning ? (
+      {featureEnabled('document_retention_warnings') && retention.warning ? (
         <RetentionBanner
           warning={retention.warning}
           onDownloadAll={retention.downloadAll}
@@ -715,7 +733,7 @@ export const DocsScreen: React.FC = () => {
         style={styles.chipsScroll}
         contentContainerStyle={styles.chipsContent}
       >
-        {FILTERS.map((f) => {
+        {visibleFilters.map((f) => {
           const active = f === filter;
           const stratKey = f === 'All' ? null : STRATEGY_DB_KEY[f];
           // Business Travel is unlocked by tier (Core/Pro), not an explicit

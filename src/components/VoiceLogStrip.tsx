@@ -26,7 +26,9 @@ import { publish } from '../services/voiceInbox';
 import { routeFromClassification } from '../services/openai';
 import { useKeepAwakeWhile } from '../hooks/useKeepAwakeWhile';
 import { useStrategyAccess } from '../hooks/useStrategyAccess';
+import { useFeatureFlag } from '../context/FeatureFlagContext';
 import { KeepAwakeIndicator } from './KeepAwakeIndicator';
+import { VoiceUnavailableNotice } from './VoiceUnavailableNotice';
 import { VoiceUpgradeSheet } from './VoiceUpgradeSheet';
 
 type Phase = 'idle' | 'recording' | 'processing';
@@ -43,6 +45,9 @@ export const VoiceLogStrip: React.FC<VoiceLogStripProps> = ({
   // Voice logging is a Core/Pro feature. Basic subscribers keep the mic button
   // in place but it turns amber and opens the upgrade sheet instead of recording.
   const { canUseVoice } = useStrategyAccess();
+  // Global feature flag — when voice is turned off firm-wide the mic is hidden
+  // entirely (separate from the tier-based amber-upgrade behavior below).
+  const voiceFeaturesEnabled = useFeatureFlag('voice_features');
   const [phase, setPhase] = useState<Phase>('idle');
   const [showUpgrade, setShowUpgrade] = useState(false);
   const recRef = useRef<Audio.Recording | null>(null);
@@ -134,6 +139,19 @@ export const VoiceLogStrip: React.FC<VoiceLogStripProps> = ({
   };
 
   const pulseScale = pulse.interpolate({ inputRange: [0, 1], outputRange: [1, 1.18] });
+
+  if (!voiceFeaturesEnabled) {
+    return (
+      <View
+        style={[
+          styles.container,
+          { paddingBottom: Math.max(spacing.sm, insets.bottom ? 0 : spacing.sm) },
+        ]}
+      >
+        <VoiceUnavailableNotice />
+      </View>
+    );
+  }
 
   return (
     <View

@@ -17,6 +17,7 @@ import { Ionicons } from '@expo/vector-icons';
 import { colors } from '../../theme';
 import { supabase, type SubscriptionTier } from '../../services/supabase';
 import { useAuth } from '../../auth/AuthContext';
+import { useFeatureFlags } from '../../context/FeatureFlagContext';
 import { contentContainerStyle } from '../../constants/layout';
 import type { OnboardingStackParamList } from '../../navigation/types';
 
@@ -64,6 +65,13 @@ export const StrategySelectionScreen: React.FC = () => {
   const insets = useSafeAreaInsets();
   const nav = useNavigation<Nav>();
   const { session, subscriptionTier, refreshProfile } = useAuth();
+  // A globally-disabled strategy is hidden from selection entirely (feature-flag
+  // layer on top of tier gating).
+  const { isEnabled } = useFeatureFlags();
+  const visibleStrategies = useMemo(
+    () => STRATEGIES.filter((s) => isEnabled(s.key)),
+    [isEnabled],
+  );
   const [selected, setSelected] = useState<string[]>([]);
   const [lockedSheet, setLockedSheet] = useState<StrategyDef | null>(null);
   const [busy, setBusy] = useState(false);
@@ -148,7 +156,7 @@ export const StrategySelectionScreen: React.FC = () => {
         showsVerticalScrollIndicator={false}
       >
         <View style={[contentContainerStyle, { gap: 10 }]}>
-        {STRATEGIES.map((s) => {
+        {visibleStrategies.map((s) => {
           const sel = isSelected(s.key);
           const locked = !sel && limitReached && tier !== 'pro';
           return (

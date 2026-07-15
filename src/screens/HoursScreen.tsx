@@ -79,6 +79,8 @@ import { generateRealEstateReport } from '../services/realEstateReport';
 import { useKeepAwakeWhile } from '../hooks/useKeepAwakeWhile';
 import { KeepAwakeIndicator } from '../components/KeepAwakeIndicator';
 import { useStrategyAccess } from '../hooks/useStrategyAccess';
+import { useFeatureFlag } from '../context/FeatureFlagContext';
+import { VoiceUnavailableNotice } from '../components/VoiceUnavailableNotice';
 import { LockedScreen } from '../components/LockedScreen';
 
 const FUTURE_PLACEHOLDER = 32;
@@ -308,6 +310,8 @@ export const HoursScreen: React.FC = () => {
 
 const HoursScreenInner: React.FC = () => {
   const insets = useSafeAreaInsets();
+  // Global voice kill-switch, independent of the strategy/tier gate above.
+  const voiceFeaturesEnabled = useFeatureFlag('voice_features');
   const { activeBusinessId } = useBusiness();
   const { session, fullName } = useAuth();
   const { year: taxYear } = useYear();
@@ -1236,6 +1240,7 @@ const HoursScreenInner: React.FC = () => {
           { paddingBottom: Math.max(spacing.sm, insets.bottom ? 0 : spacing.sm) },
         ]}
       >
+        {voiceFeaturesEnabled ? (
         <View style={styles.voiceStrip}>
           <TouchableOpacity
             activeOpacity={0.85}
@@ -1301,6 +1306,9 @@ const HoursScreenInner: React.FC = () => {
             color={recording ? '#E0352B' : colors.mutedText}
           />
         </View>
+        ) : (
+          <VoiceUnavailableNotice />
+        )}
       </View>
 
       <PropertyPickerModal

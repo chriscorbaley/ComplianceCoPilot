@@ -13,12 +13,23 @@ import { useNavigation } from '@react-navigation/native';
 import type { NativeStackNavigationProp } from '@react-navigation/native-stack';
 import { colors, radius, spacing, typography } from '../theme';
 import { useAuth } from '../auth/AuthContext';
+import { useFeatureFlag } from '../context/FeatureFlagContext';
+import {
+  completeCancellation,
+  fetchDocumentCount,
+  formatDeletionDate,
+} from '../services/cancellation';
+import { requireUserId } from '../services/supabase';
 import type { RootStackParamList } from '../navigation/types';
 
 export const SettingsScreen: React.FC = () => {
   const navigation = useNavigation<NativeStackNavigationProp<RootStackParamList>>();
-  const { session, signOut } = useAuth();
+  const { session, signOut, refreshProfile } = useAuth();
   const [busy, setBusy] = useState(false);
+  const [cancelling, setCancelling] = useState(false);
+  // When the double-signature flow is turned off firm-wide, cancellation uses a
+  // simple confirmation dialog instead. (Tier/subscription behavior unchanged.)
+  const signatureFlowEnabled = useFeatureFlag('cancellation_signature');
 
   const confirmLogout = () => {
     Alert.alert('Log out', 'Are you sure you want to log out?', [
@@ -41,6 +52,51 @@ export const SettingsScreen: React.FC = () => {
         },
       },
     ]);
+  };
+
+  // Simple-confirmation cancellation used when the signature flow flag is off.
+  const runSimpleCancellation = async () => {
+    setCancelling(true);
+    try {
+      const uid = await requireUserId();
+      const documentCount = await fetchDocumentCount(uid).catch(() => 0);
+      const result = await completeCancellation({ documentCount });
+      try {
+        await refreshProfile();
+      } catch {
+        // non-fatal; Dashboard refreshes on focus anyway
+      }
+      navigation.replace('CancelSuccess', {
+        deletionDate: formatDeletionDate(new Date(result.deletionScheduledFor)),
+        emailSent: result.emailSent,
+      });
+    } catch (err) {
+      Alert.alert(
+        'Cancellation failed',
+        err instanceof Error ? err.message : String(err),
+      );
+    } finally {
+      setCancelling(false);
+    }
+  };
+
+  const onCancelPress = () => {
+    if (signatureFlowEnabled) {
+      navigation.navigate('CancelWarning1');
+      return;
+    }
+    Alert.alert(
+      'Cancel Subscription',
+      'This cancels your subscription and schedules your documents for deletion in 30 days. This cannot be undone. Continue?',
+      [
+        { text: 'Keep Subscription', style: 'cancel' },
+        {
+          text: 'Cancel Subscription',
+          style: 'destructive',
+          onPress: () => void runSimpleCancellation(),
+        },
+      ],
+    );
   };
 
   return (
@@ -99,11 +155,18 @@ export const SettingsScreen: React.FC = () => {
           <Text style={styles.dangerLabel}>Subscription</Text>
           <TouchableOpacity
             activeOpacity={0.85}
-            onPress={() => navigation.navigate('CancelWarning1')}
-            style={styles.cancelSubBtn}
+            onPress={onCancelPress}
+            disabled={cancelling}
+            style={[styles.cancelSubBtn, cancelling && styles.logoutBtnDim]}
           >
-            <Ionicons name="close-circle-outline" size={18} color="#A32D2D" />
-            <Text style={styles.cancelSubText}>Cancel Subscription</Text>
+            {cancelling ? (
+              <ActivityIndicator color="#A32D2D" />
+            ) : (
+              <>
+                <Ionicons name="close-circle-outline" size={18} color="#A32D2D" />
+                <Text style={styles.cancelSubText}>Cancel Subscription</Text>
+              </>
+            )}
           </TouchableOpacity>
         </View>
       </ScrollView>

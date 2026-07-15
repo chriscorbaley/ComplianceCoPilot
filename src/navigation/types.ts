@@ -145,6 +145,7 @@ export type AdminTabName =
   | 'IRC'
   | 'Strategies'
   | 'Pricing'
+  | 'Flags'
   | 'Announce'
   | 'Inbox'
   | 'Legal';

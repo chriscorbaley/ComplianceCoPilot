@@ -15,6 +15,7 @@ import { BusinessTravelScreen } from '../screens/BusinessTravelScreen';
 import { MileageScreen } from '../screens/MileageScreen';
 import { MinutesScreen } from '../screens/MinutesScreen';
 import { DocsScreen } from '../screens/DocsScreen';
+import { useFeatureFlag } from '../context/FeatureFlagContext';
 import type { TabParamList } from './types';
 
 const Tab = createBottomTabNavigator<TabParamList>();
@@ -39,6 +40,10 @@ const iconFor = (route: keyof TabParamList, focused: boolean): IconName => {
 };
 
 export const BottomTabs: React.FC = () => {
+  // Feature flags fully remove a tab from navigation when the feature is off.
+  // (Tier gating still applies inside each screen when the flag is on.)
+  const businessTravelEnabled = useFeatureFlag('business_travel');
+  const mileageEnabled = useFeatureFlag('mileage_tracker');
   return (
     <Tab.Navigator
       screenOptions={({ route }) => ({
@@ -59,12 +64,14 @@ export const BottomTabs: React.FC = () => {
     >
       <Tab.Screen name="Dashboard" component={DashboardScreen} />
       <Tab.Screen name="Hours" component={HoursScreen} />
-      <Tab.Screen
-        name="Trips"
-        component={BusinessTravelScreen}
-        options={{ tabBarLabel: 'Trips' }}
-      />
-      <Tab.Screen name="Mileage" component={MileageScreen} />
+      {businessTravelEnabled && (
+        <Tab.Screen
+          name="Trips"
+          component={BusinessTravelScreen}
+          options={{ tabBarLabel: 'Trips' }}
+        />
+      )}
+      {mileageEnabled && <Tab.Screen name="Mileage" component={MileageScreen} />}
       <Tab.Screen name="Minutes" component={MinutesScreen} />
       <Tab.Screen name="Docs" component={DocsScreen} />
     </Tab.Navigator>

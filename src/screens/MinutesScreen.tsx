@@ -53,6 +53,8 @@ import { useBusiness } from '../business/BusinessContext';
 import { useKeepAwakeWhile } from '../hooks/useKeepAwakeWhile';
 import { KeepAwakeIndicator } from '../components/KeepAwakeIndicator';
 import { useStrategyAccess } from '../hooks/useStrategyAccess';
+import { useFeatureFlag } from '../context/FeatureFlagContext';
+import { VoiceUnavailableNotice } from '../components/VoiceUnavailableNotice';
 import { LockedScreen } from '../components/LockedScreen';
 
 const TYPE_ON_MS_PER_CHAR = 30;
@@ -183,6 +185,9 @@ const MinutesScreenInner: React.FC = () => {
   const navigation = useNavigation<NativeStackNavigationProp<RootStackParamList>>();
   const { activeBusinessId } = useBusiness();
   const { year: taxYear, startIso, endIso } = useYear();
+  // Global voice kill-switch. When off, the recording control is replaced with
+  // a graceful "unavailable" notice (the whole feature is still Pro-gated above).
+  const voiceFeaturesEnabled = useFeatureFlag('voice_features');
 
   const [meetingType, setMeetingType] = useState<MeetingType>(MEETING_TYPES[0]);
   const [dropdownOpen, setDropdownOpen] = useState(false);
@@ -866,6 +871,7 @@ const MinutesScreenInner: React.FC = () => {
             </View>
           ) : null}
 
+          {voiceFeaturesEnabled ? (
           <View style={styles.micRow}>
             <TouchableOpacity
               activeOpacity={0.85}
@@ -911,6 +917,9 @@ const MinutesScreenInner: React.FC = () => {
             </Text>
             <KeepAwakeIndicator visible={sessionActive} style={styles.keepAwakeBadge} />
           </View>
+          ) : (
+            <VoiceUnavailableNotice style={styles.micRow} />
+          )}
         </Card>
 
         <Text style={styles.usageNote}>
