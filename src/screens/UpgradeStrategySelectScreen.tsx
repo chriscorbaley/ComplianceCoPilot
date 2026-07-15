@@ -31,6 +31,7 @@ import { colors } from '../theme';
 import { supabase } from '../services/supabase';
 import { useAuth } from '../auth/AuthContext';
 import { useFeatureFlags } from '../context/FeatureFlagContext';
+import { useAppContent } from '../services/appContent';
 import type { RootStackParamList } from '../navigation/types';
 
 type Nav = NativeStackNavigationProp<RootStackParamList, 'UpgradeStrategySelect'>;
@@ -39,17 +40,22 @@ type Route = NativeStackScreenProps<RootStackParamList, 'UpgradeStrategySelect'>
 interface StrategyDef {
   key: string;
   name: string;
+  // app_content key for the editable description; `description` is the shipped
+  // fallback rendered until the DB value loads (or if the fetch fails).
+  descKey: string;
   description: string;
 }
 
 // Same user-selectable catalog as onboarding (Business Travel is auto-added and
-// therefore not in this list).
+// therefore not in this list). These blurbs are a separate, independently
+// editable set from the onboarding descriptions (see app_content
+// upgrade_strategy_desc_*).
 const STRATEGIES: StrategyDef[] = [
-  { key: 'real_estate', name: 'Real Estate / REPS', description: 'Material Participation hours for short-term rental tracking, and or Real Estate Professional status.' },
-  { key: 'augusta_rule', name: 'Augusta Rule', description: '14-day tax-free rental of your home to your business (IRC §280A(g)).' },
-  { key: 's_corp', name: 'S-Corp', description: 'Your S-Corp compliance, organized and export-ready — templates, records, and documents in one place.' },
-  { key: 'home_office', name: 'Home Office', description: 'Exclusive-use attestation and home-office deduction tracking (IRC §280A).' },
-  { key: 'family_management', name: 'Family Management Company', description: 'Track the documents and activity that keep your family management company strategy working.' },
+  { key: 'real_estate', name: 'Real Estate / REPS', descKey: 'upgrade_strategy_desc_real_estate', description: 'Material Participation hours for short-term rental tracking, and or Real Estate Professional status.' },
+  { key: 'augusta_rule', name: 'Augusta Rule', descKey: 'upgrade_strategy_desc_augusta_rule', description: '14-day tax-free rental of your home to your business (IRC §280A(g)).' },
+  { key: 's_corp', name: 'S-Corp', descKey: 'upgrade_strategy_desc_s_corp', description: 'Your S-Corp compliance, organized and export-ready — templates, records, and documents in one place.' },
+  { key: 'home_office', name: 'Home Office', descKey: 'upgrade_strategy_desc_home_office', description: 'Exclusive-use attestation and home-office deduction tracking (IRC §280A).' },
+  { key: 'family_management', name: 'Family Management Company', descKey: 'upgrade_strategy_desc_family_management', description: 'Track the documents and activity that keep your family management company strategy working.' },
 ];
 
 const TIER_LABEL: Record<'core' | 'pro', string> = { core: 'Core', pro: 'Pro' };
@@ -62,6 +68,8 @@ export const UpgradeStrategySelectScreen: React.FC = () => {
   const { session, activeStrategies, refreshProfile } = useAuth();
   // Globally-disabled strategies are hidden from the upgrade picker too.
   const { isEnabled } = useFeatureFlags();
+  // Editable strategy descriptions (Admin → Content, "Upgrade Strategy Picker").
+  const content = useAppContent();
   const visibleStrategies = useMemo(
     () => STRATEGIES.filter((s) => isEnabled(s.key)),
     [isEnabled],
@@ -193,7 +201,7 @@ export const UpgradeStrategySelectScreen: React.FC = () => {
                   {s.name}
                 </Text>
                 <Text style={[styles.cardDesc, locked && styles.cardDescDim]}>
-                  {s.description}
+                  {content.get(s.descKey, s.description)}
                 </Text>
                 {isOwned ? <Text style={styles.ownedLabel}>Already active</Text> : null}
                 {locked ? <Text style={styles.upgradeHint}>Upgrade limit reached</Text> : null}

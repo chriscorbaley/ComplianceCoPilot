@@ -6,10 +6,14 @@ import type { NativeStackNavigationProp } from '@react-navigation/native-stack';
 import { Ionicons } from '@expo/vector-icons';
 import { colors } from '../../theme';
 import {
+  MILEAGE_CONTENT_KEYS,
+  MILEAGE_FEATURE_KEYS,
   MILEAGE_FEATURES,
+  MILEAGE_STAT_KEYS,
   MILEAGE_STATS,
 } from '../../components/MileageLockedScreen';
 import { usePricingPlans, formatPrice } from '../../services/pricingPlans';
+import { useAppContent } from '../../services/appContent';
 import type { OnboardingStackParamList } from '../../navigation/types';
 import { contentContainerStyle } from '../../constants/layout';
 
@@ -22,6 +26,7 @@ export const MileageIntroScreen: React.FC = () => {
   const insets = useSafeAreaInsets();
   const nav = useNavigation<Nav>();
   const { byKey } = usePricingPlans();
+  const content = useAppContent();
 
   return (
     <View style={styles.root}>
@@ -32,30 +37,32 @@ export const MileageIntroScreen: React.FC = () => {
         <View style={contentContainerStyle}>
         <View style={[styles.hero, { paddingTop: insets.top + 28 }]}>
           <Ionicons name="speedometer" size={48} color={colors.amber} style={styles.icon} />
-          <Text style={styles.title}>Track Every Mile, Maximize Every Deduction</Text>
+          <Text style={styles.title}>{content.get(MILEAGE_CONTENT_KEYS.title, 'Track Every Mile, Maximize Every Deduction')}</Text>
           <Text style={styles.subtitle}>
-            The IRS allows substantial deductions for business and medical miles
-            driven. Most business owners leave this money on the table.
+            {content.get(
+              MILEAGE_CONTENT_KEYS.subtitle,
+              'The IRS allows substantial deductions for business and medical miles driven. Most business owners leave this money on the table.',
+            )}
           </Text>
 
           <View style={styles.statsRow}>
-            {MILEAGE_STATS.map((s) => (
-              <View key={s.value} style={styles.statCard}>
-                <Text style={styles.statValue}>{s.value}</Text>
-                <Text style={styles.statLabel}>{s.label}</Text>
+            {MILEAGE_STATS.map((s, i) => (
+              <View key={MILEAGE_STAT_KEYS[i]?.valueKey ?? s.value} style={styles.statCard}>
+                <Text style={styles.statValue}>{content.get(MILEAGE_STAT_KEYS[i]?.valueKey ?? '', s.value)}</Text>
+                <Text style={styles.statLabel}>{content.get(MILEAGE_STAT_KEYS[i]?.labelKey ?? '', s.label)}</Text>
               </View>
             ))}
           </View>
         </View>
 
         <View style={styles.card}>
-          <Text style={styles.cardTitle}>What Pro members get</Text>
-          {MILEAGE_FEATURES.map((f) => (
-            <View key={f.title} style={styles.featureRow}>
+          <Text style={styles.cardTitle}>{content.get(MILEAGE_CONTENT_KEYS.cardTitle, 'What Pro members get')}</Text>
+          {MILEAGE_FEATURES.map((f, i) => (
+            <View key={MILEAGE_FEATURE_KEYS[i]?.titleKey ?? f.title} style={styles.featureRow}>
               <Ionicons name="checkmark-circle" size={20} color={colors.teal} />
               <View style={styles.featureText}>
-                <Text style={styles.featureTitle}>{f.title}</Text>
-                <Text style={styles.featureSub}>{f.sub}</Text>
+                <Text style={styles.featureTitle}>{content.get(MILEAGE_FEATURE_KEYS[i]?.titleKey ?? '', f.title)}</Text>
+                <Text style={styles.featureSub}>{content.get(MILEAGE_FEATURE_KEYS[i]?.subKey ?? '', f.sub)}</Text>
               </View>
             </View>
           ))}

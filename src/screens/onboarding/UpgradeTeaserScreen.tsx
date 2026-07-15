@@ -7,31 +7,54 @@ import { Ionicons } from '@expo/vector-icons';
 import { colors } from '../../theme';
 import { useAuth } from '../../auth/AuthContext';
 import { usePricingPlans, formatPrice } from '../../services/pricingPlans';
+import { useAppContent } from '../../services/appContent';
 import { contentContainerStyle } from '../../constants/layout';
 import type { OnboardingStackParamList } from '../../navigation/types';
 import type { SubscriptionTier } from '../../services/supabase';
 
 type Nav = NativeStackNavigationProp<OnboardingStackParamList, 'UpgradeTeaser'>;
 
+// Copy is editable from Admin → Content. The `*Key` fields point at app_content
+// rows; the sibling strings are the shipped fallbacks rendered until the DB
+// values load (or if the fetch fails).
+interface TeaserFeature {
+  key: string;
+  fallback: string;
+}
+
 interface TeaserContent {
+  headlineKey: string;
   headline: string;
+  subheadKey: string;
   subhead: string;
-  lockedFeatures: string[];
+  lockedFeatures: TeaserFeature[];
   // Tier being upsold (its display_name + price come from pricing_plans).
   upgradeTarget: SubscriptionTier;
 }
 
 const STARTER_TEASER: TeaserContent = {
+  headlineKey: 'upsell_headline',
   headline: "You're one step away from better compliance coverage",
+  subheadKey: 'upsell_body_starter',
   subhead: 'Core members track 3 strategies and never miss a deadline',
-  lockedFeatures: ['Additional strategies', 'Strategy progress dashboard', 'Priority support'],
+  lockedFeatures: [
+    { key: 'upsell_starter_feature1', fallback: 'Additional strategies' },
+    { key: 'upsell_starter_feature2', fallback: 'Strategy progress dashboard' },
+    { key: 'upsell_starter_feature3', fallback: 'Priority support' },
+  ],
   upgradeTarget: 'core',
 };
 
 const CORE_TEASER: TeaserContent = {
+  headlineKey: 'upsell_headline',
   headline: "You're one step away from better compliance coverage",
+  subheadKey: 'upsell_body_core',
   subhead: 'Pro members track every strategy with the full audit trail',
-  lockedFeatures: ['All tax strategies', 'AI voice meeting minutes', 'Complete audit trail'],
+  lockedFeatures: [
+    { key: 'upsell_core_feature1', fallback: 'All tax strategies' },
+    { key: 'upsell_core_feature2', fallback: 'AI voice meeting minutes' },
+    { key: 'upsell_core_feature3', fallback: 'Complete audit trail' },
+  ],
   upgradeTarget: 'pro',
 };
 
@@ -40,6 +63,7 @@ export const UpgradeTeaserScreen: React.FC = () => {
   const nav = useNavigation<Nav>();
   const { subscriptionTier } = useAuth();
   const { byKey } = usePricingPlans();
+  const appContent = useAppContent();
 
   // Defensive: Pro shouldn't see this; skip straight to the Business Travel
   // value screen (which then continues to payment).
@@ -69,14 +93,14 @@ export const UpgradeTeaserScreen: React.FC = () => {
 
       <View style={styles.body}>
         <View style={[contentContainerStyle, { gap: 12 }]}>
-        <Text style={styles.headline}>{content.headline}</Text>
-        <Text style={styles.subhead}>{content.subhead}</Text>
+        <Text style={styles.headline}>{appContent.get(content.headlineKey, content.headline)}</Text>
+        <Text style={styles.subhead}>{appContent.get(content.subheadKey, content.subhead)}</Text>
 
         <View style={styles.featureBox}>
           {content.lockedFeatures.map((f) => (
-            <View key={f} style={styles.featureRow}>
+            <View key={f.key} style={styles.featureRow}>
               <Ionicons name="lock-closed" size={16} color="#BA7517" />
-              <Text style={styles.featureText}>{f}</Text>
+              <Text style={styles.featureText}>{appContent.get(f.key, f.fallback)}</Text>
             </View>
           ))}
         </View>

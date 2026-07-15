@@ -7,6 +7,7 @@ import { Ionicons } from '@expo/vector-icons';
 import { colors } from '../theme';
 import { scaled } from '../constants/layout';
 import { usePricingPlans, formatPrice } from '../services/pricingPlans';
+import { useAppContent } from '../services/appContent';
 import type { RootStackParamList } from '../navigation/types';
 
 // Shared marketing copy for the Mileage upsell — reused by the in-app locked
@@ -57,12 +58,39 @@ export const MILEAGE_FEATURES: MileageFeature[] = [
   },
 ];
 
+// app_content keys for the mileage marketing copy, shared by BOTH surfaces that
+// render it — this in-app locked screen and the onboarding Mileage intro — so
+// an Admin edit updates both places consistently. The MILEAGE_STATS /
+// MILEAGE_FEATURES constants above remain the shipped fallbacks (paired by
+// index with these keys).
+export const MILEAGE_CONTENT_KEYS = {
+  title: 'mileage_intro_title',
+  subtitle: 'mileage_intro_subtitle',
+  cardTitle: 'mileage_intro_card_title',
+} as const;
+
+export const MILEAGE_STAT_KEYS = [
+  { valueKey: 'mileage_intro_stat1_value', labelKey: 'mileage_intro_stat1_label' },
+  { valueKey: 'mileage_intro_stat2_value', labelKey: 'mileage_intro_stat2_label' },
+  { valueKey: 'mileage_intro_stat3_value', labelKey: 'mileage_intro_stat3_label' },
+];
+
+export const MILEAGE_FEATURE_KEYS = [
+  { titleKey: 'mileage_intro_feature1_title', subKey: 'mileage_intro_feature1_sub' },
+  { titleKey: 'mileage_intro_feature2_title', subKey: 'mileage_intro_feature2_sub' },
+  { titleKey: 'mileage_intro_feature3_title', subKey: 'mileage_intro_feature3_sub' },
+  { titleKey: 'mileage_intro_feature4_title', subKey: 'mileage_intro_feature4_sub' },
+  { titleKey: 'mileage_intro_feature5_title', subKey: 'mileage_intro_feature5_sub' },
+  { titleKey: 'mileage_intro_feature6_title', subKey: 'mileage_intro_feature6_sub' },
+];
+
 // Locked teaser shown on the Mileage tab for Basic and Core subscribers.
 // Mileage tracking is a Pro-only feature.
 export const MileageLockedScreen: React.FC = () => {
   const insets = useSafeAreaInsets();
   const navigation = useNavigation<NativeStackNavigationProp<RootStackParamList>>();
   const { byKey } = usePricingPlans();
+  const content = useAppContent();
 
   return (
     <View style={styles.root}>
@@ -72,30 +100,32 @@ export const MileageLockedScreen: React.FC = () => {
       >
         <View style={[styles.hero, { paddingTop: insets.top + 32 }]}>
           <Ionicons name="speedometer" size={48} color={colors.amber} />
-          <Text style={styles.title}>Track Every Mile, Maximize Every Deduction</Text>
+          <Text style={styles.title}>{content.get(MILEAGE_CONTENT_KEYS.title, 'Track Every Mile, Maximize Every Deduction')}</Text>
           <Text style={styles.subtitle}>
-            The IRS allows substantial deductions for business and medical miles
-            driven. Most business owners leave this money on the table.
+            {content.get(
+              MILEAGE_CONTENT_KEYS.subtitle,
+              'The IRS allows substantial deductions for business and medical miles driven. Most business owners leave this money on the table.',
+            )}
           </Text>
 
           <View style={styles.statsRow}>
-            {MILEAGE_STATS.map((s) => (
-              <View key={s.value} style={styles.statCard}>
-                <Text style={styles.statValue}>{s.value}</Text>
-                <Text style={styles.statLabel}>{s.label}</Text>
+            {MILEAGE_STATS.map((s, i) => (
+              <View key={MILEAGE_STAT_KEYS[i]?.valueKey ?? s.value} style={styles.statCard}>
+                <Text style={styles.statValue}>{content.get(MILEAGE_STAT_KEYS[i]?.valueKey ?? '', s.value)}</Text>
+                <Text style={styles.statLabel}>{content.get(MILEAGE_STAT_KEYS[i]?.labelKey ?? '', s.label)}</Text>
               </View>
             ))}
           </View>
         </View>
 
         <View style={styles.card}>
-          <Text style={styles.cardTitle}>What Pro members get</Text>
-          {MILEAGE_FEATURES.map((f) => (
-            <View key={f.title} style={styles.featureRow}>
+          <Text style={styles.cardTitle}>{content.get(MILEAGE_CONTENT_KEYS.cardTitle, 'What Pro members get')}</Text>
+          {MILEAGE_FEATURES.map((f, i) => (
+            <View key={MILEAGE_FEATURE_KEYS[i]?.titleKey ?? f.title} style={styles.featureRow}>
               <Ionicons name="checkmark-circle" size={20} color={colors.teal} />
               <View style={styles.featureText}>
-                <Text style={styles.featureTitle}>{f.title}</Text>
-                <Text style={styles.featureSub}>{f.sub}</Text>
+                <Text style={styles.featureTitle}>{content.get(MILEAGE_FEATURE_KEYS[i]?.titleKey ?? '', f.title)}</Text>
+                <Text style={styles.featureSub}>{content.get(MILEAGE_FEATURE_KEYS[i]?.subKey ?? '', f.sub)}</Text>
               </View>
             </View>
           ))}

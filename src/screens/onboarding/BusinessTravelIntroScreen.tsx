@@ -7,50 +7,70 @@ import { Ionicons } from '@expo/vector-icons';
 import { colors } from '../../theme';
 import { useAuth } from '../../auth/AuthContext';
 import { usePricingPlans, formatPrice } from '../../services/pricingPlans';
+import { useAppContent } from '../../services/appContent';
 import type { OnboardingStackParamList } from '../../navigation/types';
 import { contentContainerStyle } from '../../constants/layout';
 
 type Nav = NativeStackNavigationProp<OnboardingStackParamList, 'BusinessTravelIntro'>;
 
+// Copy is editable from Admin → Content. Each `*Key` points at an app_content
+// row; the sibling strings are the shipped fallbacks rendered until the DB
+// values load (or if the fetch fails).
 interface StatDef {
+  valueKey: string;
   value: string;
+  labelKey: string;
   label: string;
 }
 
 const STATS: StatDef[] = [
-  { value: '$3,500+', label: 'Average tax savings per business trip' },
-  { value: '100%', label: 'Of airfare may be deductible on qualifying trips' },
-  { value: '2 IRS Rule Sets', label: 'Domestic and international compliance handled automatically' },
+  { valueKey: 'bt_intro_stat1_value', value: '$3,500+', labelKey: 'bt_intro_stat1_label', label: 'Average tax savings per business trip' },
+  { valueKey: 'bt_intro_stat2_value', value: '100%', labelKey: 'bt_intro_stat2_label', label: 'Of airfare may be deductible on qualifying trips' },
+  { valueKey: 'bt_intro_stat3_value', value: '2 IRS Rule Sets', labelKey: 'bt_intro_stat3_label', label: 'Domestic and international compliance handled automatically' },
 ];
 
 interface FeatureDef {
+  titleKey: string;
   title: string;
+  subKey: string;
   sub: string;
 }
 
 const FEATURES: FeatureDef[] = [
   {
+    titleKey: 'bt_intro_feature1_title',
     title: 'AI Itinerary Analyzer',
+    subKey: 'bt_intro_feature1_sub',
     sub: 'Speak your trip — get an instant deductibility verdict before you even book',
   },
   {
+    titleKey: 'bt_intro_feature2_title',
     title: 'Domestic Travel (IRC §162)',
+    subKey: 'bt_intro_feature2_sub',
     sub: 'Primary purpose test applied automatically — know your deduction before you travel',
   },
   {
+    titleKey: 'bt_intro_feature3_title',
     title: 'International Travel (IRC §274(c))',
+    subKey: 'bt_intro_feature3_sub',
     sub: '7-day rule, 25% personal threshold, and allocation formula calculated for you',
   },
   {
+    titleKey: 'bt_intro_feature4_title',
     title: 'Log This Trip',
+    subKey: 'bt_intro_feature4_sub',
     sub: 'AI analysis results pre-fill your trip log — one tap to save a compliant record',
   },
   {
+    titleKey: 'bt_intro_feature5_title',
     title: 'Draft Future Trips',
+    subKey: 'bt_intro_feature5_sub',
     sub: 'Plan upcoming travel and finalize records after you return',
   },
   {
+    titleKey: 'bt_intro_feature6_title',
     title: 'Exportable Reports',
+    subKey: 'bt_intro_feature6_sub',
     sub: 'Send a complete trip compliance report to your tax advisor in seconds',
   },
 ];
@@ -62,6 +82,7 @@ export const BusinessTravelIntroScreen: React.FC = () => {
   const nav = useNavigation<Nav>();
   const { subscriptionTier } = useAuth();
   const { byKey } = usePricingPlans();
+  const content = useAppContent();
   const tier = subscriptionTier ?? 'starter';
   const isBasic = tier === 'starter';
   const tierName = byKey[tier].display_name;
@@ -75,30 +96,32 @@ export const BusinessTravelIntroScreen: React.FC = () => {
         <View style={contentContainerStyle}>
         <View style={[styles.hero, { paddingTop: insets.top + 28 }]}>
           <Ionicons name="airplane" size={48} color={colors.amber} style={styles.planeIcon} />
-          <Text style={styles.title}>Don't Leave Money on the Table</Text>
+          <Text style={styles.title}>{content.get('bt_intro_title', "Don't Leave Money on the Table")}</Text>
           <Text style={styles.subtitle}>
-            Business travel is one of the most overlooked tax deductions for
-            business owners
+            {content.get(
+              'bt_intro_subtitle',
+              'Business travel is one of the most overlooked tax deductions for business owners',
+            )}
           </Text>
 
           <View style={styles.statsRow}>
             {STATS.map((s) => (
-              <View key={s.value} style={styles.statCard}>
-                <Text style={styles.statValue}>{s.value}</Text>
-                <Text style={styles.statLabel}>{s.label}</Text>
+              <View key={s.valueKey} style={styles.statCard}>
+                <Text style={styles.statValue}>{content.get(s.valueKey, s.value)}</Text>
+                <Text style={styles.statLabel}>{content.get(s.labelKey, s.label)}</Text>
               </View>
             ))}
           </View>
         </View>
 
         <View style={styles.card}>
-          <Text style={styles.cardTitle}>What Core and Pro members get</Text>
+          <Text style={styles.cardTitle}>{content.get('bt_intro_card_title', 'What Core and Pro members get')}</Text>
           {FEATURES.map((f) => (
-            <View key={f.title} style={styles.featureRow}>
+            <View key={f.titleKey} style={styles.featureRow}>
               <Ionicons name="checkmark-circle" size={20} color={colors.teal} />
               <View style={styles.featureText}>
-                <Text style={styles.featureTitle}>{f.title}</Text>
-                <Text style={styles.featureSub}>{f.sub}</Text>
+                <Text style={styles.featureTitle}>{content.get(f.titleKey, f.title)}</Text>
+                <Text style={styles.featureSub}>{content.get(f.subKey, f.sub)}</Text>
               </View>
             </View>
           ))}

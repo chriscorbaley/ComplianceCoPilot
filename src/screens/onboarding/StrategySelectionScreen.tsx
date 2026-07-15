@@ -18,6 +18,7 @@ import { colors } from '../../theme';
 import { supabase, type SubscriptionTier } from '../../services/supabase';
 import { useAuth } from '../../auth/AuthContext';
 import { useFeatureFlags } from '../../context/FeatureFlagContext';
+import { useAppContent } from '../../services/appContent';
 import { contentContainerStyle } from '../../constants/layout';
 import type { OnboardingStackParamList } from '../../navigation/types';
 
@@ -26,6 +27,9 @@ type Nav = NativeStackNavigationProp<OnboardingStackParamList, 'StrategySelectio
 interface StrategyDef {
   key: string;
   name: string;
+  // app_content key for the editable description; `description` is the shipped
+  // fallback rendered until the DB value loads (or if the fetch fails).
+  descKey: string;
   description: string;
 }
 
@@ -33,11 +37,11 @@ interface StrategyDef {
 // automatically for Core and Pro subscribers on onboarding completion (see
 // onFinish), and is locked behind an upgrade screen for Basic.
 const STRATEGIES: StrategyDef[] = [
-  { key: 'real_estate',       name: 'Real Estate / REPS',        description: 'Material Participation hours for short-term rental tracking, and or Real Estate Professional status.' },
-  { key: 'augusta_rule',      name: 'Augusta Rule',              description: '14-day tax-free rental of your home to your business (IRC §280A(g)).' },
-  { key: 's_corp',            name: 'S-Corp',                    description: 'Your S-Corp compliance, organized and export-ready. Templates, records, and documents — all in one place when your CPA needs them.' },
-  { key: 'home_office',       name: 'Home Office',               description: 'Exclusive-use attestation and home-office deduction tracking (IRC §280A).' },
-  { key: 'family_management', name: 'Family Management Company', description: 'Turn your family into a tax-efficient team. Track the documents and activity that keep your family management company strategy working.' },
+  { key: 'real_estate',       name: 'Real Estate / REPS',        descKey: 'strategy_desc_real_estate',       description: 'Material Participation hours for short-term rental tracking, and or Real Estate Professional status.' },
+  { key: 'augusta_rule',      name: 'Augusta Rule',              descKey: 'strategy_desc_augusta_rule',      description: '14-day tax-free rental of your home to your business (IRC §280A(g)).' },
+  { key: 's_corp',            name: 'S-Corp',                    descKey: 'strategy_desc_s_corp',            description: 'Your S-Corp compliance, organized and export-ready. Templates, records, and documents — all in one place when your CPA needs them.' },
+  { key: 'home_office',       name: 'Home Office',               descKey: 'strategy_desc_home_office',       description: 'Exclusive-use attestation and home-office deduction tracking (IRC §280A).' },
+  { key: 'family_management', name: 'Family Management Company', descKey: 'strategy_desc_family_management', description: 'Turn your family into a tax-efficient team. Track the documents and activity that keep your family management company strategy working.' },
 ];
 
 // Core and Pro subscribers get Business Travel compliance for free. Append it to
@@ -68,6 +72,9 @@ export const StrategySelectionScreen: React.FC = () => {
   // A globally-disabled strategy is hidden from selection entirely (feature-flag
   // layer on top of tier gating).
   const { isEnabled } = useFeatureFlags();
+  // Editable strategy descriptions (Admin → Content). Falls back to the shipped
+  // text below until the DB value loads.
+  const content = useAppContent();
   const visibleStrategies = useMemo(
     () => STRATEGIES.filter((s) => isEnabled(s.key)),
     [isEnabled],
@@ -175,7 +182,7 @@ export const StrategySelectionScreen: React.FC = () => {
                   {s.name}
                 </Text>
                 <Text style={[styles.cardDesc, locked && styles.cardDescDim]}>
-                  {s.description}
+                  {content.get(s.descKey, s.description)}
                 </Text>
                 {locked ? <Text style={styles.upgradeHint}>Upgrade to unlock</Text> : null}
               </View>
@@ -226,7 +233,9 @@ export const StrategySelectionScreen: React.FC = () => {
                   </View>
                   <Text style={styles.sheetTitle}>{lockedSheet.name}</Text>
                 </View>
-                <Text style={styles.sheetDesc}>{lockedSheet.description}</Text>
+                <Text style={styles.sheetDesc}>
+                  {content.get(lockedSheet.descKey, lockedSheet.description)}
+                </Text>
                 {tier !== 'pro' ? (
                   <Text style={styles.sheetRequires}>
                     This strategy requires {TIER_REQUIRED_FOR_MORE[tier]}.
