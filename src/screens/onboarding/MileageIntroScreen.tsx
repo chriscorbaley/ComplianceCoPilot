@@ -9,6 +9,7 @@ import {
   MILEAGE_FEATURES,
   MILEAGE_STATS,
 } from '../../components/MileageLockedScreen';
+import { usePricingPlans, formatPrice } from '../../services/pricingPlans';
 import type { OnboardingStackParamList } from '../../navigation/types';
 import { contentContainerStyle } from '../../constants/layout';
 
@@ -20,6 +21,7 @@ type Nav = NativeStackNavigationProp<OnboardingStackParamList, 'MileageIntro'>;
 export const MileageIntroScreen: React.FC = () => {
   const insets = useSafeAreaInsets();
   const nav = useNavigation<Nav>();
+  const { byKey } = usePricingPlans();
 
   return (
     <View style={styles.root}>
@@ -68,14 +70,16 @@ export const MileageIntroScreen: React.FC = () => {
             style={[styles.cta, styles.ctaGold]}
             onPress={() => nav.replace('ChoosePlan', { highlight: 'pro' })}
           >
-            <Text style={styles.ctaText}>Upgrade to Pro — $199/mo</Text>
+            <Text style={styles.ctaText}>
+              Upgrade to {byKey.pro.display_name} — {formatPrice(byKey.pro.monthly_price)}/mo
+            </Text>
           </TouchableOpacity>
           <TouchableOpacity
             activeOpacity={0.85}
             style={[styles.cta, styles.ctaOutline]}
             onPress={() => nav.replace('Payment')}
           >
-            <Text style={styles.ctaOutlineText}>Continue with Core</Text>
+            <Text style={styles.ctaOutlineText}>Continue with {byKey.core.display_name}</Text>
           </TouchableOpacity>
         </View>
         </View>

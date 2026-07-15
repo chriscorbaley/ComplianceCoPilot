@@ -18,44 +18,36 @@ import { Ionicons } from '@expo/vector-icons';
 import { colors } from '../../theme';
 import { supabase, type SubscriptionTier } from '../../services/supabase';
 import { useAuth } from '../../auth/AuthContext';
+import { usePricingPlans, formatPrice, type PricingPlan } from '../../services/pricingPlans';
 import type { OnboardingStackParamList, RootStackParamList } from '../../navigation/types';
 import { contentContainerStyle } from '../../constants/layout';
 
 type Nav = NativeStackNavigationProp<OnboardingStackParamList, 'ChoosePlan'>;
 type Route = NativeStackScreenProps<OnboardingStackParamList, 'ChoosePlan'>['route'];
 
-const TIER_PRICES: Record<SubscriptionTier, number> = {
-  starter: 49,
-  core: 99,
-  pro: 199,
-};
-
-interface Feature {
-  text: string;
-}
-
 interface PlanCardProps {
-  tier: SubscriptionTier;
   name: string;
   price: number;
-  features: Feature[];
+  trialDays: number;
+  features: string[];
   highlighted: boolean;
   busy: boolean;
   onSelect: () => void;
 }
 
-const StarterCard: React.FC<Omit<PlanCardProps, 'tier'>> = ({ name, price, features, highlighted, busy, onSelect }) => (
+const StarterCard: React.FC<PlanCardProps> = ({ name, price, trialDays, features, highlighted, busy, onSelect }) => (
   <View style={[styles.cardWhite, highlighted && styles.cardHighlighted]}>
     <Text style={styles.planNameNavy}>{name}</Text>
     <View style={styles.priceRow}>
-      <Text style={styles.priceLargeNavy}>${price}</Text>
+      <Text style={styles.priceLargeNavy}>{formatPrice(price)}</Text>
       <Text style={styles.priceMuted}>/month</Text>
     </View>
+    <Text style={styles.trialLine}>{trialDays}-day free trial</Text>
     <View style={styles.divider} />
     {features.map((f, i) => (
       <View key={i} style={styles.featureRow}>
         <Ionicons name="checkmark-circle" size={16} color={colors.teal} />
-        <Text style={styles.featureText}>{f.text}</Text>
+        <Text style={styles.featureText}>{f}</Text>
       </View>
     ))}
     <TouchableOpacity activeOpacity={0.85} disabled={busy} onPress={onSelect} style={styles.selectBtnOutline}>
@@ -64,18 +56,19 @@ const StarterCard: React.FC<Omit<PlanCardProps, 'tier'>> = ({ name, price, featu
   </View>
 );
 
-const CoreCard: React.FC<Omit<PlanCardProps, 'tier'>> = ({ name, price, features, highlighted, busy, onSelect }) => (
+const CoreCard: React.FC<PlanCardProps> = ({ name, price, trialDays, features, highlighted, busy, onSelect }) => (
   <View style={[styles.cardWhite, styles.cardCoreBorder, highlighted && styles.cardHighlighted]}>
     <Text style={styles.planNameNavy}>{name}</Text>
     <View style={styles.priceRow}>
-      <Text style={styles.priceLargeNavy}>${price}</Text>
+      <Text style={styles.priceLargeNavy}>{formatPrice(price)}</Text>
       <Text style={styles.priceMuted}>/month</Text>
     </View>
+    <Text style={styles.trialLine}>{trialDays}-day free trial</Text>
     <View style={styles.divider} />
     {features.map((f, i) => (
       <View key={i} style={styles.featureRow}>
         <Ionicons name="checkmark-circle" size={16} color={colors.teal} />
-        <Text style={styles.featureText}>{f.text}</Text>
+        <Text style={styles.featureText}>{f}</Text>
       </View>
     ))}
     <TouchableOpacity activeOpacity={0.85} disabled={busy} onPress={onSelect} style={styles.selectBtnOutline}>
@@ -84,21 +77,22 @@ const CoreCard: React.FC<Omit<PlanCardProps, 'tier'>> = ({ name, price, features
   </View>
 );
 
-const ProCard: React.FC<Omit<PlanCardProps, 'tier'>> = ({ name, price, features, highlighted, busy, onSelect }) => (
+const ProCard: React.FC<PlanCardProps> = ({ name, price, trialDays, features, highlighted, busy, onSelect }) => (
   <View style={[styles.cardNavy, highlighted && styles.cardNavyHighlighted]}>
     <View style={styles.badge}>
       <Text style={styles.badgeText}>MOST POPULAR</Text>
     </View>
     <Text style={styles.planNameWhite}>{name}</Text>
     <View style={styles.priceRow}>
-      <Text style={styles.priceLargeWhite}>${price}</Text>
+      <Text style={styles.priceLargeWhite}>{formatPrice(price)}</Text>
       <Text style={styles.priceMutedBlue}>/month</Text>
     </View>
+    <Text style={styles.trialLineBlue}>{trialDays}-day free trial</Text>
     <View style={styles.dividerWhite} />
     {features.map((f, i) => (
       <View key={i} style={styles.featureRow}>
         <Ionicons name="checkmark-circle" size={16} color="#BA7517" />
-        <Text style={styles.featureTextWhite}>{f.text}</Text>
+        <Text style={styles.featureTextWhite}>{f}</Text>
       </View>
     ))}
     <TouchableOpacity activeOpacity={0.85} disabled={busy} onPress={onSelect} style={styles.selectBtnGold}>
@@ -107,11 +101,20 @@ const ProCard: React.FC<Omit<PlanCardProps, 'tier'>> = ({ name, price, features,
   </View>
 );
 
+// Map each plan_key to its styled card. plan_key is the stable gating identity;
+// display_name/price/features/trial all come from the database row.
+const CARD_BY_KEY: Record<SubscriptionTier, React.FC<PlanCardProps>> = {
+  starter: StarterCard,
+  core: CoreCard,
+  pro: ProCard,
+};
+
 export const ChoosePlanScreen: React.FC = () => {
   const insets = useSafeAreaInsets();
   const nav = useNavigation<Nav>();
   const route = useRoute<Route>();
   const { session, refreshProfile, onboardingCompleted } = useAuth();
+  const { plans, loading } = usePricingPlans();
   const highlight = route.params?.highlight ?? null;
   const [busyTier, setBusyTier] = useState<SubscriptionTier | null>(null);
   const [codeOpen, setCodeOpen] = useState(false);
@@ -193,52 +196,33 @@ export const ChoosePlanScreen: React.FC = () => {
         <Text style={styles.title}>Choose Your Plan</Text>
         <Text style={styles.subtitle}>Start protecting your compliance today</Text>
 
-        <View style={styles.cards}>
-          <StarterCard
-            name="Basic"
-            price={TIER_PRICES.starter}
-            features={[
-              { text: '1 tax strategy' },
-              { text: 'AI document generator' },
-              { text: 'Strategy-specific compliance checklists' },
-              { text: 'Document storage' },
-            ]}
-            highlighted={highlight === 'starter'}
-            busy={busyTier === 'starter'}
-            onSelect={() => selectPlan('starter')}
-          />
+        {loading ? (
+          <View style={styles.loadingWrap}>
+            <ActivityIndicator color={colors.white} />
+            <Text style={styles.loadingText}>Loading plans…</Text>
+          </View>
+        ) : (
+          <View style={styles.cards}>
+            {plans.map((p: PricingPlan) => {
+              const Card = CARD_BY_KEY[p.plan_key];
+              if (!Card) return null;
+              return (
+                <Card
+                  key={p.plan_key}
+                  name={p.display_name}
+                  price={p.monthly_price}
+                  trialDays={p.trial_days}
+                  features={p.features}
+                  highlighted={highlight === p.plan_key}
+                  busy={busyTier === p.plan_key}
+                  onSelect={() => selectPlan(p.plan_key)}
+                />
+              );
+            })}
+          </View>
+        )}
 
-          <CoreCard
-            name="Core"
-            price={TIER_PRICES.core}
-            features={[
-              { text: 'Up to 3 tax strategies' },
-              { text: 'All Basic features' },
-              { text: 'Strategy progress tracking' },
-              { text: 'Priority support' },
-            ]}
-            highlighted={highlight === 'core'}
-            busy={busyTier === 'core'}
-            onSelect={() => selectPlan('core')}
-          />
-
-          <ProCard
-            name="Pro"
-            price={TIER_PRICES.pro}
-            features={[
-              { text: 'All strategies' },
-              { text: 'AI voice meeting minutes' },
-              { text: 'Complete audit trail' },
-              { text: 'Mileage tracker with IRS deduction calculator' },
-              { text: 'All Core and Basic features' },
-            ]}
-            highlighted={highlight === 'pro'}
-            busy={busyTier === 'pro'}
-            onSelect={() => selectPlan('pro')}
-          />
-        </View>
-
-        <Text style={styles.trialNote}>All plans include a 3-day free trial. Cancel anytime.</Text>
+        <Text style={styles.trialNote}>Cancel anytime.</Text>
 
         <TouchableOpacity onPress={() => setCodeOpen(true)} style={styles.codeWrap}>
           <Text style={styles.codeText}>
@@ -314,6 +298,28 @@ const styles = StyleSheet.create({
   },
   cards: {
     gap: 12,
+  },
+  loadingWrap: {
+    alignItems: 'center',
+    justifyContent: 'center',
+    paddingVertical: 48,
+    gap: 12,
+  },
+  loadingText: {
+    color: '#85B7EB',
+    fontSize: 14,
+  },
+  trialLine: {
+    color: colors.teal,
+    fontSize: 12,
+    fontWeight: '600',
+    marginTop: -2,
+  },
+  trialLineBlue: {
+    color: '#85B7EB',
+    fontSize: 12,
+    fontWeight: '600',
+    marginTop: -2,
   },
   cardWhite: {
     backgroundColor: colors.white,

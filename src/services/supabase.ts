@@ -88,6 +88,22 @@ export interface PrivacyAcceptanceRow {
   policy_version: string;
 }
 
+// Terms of Service + Privacy Policy text, versioned. Editable from the Admin
+// panel; the active row per document_type is what onboarding renders. Rows are
+// never deleted so full version history is preserved.
+export type LegalDocumentType = 'tos' | 'privacy';
+
+export interface LegalDocumentRow {
+  id: string;
+  document_type: LegalDocumentType;
+  version: string;
+  content: string;
+  effective_date: string | null;
+  is_active: boolean;
+  created_at: string;
+  updated_at: string;
+}
+
 export type EntityType = 'LLC' | 'S-Corp' | 'C-Corp' | 'Sole Proprietor' | 'Trust';
 
 export interface BusinessRow {

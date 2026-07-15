@@ -1,4 +1,4 @@
-import React, { useEffect, useState } from 'react';
+import React, { useCallback, useEffect, useState } from 'react';
 import { StatusBar } from 'expo-status-bar';
 import * as ScreenOrientation from 'expo-screen-orientation';
 import { NavigationContainer, DefaultTheme } from '@react-navigation/native';
@@ -8,6 +8,7 @@ import { SafeAreaProvider } from 'react-native-safe-area-context';
 import './src/constants/layout';
 import { RootStack } from './src/navigation/RootStack';
 import { OnboardingStack } from './src/navigation/OnboardingStack';
+import { LegalReacceptanceFlow } from './src/screens/onboarding/LegalReacceptanceFlow';
 import { colors } from './src/theme';
 import { AuthProvider, useAuth } from './src/auth/AuthContext';
 import { BusinessProvider } from './src/business/BusinessContext';
@@ -31,7 +32,14 @@ const navTheme = {
 const SPLASH_DURATION_MS = 1500;
 
 const Gate: React.FC = () => {
-  const { session, loading, onboardingCompleted, isAdmin } = useAuth();
+  const {
+    session,
+    loading,
+    onboardingCompleted,
+    isAdmin,
+    legalReacceptanceNeeded,
+    refreshProfile,
+  } = useAuth();
   const [splashElapsed, setSplashElapsed] = useState(false);
   const [authView, setAuthView] = useState<'signin' | 'signup'>('signin');
 
@@ -39,6 +47,10 @@ const Gate: React.FC = () => {
     const t = setTimeout(() => setSplashElapsed(true), SPLASH_DURATION_MS);
     return () => clearTimeout(t);
   }, []);
+
+  const onReacceptanceComplete = useCallback(() => {
+    void refreshProfile();
+  }, [refreshProfile]);
 
   if (loading || !splashElapsed) return <SplashScreen />;
   if (!session) {
@@ -53,6 +65,17 @@ const Gate: React.FC = () => {
       <NavigationContainer theme={navTheme}>
         <OnboardingStack />
       </NavigationContainer>
+    );
+  }
+  // An onboarded user whose accepted ToS/Privacy version is now out of date
+  // must re-accept before reaching the app. refreshProfile re-runs the check,
+  // clearing this once every changed document has been re-accepted.
+  if (legalReacceptanceNeeded.length > 0) {
+    return (
+      <LegalReacceptanceFlow
+        needed={legalReacceptanceNeeded}
+        onComplete={onReacceptanceComplete}
+      />
     );
   }
   return (

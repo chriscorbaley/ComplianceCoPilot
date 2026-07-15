@@ -26,23 +26,23 @@ import { Ionicons } from '@expo/vector-icons';
 import { colors } from '../theme';
 import { supabase } from '../services/supabase';
 import { useAuth } from '../auth/AuthContext';
+import { usePricingPlans, formatPrice } from '../services/pricingPlans';
 import type { RootStackParamList } from '../navigation/types';
 
 type Nav = NativeStackNavigationProp<RootStackParamList, 'UpgradeConfirm'>;
 type Route = NativeStackScreenProps<RootStackParamList, 'UpgradeConfirm'>['route'];
-
-const TIER_PRICE: Record<'core' | 'pro', number> = { core: 99, pro: 199 };
-const TIER_LABEL: Record<'core' | 'pro', string> = { core: 'Core', pro: 'Pro' };
 
 export const UpgradeConfirmScreen: React.FC = () => {
   const insets = useSafeAreaInsets();
   const nav = useNavigation<Nav>();
   const route = useRoute<Route>();
   const { session, activeStrategies, refreshProfile } = useAuth();
+  const { byKey } = usePricingPlans();
 
   const tier = route.params.tier;
-  const price = TIER_PRICE[tier];
-  const label = TIER_LABEL[tier];
+  const plan = byKey[tier];
+  const price = plan.monthly_price;
+  const label = plan.display_name;
   const [busy, setBusy] = useState(false);
 
   // Business Travel is auto-added and doesn't count toward the strategy limit,
@@ -121,7 +121,7 @@ export const UpgradeConfirmScreen: React.FC = () => {
       <View style={styles.card}>
         <Text style={styles.planName}>{label}</Text>
         <View style={styles.priceRow}>
-          <Text style={styles.price}>${price}</Text>
+          <Text style={styles.price}>{formatPrice(price)}</Text>
           <Text style={styles.priceUnit}>/month</Text>
         </View>
         <Text style={styles.billedVia}>Billed monthly via Stripe</Text>
@@ -141,8 +141,8 @@ export const UpgradeConfirmScreen: React.FC = () => {
       {/* Amber billing disclosure */}
       <View style={styles.billingBox}>
         <Text style={styles.billingText}>
-          By upgrading you agree to be charged ${price}/month starting today. You
-          can cancel anytime from your account settings.
+          By upgrading you agree to be charged {formatPrice(price)}/month starting
+          today. You can cancel anytime from your account settings.
         </Text>
       </View>
 
@@ -156,7 +156,7 @@ export const UpgradeConfirmScreen: React.FC = () => {
           <ActivityIndicator color={colors.white} />
         ) : (
           <Text style={styles.confirmText}>
-            Confirm Upgrade to {label} — ${price}/mo
+            Confirm Upgrade to {label} — {formatPrice(price)}/mo
           </Text>
         )}
       </TouchableOpacity>

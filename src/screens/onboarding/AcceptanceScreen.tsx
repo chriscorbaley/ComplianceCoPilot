@@ -21,6 +21,9 @@ interface AcceptanceScreenProps {
   body: string;
   checkboxLabel: string;
   busy?: boolean;
+  // While true the document text is still being fetched: show a spinner in the
+  // body and keep the acceptance controls disabled.
+  loading?: boolean;
   onAccept: () => void | Promise<void>;
 }
 
@@ -30,6 +33,7 @@ export const AcceptanceScreen: React.FC<AcceptanceScreenProps> = ({
   body,
   checkboxLabel,
   busy = false,
+  loading = false,
   onAccept,
 }) => {
   const insets = useSafeAreaInsets();
@@ -56,17 +60,24 @@ export const AcceptanceScreen: React.FC<AcceptanceScreenProps> = ({
       <Text style={styles.effectiveDate}>{effectiveDate}</Text>
 
       <View style={styles.scrollWrap}>
-        <ScrollView
-          ref={scrollRef}
-          onScroll={onScroll}
-          scrollEventThrottle={16}
-          contentContainerStyle={styles.scrollContent}
-          showsVerticalScrollIndicator={false}
-        >
-          <View style={contentContainerStyle}>
-            <Text style={styles.bodyText}>{body}</Text>
+        {loading ? (
+          <View style={styles.loadingWrap}>
+            <ActivityIndicator color="#185FA5" />
+            <Text style={styles.loadingText}>Loading…</Text>
           </View>
-        </ScrollView>
+        ) : (
+          <ScrollView
+            ref={scrollRef}
+            onScroll={onScroll}
+            scrollEventThrottle={16}
+            contentContainerStyle={styles.scrollContent}
+            showsVerticalScrollIndicator={false}
+          >
+            <View style={contentContainerStyle}>
+              <Text style={styles.bodyText}>{body}</Text>
+            </View>
+          </ScrollView>
+        )}
         <View style={styles.progressTrack}>
           <View style={[styles.progressFill, { width: `${Math.round(scrollPct * 100)}%` }]} />
         </View>
@@ -75,6 +86,7 @@ export const AcceptanceScreen: React.FC<AcceptanceScreenProps> = ({
       <View style={[styles.footer, { paddingBottom: insets.bottom + 12 }]}>
         <TouchableOpacity
           activeOpacity={0.8}
+          disabled={loading}
           onPress={() => setChecked(!checked)}
           style={styles.checkRow}
         >
@@ -86,9 +98,9 @@ export const AcceptanceScreen: React.FC<AcceptanceScreenProps> = ({
 
         <TouchableOpacity
           activeOpacity={0.85}
-          disabled={!checked || busy}
+          disabled={!checked || busy || loading}
           onPress={onAccept}
-          style={[styles.continueBtn, (!checked || busy) && styles.continueBtnDisabled]}
+          style={[styles.continueBtn, (!checked || busy || loading) && styles.continueBtnDisabled]}
         >
           {busy ? (
             <ActivityIndicator color={colors.white} />
@@ -145,6 +157,16 @@ const styles = StyleSheet.create({
     color: colors.bodyText,
     fontSize: 13,
     lineHeight: 20,
+  },
+  loadingWrap: {
+    flex: 1,
+    alignItems: 'center',
+    justifyContent: 'center',
+    gap: 10,
+  },
+  loadingText: {
+    color: '#888888',
+    fontSize: 13,
   },
   progressTrack: {
     height: 3,

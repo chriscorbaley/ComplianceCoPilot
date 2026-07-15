@@ -144,5 +144,7 @@ export type AdminTabName =
   | 'Fields'
   | 'IRC'
   | 'Strategies'
+  | 'Pricing'
   | 'Announce'
-  | 'Inbox';
+  | 'Inbox'
+  | 'Legal';

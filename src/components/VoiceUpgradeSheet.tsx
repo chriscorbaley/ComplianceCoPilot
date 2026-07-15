@@ -5,6 +5,7 @@ import { useNavigation } from '@react-navigation/native';
 import type { NativeStackNavigationProp } from '@react-navigation/native-stack';
 import { colors } from '../theme';
 import { scaled } from '../constants/layout';
+import { usePricingPlans, formatPrice } from '../services/pricingPlans';
 import type { RootStackParamList } from '../navigation/types';
 
 interface VoiceUpgradeSheetProps {
@@ -21,6 +22,7 @@ export const VoiceUpgradeSheet: React.FC<VoiceUpgradeSheetProps> = ({
 }) => {
   const navigation =
     useNavigation<NativeStackNavigationProp<RootStackParamList>>();
+  const { byKey } = usePricingPlans();
 
   const goUpgrade = (tier: 'core' | 'pro') => {
     onClose();
@@ -55,14 +57,18 @@ export const VoiceUpgradeSheet: React.FC<VoiceUpgradeSheetProps> = ({
             style={[styles.cta, styles.ctaCore]}
             onPress={() => goUpgrade('core')}
           >
-            <Text style={styles.ctaText}>Upgrade to Core — $99/mo</Text>
+            <Text style={styles.ctaText}>
+              Upgrade to {byKey.core.display_name} — {formatPrice(byKey.core.monthly_price)}/mo
+            </Text>
           </TouchableOpacity>
           <TouchableOpacity
             activeOpacity={0.85}
             style={[styles.cta, styles.ctaPro]}
             onPress={() => goUpgrade('pro')}
           >
-            <Text style={styles.ctaText}>Upgrade to Pro — $199/mo</Text>
+            <Text style={styles.ctaText}>
+              Upgrade to {byKey.pro.display_name} — {formatPrice(byKey.pro.monthly_price)}/mo
+            </Text>
           </TouchableOpacity>
           <TouchableOpacity activeOpacity={0.7} onPress={onClose} style={styles.dismiss}>
             <Text style={styles.dismissText}>Not now</Text>

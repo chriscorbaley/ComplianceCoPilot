@@ -1,5 +1,11 @@
 import React, { createContext, useCallback, useContext, useEffect, useState } from 'react';
-import { supabase, type Session, type SubscriptionTier } from '../services/supabase';
+import {
+  supabase,
+  type LegalDocumentType,
+  type Session,
+  type SubscriptionTier,
+} from '../services/supabase';
+import { fetchLegalReacceptanceNeeded } from '../services/legalDocuments';
 
 interface AuthState {
   session: Session | null;
@@ -11,6 +17,9 @@ interface AuthState {
   subscriptionTier: SubscriptionTier | null;
   activeStrategies: string[];
   emailVerified: boolean;
+  // Legal documents whose active version no longer matches what this user last
+  // accepted. Non-empty => force re-acceptance before the main app loads.
+  legalReacceptanceNeeded: LegalDocumentType[];
   signIn: (email: string, password: string) => Promise<void>;
   signUp: (email: string, password: string, fullName: string) => Promise<void>;
   signOut: () => Promise<void>;
@@ -73,6 +82,7 @@ export const AuthProvider: React.FC<React.PropsWithChildren> = ({ children }) =>
   const [businessOnboardingCompleted, setBusinessOnboardingCompleted] = useState(false);
   const [subscriptionTier, setSubscriptionTier] = useState<SubscriptionTier | null>(null);
   const [activeStrategies, setActiveStrategies] = useState<string[]>([]);
+  const [legalReacceptanceNeeded, setLegalReacceptanceNeeded] = useState<LegalDocumentType[]>([]);
 
   const applyProfile = useCallback((p: UserProfile) => {
     setIsAdmin(p.isAdmin);
@@ -83,12 +93,26 @@ export const AuthProvider: React.FC<React.PropsWithChildren> = ({ children }) =>
     setActiveStrategies(p.activeStrategies);
   }, []);
 
+  // Compute whether the user must re-accept updated legal documents. Only
+  // relevant for a fully-onboarded non-admin user: brand-new users accept via
+  // onboarding, and admins manage the documents. Runs after the profile loads
+  // so we know their onboarding/admin status.
+  const syncReacceptance = useCallback(async (userId: string, profile: UserProfile) => {
+    if (profile.isAdmin || !profile.onboardingCompleted) {
+      setLegalReacceptanceNeeded([]);
+      return;
+    }
+    const needed = await fetchLegalReacceptanceNeeded(userId);
+    setLegalReacceptanceNeeded(needed);
+  }, []);
+
   const refreshProfile = useCallback(async () => {
     const uid = session?.user.id;
     if (!uid) return;
     const profile = await fetchUserProfile(uid);
     applyProfile(profile);
-  }, [session?.user.id, applyProfile]);
+    await syncReacceptance(uid, profile);
+  }, [session?.user.id, applyProfile, syncReacceptance]);
 
   useEffect(() => {
     let mounted = true;
@@ -97,15 +121,19 @@ export const AuthProvider: React.FC<React.PropsWithChildren> = ({ children }) =>
       setSession(data.session);
       if (data.session?.user.id) {
         const profile = await fetchUserProfile(data.session.user.id);
-        if (mounted) applyProfile(profile);
+        if (mounted) {
+          applyProfile(profile);
+          await syncReacceptance(data.session.user.id, profile);
+        }
       }
-      setLoading(false);
+      if (mounted) setLoading(false);
     });
     const { data: sub } = supabase.auth.onAuthStateChange(async (_event, s) => {
       setSession(s);
       if (s?.user.id) {
         const profile = await fetchUserProfile(s.user.id);
         applyProfile(profile);
+        await syncReacceptance(s.user.id, profile);
       } else {
         applyProfile({
           isAdmin: false,
@@ -115,13 +143,14 @@ export const AuthProvider: React.FC<React.PropsWithChildren> = ({ children }) =>
           subscriptionTier: null,
           activeStrategies: [],
         });
+        setLegalReacceptanceNeeded([]);
       }
     });
     return () => {
       mounted = false;
       sub.subscription.unsubscribe();
     };
-  }, [applyProfile]);
+  }, [applyProfile, syncReacceptance]);
 
   const signIn: AuthState['signIn'] = async (email, password) => {
     const { error } = await supabase.auth.signInWithPassword({ email, password });
@@ -156,6 +185,7 @@ export const AuthProvider: React.FC<React.PropsWithChildren> = ({ children }) =>
         subscriptionTier,
         activeStrategies,
         emailVerified,
+        legalReacceptanceNeeded,
         signIn,
         signUp,
         signOut,

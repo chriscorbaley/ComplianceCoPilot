@@ -15,30 +15,19 @@ import { useNavigation } from '@react-navigation/native';
 import type { NativeStackNavigationProp } from '@react-navigation/native-stack';
 import { Ionicons } from '@expo/vector-icons';
 import { colors } from '../../theme';
-import { supabase, type SubscriptionTier } from '../../services/supabase';
+import { supabase } from '../../services/supabase';
 import { useAuth } from '../../auth/AuthContext';
+import { usePricingPlans, formatPrice } from '../../services/pricingPlans';
 import type { OnboardingStackParamList } from '../../navigation/types';
 import { contentContainerStyle } from '../../constants/layout';
 
 type Nav = NativeStackNavigationProp<OnboardingStackParamList, 'Payment'>;
 
-const TIER_NAMES: Record<SubscriptionTier, string> = {
-  // Display label only — the DB tier value stays 'starter'.
-  starter: 'Basic',
-  core: 'Core',
-  pro: 'Pro',
-};
-
-const TIER_PRICES: Record<SubscriptionTier, number> = {
-  starter: 49,
-  core: 99,
-  pro: 199,
-};
-
 export const PaymentScreen: React.FC = () => {
   const insets = useSafeAreaInsets();
   const nav = useNavigation<Nav>();
   const { session, subscriptionTier, refreshProfile } = useAuth();
+  const { byKey } = usePricingPlans();
   const [cardNumber, setCardNumber] = useState('');
   const [expiry, setExpiry] = useState('');
   const [cvc, setCvc] = useState('');
@@ -46,13 +35,15 @@ export const PaymentScreen: React.FC = () => {
   const [busy, setBusy] = useState(false);
 
   const tier = subscriptionTier ?? 'starter';
-  const price = TIER_PRICES[tier];
+  const plan = byKey[tier];
+  const price = plan.monthly_price;
+  const trialDays = plan.trial_days;
 
   const nextBillingLabel = useMemo(() => {
     const trialEnd = new Date();
-    trialEnd.setDate(trialEnd.getDate() + 3); // was + 7, now + 3
+    trialEnd.setDate(trialEnd.getDate() + trialDays);
     return trialEnd.toLocaleDateString('en-US', { month: 'long', day: 'numeric', year: 'numeric' });
-  }, []);
+  }, [trialDays]);
 
   const formValid = cardNumber.replace(/\s/g, '').length >= 12 && expiry.length >= 4 && cvc.length >= 3 && zip.length >= 3;
 
@@ -123,11 +114,11 @@ export const PaymentScreen: React.FC = () => {
 
         <View style={styles.summary}>
           <Text style={styles.summaryLabel}>You're starting</Text>
-          <Text style={styles.summaryPlan}>{TIER_NAMES[tier]}</Text>
-          <Text style={styles.summaryPrice}>${price}/month</Text>
+          <Text style={styles.summaryPlan}>{plan.display_name}</Text>
+          <Text style={styles.summaryPrice}>{formatPrice(price)}/month</Text>
           <View style={styles.trialPill}>
             <Ionicons name="time-outline" size={12} color="#85B7EB" />
-            <Text style={styles.trialPillText}>3-day free trial · first charge {nextBillingLabel}</Text>
+            <Text style={styles.trialPillText}>{trialDays}-day free trial · first charge {nextBillingLabel}</Text>
           </View>
         </View>
 

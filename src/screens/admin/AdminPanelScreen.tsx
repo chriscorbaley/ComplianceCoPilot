@@ -20,6 +20,8 @@ import { IrcReferencesEditor } from './IrcReferencesEditor';
 import { StrategiesToggle } from './StrategiesToggle';
 import { AnnouncementPublisher } from './AnnouncementPublisher';
 import { RegulatoryAlertsInbox } from './RegulatoryAlertsInbox';
+import { LegalDocumentsEditor } from './LegalDocumentsEditor';
+import { PricingEditor } from './PricingEditor';
 
 type AdminRoute = RouteProp<RootStackParamList, 'AdminPanel'>;
 
@@ -35,8 +37,10 @@ const TABS: TabSpec[] = [
   { key: 'Fields',     label: 'Fields',        icon: 'options-outline' },
   { key: 'IRC',        label: 'IRC',           icon: 'book-outline' },
   { key: 'Strategies', label: 'Strategies',    icon: 'toggle-outline' },
+  { key: 'Pricing',    label: 'Pricing',       icon: 'pricetags-outline' },
   { key: 'Announce',   label: 'Announce',      icon: 'megaphone-outline' },
   { key: 'Inbox',      label: 'Inbox',         icon: 'mail-outline' },
+  { key: 'Legal',      label: 'Legal',         icon: 'shield-outline' },
 ];
 
 export const AdminPanelScreen: React.FC = () => {
@@ -138,7 +142,9 @@ export const AdminPanelScreen: React.FC = () => {
         {tab === 'Fields' && <FormFieldsManager />}
         {tab === 'IRC' && <IrcReferencesEditor />}
         {tab === 'Strategies' && <StrategiesToggle />}
+        {tab === 'Pricing' && <PricingEditor />}
         {tab === 'Announce' && <AnnouncementPublisher />}
+        {tab === 'Legal' && <LegalDocumentsEditor />}
         {tab === 'Inbox' && <RegulatoryAlertsInbox onJumpToRules={(keys, values) => {
           navigation.setParams({
             initialTab: 'Rules',

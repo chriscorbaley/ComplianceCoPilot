@@ -6,6 +6,7 @@ import type { NativeStackNavigationProp } from '@react-navigation/native-stack';
 import { Ionicons } from '@expo/vector-icons';
 import { colors } from '../../theme';
 import { useAuth } from '../../auth/AuthContext';
+import { usePricingPlans, formatPrice } from '../../services/pricingPlans';
 import { contentContainerStyle } from '../../constants/layout';
 import type { OnboardingStackParamList } from '../../navigation/types';
 import type { SubscriptionTier } from '../../services/supabase';
@@ -16,33 +17,29 @@ interface TeaserContent {
   headline: string;
   subhead: string;
   lockedFeatures: string[];
-  upgradeLabel: string;
+  // Tier being upsold (its display_name + price come from pricing_plans).
   upgradeTarget: SubscriptionTier;
-  skipLabel: string;
 }
 
 const STARTER_TEASER: TeaserContent = {
   headline: "You're one step away from better compliance coverage",
   subhead: 'Core members track 3 strategies and never miss a deadline',
   lockedFeatures: ['Additional strategies', 'Strategy progress dashboard', 'Priority support'],
-  upgradeLabel: 'Upgrade to Core — $99/mo',
   upgradeTarget: 'core',
-  skipLabel: 'Continue with Basic',
 };
 
 const CORE_TEASER: TeaserContent = {
   headline: "You're one step away from better compliance coverage",
   subhead: 'Pro members track every strategy with the full audit trail',
   lockedFeatures: ['All tax strategies', 'AI voice meeting minutes', 'Complete audit trail'],
-  upgradeLabel: 'Upgrade to Pro — $199/mo',
   upgradeTarget: 'pro',
-  skipLabel: 'Continue with Core',
 };
 
 export const UpgradeTeaserScreen: React.FC = () => {
   const insets = useSafeAreaInsets();
   const nav = useNavigation<Nav>();
   const { subscriptionTier } = useAuth();
+  const { byKey } = usePricingPlans();
 
   // Defensive: Pro shouldn't see this; skip straight to the Business Travel
   // value screen (which then continues to payment).
@@ -55,6 +52,9 @@ export const UpgradeTeaserScreen: React.FC = () => {
   if (subscriptionTier !== 'starter' && subscriptionTier !== 'core') return null;
 
   const content = subscriptionTier === 'starter' ? STARTER_TEASER : CORE_TEASER;
+  const target = byKey[content.upgradeTarget];
+  const upgradeLabel = `Upgrade to ${target.display_name} — ${formatPrice(target.monthly_price)}/mo`;
+  const skipLabel = `Continue with ${byKey[subscriptionTier].display_name}`;
 
   return (
     <View style={[styles.root, { paddingTop: insets.top + 16, paddingBottom: insets.bottom + 16 }]}>
@@ -89,11 +89,11 @@ export const UpgradeTeaserScreen: React.FC = () => {
           style={styles.upgradeBtn}
           onPress={() => nav.replace('ChoosePlan', { highlight: content.upgradeTarget })}
         >
-          <Text style={styles.upgradeText}>{content.upgradeLabel}</Text>
+          <Text style={styles.upgradeText}>{upgradeLabel}</Text>
         </TouchableOpacity>
 
         <TouchableOpacity activeOpacity={0.7} style={styles.skipWrap} onPress={() => nav.replace('BusinessTravelIntro')}>
-          <Text style={styles.skipText}>{content.skipLabel}</Text>
+          <Text style={styles.skipText}>{skipLabel}</Text>
         </TouchableOpacity>
       </View>
     </View>

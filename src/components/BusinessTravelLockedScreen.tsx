@@ -6,6 +6,7 @@ import type { NativeStackNavigationProp } from '@react-navigation/native-stack';
 import { Ionicons } from '@expo/vector-icons';
 import { colors } from '../theme';
 import { scaled } from '../constants/layout';
+import { usePricingPlans, formatPrice } from '../services/pricingPlans';
 import type { RootStackParamList } from '../navigation/types';
 
 interface StatDef {
@@ -34,6 +35,7 @@ export const BusinessTravelLockedScreen: React.FC = () => {
   const insets = useSafeAreaInsets();
   const navigation =
     useNavigation<NativeStackNavigationProp<RootStackParamList>>();
+  const { byKey } = usePricingPlans();
 
   const goUpgrade = (tier: 'core' | 'pro') =>
     navigation.navigate('ChoosePlan', { highlight: tier });
@@ -72,17 +74,21 @@ export const BusinessTravelLockedScreen: React.FC = () => {
             onPress={() => goUpgrade('core')}
             style={[styles.cta, styles.ctaCore]}
           >
-            <Text style={styles.ctaText}>Upgrade to Core — $99/mo</Text>
+            <Text style={styles.ctaText}>
+              Upgrade to {byKey.core.display_name} — {formatPrice(byKey.core.monthly_price)}/mo
+            </Text>
           </TouchableOpacity>
           <TouchableOpacity
             activeOpacity={0.85}
             onPress={() => goUpgrade('pro')}
             style={[styles.cta, styles.ctaPro]}
           >
-            <Text style={styles.ctaText}>Upgrade to Pro — $199/mo</Text>
+            <Text style={styles.ctaText}>
+              Upgrade to {byKey.pro.display_name} — {formatPrice(byKey.pro.monthly_price)}/mo
+            </Text>
           </TouchableOpacity>
 
-          <Text style={styles.trialNote}>3-day free trial on all plans</Text>
+          <Text style={styles.trialNote}>{byKey.core.trial_days}-day free trial on all plans</Text>
         </View>
       </ScrollView>
     </View>

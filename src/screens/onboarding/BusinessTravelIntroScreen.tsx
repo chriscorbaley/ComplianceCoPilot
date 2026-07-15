@@ -6,6 +6,7 @@ import type { NativeStackNavigationProp } from '@react-navigation/native-stack';
 import { Ionicons } from '@expo/vector-icons';
 import { colors } from '../../theme';
 import { useAuth } from '../../auth/AuthContext';
+import { usePricingPlans, formatPrice } from '../../services/pricingPlans';
 import type { OnboardingStackParamList } from '../../navigation/types';
 import { contentContainerStyle } from '../../constants/layout';
 
@@ -60,9 +61,10 @@ export const BusinessTravelIntroScreen: React.FC = () => {
   const insets = useSafeAreaInsets();
   const nav = useNavigation<Nav>();
   const { subscriptionTier } = useAuth();
+  const { byKey } = usePricingPlans();
   const tier = subscriptionTier ?? 'starter';
   const isBasic = tier === 'starter';
-  const tierName = tier === 'pro' ? 'Pro' : 'Core';
+  const tierName = byKey[tier].display_name;
 
   return (
     <View style={styles.root}>
@@ -113,14 +115,16 @@ export const BusinessTravelIntroScreen: React.FC = () => {
                 style={[styles.cta, styles.ctaGold]}
                 onPress={() => nav.replace('ChoosePlan', { highlight: 'core' })}
               >
-                <Text style={styles.ctaText}>Upgrade to Core — $99/mo</Text>
+                <Text style={styles.ctaText}>
+                  Upgrade to {byKey.core.display_name} — {formatPrice(byKey.core.monthly_price)}/mo
+                </Text>
               </TouchableOpacity>
               <TouchableOpacity
                 activeOpacity={0.85}
                 style={[styles.cta, styles.ctaOutline]}
                 onPress={() => nav.replace('Payment')}
               >
-                <Text style={styles.ctaOutlineText}>Continue with Basic</Text>
+                <Text style={styles.ctaOutlineText}>Continue with {byKey.starter.display_name}</Text>
               </TouchableOpacity>
             </>
           ) : (
