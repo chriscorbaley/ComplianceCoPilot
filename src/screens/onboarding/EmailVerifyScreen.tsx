@@ -86,6 +86,14 @@ export const EmailVerifyScreen: React.FC = () => {
     if (!email) return;
     setResending(true);
     try {
+      // Verification email is currently delivered by Supabase Auth's built-in
+      // template. If/when we move verification to our own provider, fetch and
+      // render the admin-editable copy instead:
+      //   const t = await fetchEmailTemplate('verification');
+      //   const { subject, bodyHtml } = renderTemplate(t, {
+      //     user_name: name, verification_link: link,
+      //   });
+      //   TODO: hand (subject, bodyHtml) to the email provider send call here.
       const { error } = await supabase.auth.resend({ type: 'signup', email });
       if (error) throw error;
       Alert.alert('Verification email sent', `We sent another link to ${email}.`);

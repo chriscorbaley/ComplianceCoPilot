@@ -104,6 +104,26 @@ export interface LegalDocumentRow {
   updated_at: string;
 }
 
+// Transactional email templates, edited from the Admin panel and rendered at
+// send time (welcome, verification, deletion warning, cancellation confirm).
+export type EmailTemplateKey =
+  | 'welcome'
+  | 'verification'
+  | 'deletion_warning'
+  | 'cancellation_confirm';
+
+export interface EmailTemplateRow {
+  id: string;
+  template_key: EmailTemplateKey;
+  subject: string;
+  body_html: string;
+  // Variable names (without braces) that this template supports, e.g.
+  // ['user_name', 'tax_year']. Drives the Admin editor's insertable chips.
+  available_variables: string[] | null;
+  created_at: string;
+  updated_at: string;
+}
+
 export type EntityType = 'LLC' | 'S-Corp' | 'C-Corp' | 'Sole Proprietor' | 'Trust';
 
 export interface BusinessRow {

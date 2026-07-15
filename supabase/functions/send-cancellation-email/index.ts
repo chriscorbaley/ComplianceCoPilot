@@ -5,6 +5,11 @@
 // as secrets. If RESEND_API_KEY is missing the function returns ok:true with
 // emailed:false so the client flow still completes.
 //
+// Subject + body come from the admin-editable `email_templates` row with
+// template_key='cancellation_confirm' (rendered with the user's real values).
+// If that row is absent/unreadable the hardcoded copy below is used as a
+// fallback.
+//
 // Deploy:
 //   supabase functions deploy send-cancellation-email
 //
@@ -41,6 +46,44 @@ function formatDate(iso: string): string {
     day: 'numeric',
     year: 'numeric',
   });
+}
+
+// Substitute {placeholder} tokens with real values. Tokens without a matching
+// key are left intact. (Mirror of renderTemplate in
+// src/services/emailTemplates.ts — duplicated here because Edge Functions can't
+// import the React Native service module.)
+function renderTemplate(
+  subject: string,
+  bodyHtml: string,
+  vars: Record<string, string | number>,
+): { subject: string; html: string } {
+  const apply = (s: string) =>
+    s.replace(/\{(\w+)\}/g, (m, k: string) =>
+      Object.prototype.hasOwnProperty.call(vars, k) ? String(vars[k]) : m,
+    );
+  return { subject: apply(subject), html: apply(bodyHtml) };
+}
+
+// Fetch the admin-editable template from email_templates. Returns null if the
+// row is missing or unreadable so the caller can fall back to the hardcoded
+// copy below.
+async function fetchTemplate(
+  admin: any,
+  key: string,
+): Promise<{ subject: string; body_html: string } | null> {
+  try {
+    const { data } = await admin
+      .from('email_templates')
+      .select('subject, body_html')
+      .eq('template_key', key)
+      .maybeSingle();
+    if (data?.subject && data?.body_html) {
+      return { subject: data.subject as string, body_html: data.body_html as string };
+    }
+  } catch {
+    // fall through to null
+  }
+  return null;
 }
 
 function buildEmailHtml(args: { name: string; deletionDate: string; documentCount: number }): string {
@@ -93,11 +136,25 @@ Deno.serve(async (req) => {
   if (!RESEND_KEY) return json({ ok: true, emailed: false, reason: 'RESEND_API_KEY not set' });
 
   const deletionDate = formatDate((cancellation as any).deletion_scheduled_for as string);
-  const html = buildEmailHtml({
-    name,
-    deletionDate,
-    documentCount: Number((cancellation as any).document_count_at_cancellation ?? 0),
-  });
+  const documentCount = Number((cancellation as any).document_count_at_cancellation ?? 0);
+
+  // Prefer the admin-editable template; fall back to the hardcoded copy so a
+  // missing/unseeded row never blocks the cancellation email.
+  const template = await fetchTemplate(admin, 'cancellation_confirm');
+  let subject: string;
+  let html: string;
+  if (template) {
+    const rendered = renderTemplate(template.subject, template.body_html, {
+      user_name: name,
+      deletion_date: deletionDate,
+      document_count: documentCount,
+    });
+    subject = rendered.subject;
+    html = rendered.html;
+  } else {
+    subject = 'Your Compliance Co-Pilot subscription has been cancelled';
+    html = buildEmailHtml({ name, deletionDate, documentCount });
+  }
 
   const r = await fetch('https://api.resend.com/emails', {
     method: 'POST',
@@ -108,7 +165,7 @@ Deno.serve(async (req) => {
     body: JSON.stringify({
       from: FROM_EMAIL,
       to: [email],
-      subject: 'Your Compliance Co-Pilot subscription has been cancelled',
+      subject,
       html,
     }),
   });

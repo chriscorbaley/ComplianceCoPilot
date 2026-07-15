@@ -15,6 +15,16 @@
 // processing — both guard on is_deleted so a stray run is harmless, but there is
 // no reason to run both.
 //
+// TODO (email provider not yet connected): send a "documents will be deleted
+// soon" warning email a few days BEFORE the purge, sourced from the admin-
+// editable `email_templates` row with template_key='deletion_warning'. That
+// belongs in a separate scheduled function (e.g. `send-deletion-warnings`) that
+// selects cancellations whose deletion_scheduled_for is ~N days out, renders the
+// template with { user_name, deletion_date, document_count }, and hands the
+// result to the provider send call. The render layer already exists in
+// src/services/emailTemplates.ts (renderTemplate) and is mirrored inline in the
+// other email functions.
+//
 // Deploy:
 //   supabase functions deploy process-deletions
 // Schedule (daily 03:00 UTC):

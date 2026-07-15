@@ -148,4 +148,5 @@ export type AdminTabName =
   | 'Flags'
   | 'Announce'
   | 'Inbox'
+  | 'Emails'
   | 'Legal';
