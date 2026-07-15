@@ -12,6 +12,8 @@ import { Ionicons } from '@expo/vector-icons';
 import { colors, radius, spacing, typography } from '../../theme';
 import { supabase, type RegulatoryAlertRow } from '../../services/supabase';
 import { listPendingAlerts } from '../../services/regulatoryAlerts';
+import { useAuth } from '../../auth/AuthContext';
+import { logAdminAction } from '../../services/auditLog';
 import {
   AdminButton,
   AdminCard,
@@ -28,6 +30,7 @@ interface RegulatoryAlertsInboxProps {
 export const RegulatoryAlertsInbox: React.FC<RegulatoryAlertsInboxProps> = ({
   onJumpToRules,
 }) => {
+  const { session } = useAuth();
   const [rows, setRows] = useState<RegulatoryAlertRow[] | null>(null);
   const [error, setError] = useState<string | null>(null);
   const [busy, setBusy] = useState<Record<string, boolean>>({});
@@ -77,6 +80,14 @@ export const RegulatoryAlertsInbox: React.FC<RegulatoryAlertsInboxProps> = ({
       Alert.alert('Approve failed', e.message);
       return;
     }
+    await logAdminAction({
+      action: 'approve_regulatory_alert',
+      tableAffected: 'regulatory_alerts',
+      recordKey: row.id,
+      oldValue: { status: row.status },
+      newValue: { status: 'approved' },
+      adminEmail: session?.user.email ?? null,
+    });
     onJumpToRules(ruleKeys, values);
   };
 
@@ -99,7 +110,18 @@ export const RegulatoryAlertsInbox: React.FC<RegulatoryAlertsInboxProps> = ({
               })
               .eq('id', row.id);
             setBusy((b) => ({ ...b, [row.id]: false }));
-            if (e) Alert.alert('Dismiss failed', e.message);
+            if (e) {
+              Alert.alert('Dismiss failed', e.message);
+              return;
+            }
+            await logAdminAction({
+              action: 'dismiss_regulatory_alert',
+              tableAffected: 'regulatory_alerts',
+              recordKey: row.id,
+              oldValue: { status: row.status },
+              newValue: { status: 'dismissed' },
+              adminEmail: session?.user.email ?? null,
+            });
           },
         },
       ],

@@ -130,7 +130,7 @@ export const PricingEditor: React.FC = () => {
           is_active: editor.is_active,
           features,
         },
-        session?.user.id ?? null,
+        session?.user.email ?? null,
       );
       setEditor(null);
       await load();

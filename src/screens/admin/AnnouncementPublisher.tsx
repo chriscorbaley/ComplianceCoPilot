@@ -2,6 +2,8 @@ import React, { useEffect, useState } from 'react';
 import { Alert, ScrollView, StyleSheet, Text, View } from 'react-native';
 import { colors, spacing, typography } from '../../theme';
 import { supabase, type AnnouncementRow } from '../../services/supabase';
+import { useAuth } from '../../auth/AuthContext';
+import { logAdminAction } from '../../services/auditLog';
 import {
   AdminButton,
   AdminCard,
@@ -12,6 +14,7 @@ import {
 } from './_shared';
 
 export const AnnouncementPublisher: React.FC = () => {
+  const { session } = useAuth();
   const [rows, setRows] = useState<AnnouncementRow[] | null>(null);
   const [error, setError] = useState<string | null>(null);
   const [draft, setDraft] = useState('');
@@ -61,6 +64,14 @@ export const AnnouncementPublisher: React.FC = () => {
       Alert.alert('Publish failed', e.message);
       return;
     }
+    await logAdminAction({
+      action: 'publish_announcement',
+      tableAffected: 'announcements',
+      recordKey: msg.slice(0, 80),
+      oldValue: null,
+      newValue: { message: msg },
+      adminEmail: session?.user.email ?? null,
+    });
     setDraft('');
     Alert.alert('Published', 'All active client sessions will see this within 60 seconds.');
   };
@@ -76,7 +87,18 @@ export const AnnouncementPublisher: React.FC = () => {
             .from('announcements')
             .delete()
             .eq('id', row.id);
-          if (e) Alert.alert('Remove failed', e.message);
+          if (e) {
+            Alert.alert('Remove failed', e.message);
+            return;
+          }
+          await logAdminAction({
+            action: 'delete_announcement',
+            tableAffected: 'announcements',
+            recordKey: row.id,
+            oldValue: { message: row.message },
+            newValue: null,
+            adminEmail: session?.user.email ?? null,
+          });
         },
       },
     ]);

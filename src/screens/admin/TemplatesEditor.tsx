@@ -3,6 +3,8 @@ import { Alert, ScrollView, StyleSheet, Text, TouchableOpacity, View } from 'rea
 import { Ionicons } from '@expo/vector-icons';
 import { colors, radius, spacing, typography } from '../../theme';
 import { supabase, type DocumentTemplateRow } from '../../services/supabase';
+import { useAuth } from '../../auth/AuthContext';
+import { logAdminAction } from '../../services/auditLog';
 import {
   AdminButton,
   AdminCard,
@@ -13,6 +15,7 @@ import {
 } from './_shared';
 
 export const TemplatesEditor: React.FC = () => {
+  const { session } = useAuth();
   const [rows, setRows] = useState<DocumentTemplateRow[] | null>(null);
   const [error, setError] = useState<string | null>(null);
   const [expandedId, setExpandedId] = useState<string | null>(null);
@@ -71,6 +74,14 @@ export const TemplatesEditor: React.FC = () => {
       Alert.alert('Save failed', e.message);
       return;
     }
+    await logAdminAction({
+      action: 'update_document_template',
+      tableAffected: 'document_templates',
+      recordKey: row.template_key,
+      oldValue: { template_content: row.template_content },
+      newValue: { template_content: draft },
+      adminEmail: session?.user.email ?? null,
+    });
     setDrafts((cur) => {
       const { [row.id]: _drop, ...rest } = cur;
       return rest;

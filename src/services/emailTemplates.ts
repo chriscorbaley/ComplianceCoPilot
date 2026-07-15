@@ -14,6 +14,7 @@
 
 import { supabase } from './supabase';
 import type { EmailTemplateKey, EmailTemplateRow } from './supabase';
+import { logAdminAction } from './auditLog';
 
 export interface EmailTemplate {
   template_key: EmailTemplateKey;
@@ -224,14 +225,14 @@ export async function fetchAllEmailTemplates(): Promise<EmailTemplate[]> {
 
 // ── Admin writes ─────────────────────────────────────────────────────────────
 
-// Persist an edit to a template's subject + body and best-effort append an entry
-// to admin_audit_log. The audit insert is wrapped so a missing admin_audit_log
-// table (or RLS/offline failure) never blocks the template update itself.
+// Persist an edit to a template's subject + body and record it to the admin
+// audit log. The audit insert is best-effort (see logAdminAction) so it never
+// blocks the template update itself.
 export async function updateEmailTemplate(
   templateKey: EmailTemplateKey,
   subject: string,
   bodyHtml: string,
-  adminUserId: string | null = null,
+  adminEmail: string | null = null,
 ): Promise<void> {
   // Snapshot current values for the audit "before" record.
   let before: Record<string, unknown> | null = null;
@@ -252,19 +253,14 @@ export async function updateEmailTemplate(
     .eq('template_key', templateKey);
   if (error) throw error;
 
-  // Best-effort audit log. Ignore any failure (table absent, RLS, offline) so
-  // it never blocks the template change itself.
-  try {
-    await supabase.from('admin_audit_log').insert({
-      admin_id: adminUserId,
-      action: 'update_email_template',
-      table_name: 'email_templates',
-      record_key: templateKey,
-      details: { before, after: { subject, body_html: bodyHtml } },
-    });
-  } catch {
-    /* admin_audit_log may not exist — template update already succeeded */
-  }
+  await logAdminAction({
+    action: 'update_email_template',
+    tableAffected: 'email_templates',
+    recordKey: templateKey,
+    oldValue: before,
+    newValue: { subject, body_html: bodyHtml },
+    adminEmail,
+  });
 }
 
 // Re-export the row type for callers that read raw rows.

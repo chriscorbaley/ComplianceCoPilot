@@ -150,4 +150,5 @@ export type AdminTabName =
   | 'Inbox'
   | 'Emails'
   | 'Content'
-  | 'Legal';
+  | 'Legal'
+  | 'Audit';

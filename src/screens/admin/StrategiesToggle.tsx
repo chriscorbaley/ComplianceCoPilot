@@ -2,6 +2,8 @@ import React, { useEffect, useState } from 'react';
 import { Alert, ScrollView, StyleSheet, Switch, Text, View } from 'react-native';
 import { colors, spacing, typography } from '../../theme';
 import { supabase, type StrategyRow } from '../../services/supabase';
+import { useAuth } from '../../auth/AuthContext';
+import { logAdminAction } from '../../services/auditLog';
 import {
   AdminCard,
   AdminEmpty,
@@ -10,6 +12,7 @@ import {
 } from './_shared';
 
 export const StrategiesToggle: React.FC = () => {
+  const { session } = useAuth();
   const [rows, setRows] = useState<StrategyRow[] | null>(null);
   const [error, setError] = useState<string | null>(null);
   const [busy, setBusy] = useState<Record<string, boolean>>({});
@@ -56,7 +59,16 @@ export const StrategiesToggle: React.FC = () => {
       setRows((cur) =>
         cur ? cur.map((r) => (r.id === row.id ? { ...r, enabled: row.enabled } : r)) : cur,
       );
+      return;
     }
+    await logAdminAction({
+      action: 'toggle_strategy',
+      tableAffected: 'strategies',
+      recordKey: row.id,
+      oldValue: { enabled: row.enabled },
+      newValue: { enabled: next },
+      adminEmail: session?.user.email ?? null,
+    });
   };
 
   if (!rows && !error) return <AdminLoading label="Loading strategies…" />;

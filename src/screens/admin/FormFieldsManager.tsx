@@ -11,6 +11,8 @@ import {
 import { Ionicons } from '@expo/vector-icons';
 import { colors, radius, spacing, typography } from '../../theme';
 import { supabase, type FormFieldRow, type StrategyRow } from '../../services/supabase';
+import { useAuth } from '../../auth/AuthContext';
+import { logAdminAction } from '../../services/auditLog';
 import {
   AdminButton,
   AdminCard,
@@ -35,6 +37,7 @@ const EMPTY_DRAFT: FieldDraft = {
 };
 
 export const FormFieldsManager: React.FC = () => {
+  const { session } = useAuth();
   const [strategies, setStrategies] = useState<StrategyRow[]>([]);
   const [rows, setRows] = useState<FormFieldRow[] | null>(null);
   const [error, setError] = useState<string | null>(null);
@@ -110,7 +113,16 @@ export const FormFieldsManager: React.FC = () => {
     setBusy((b) => ({ ...b, [row.id]: false, [other.id]: false }));
     if (r1.error || r2.error) {
       Alert.alert('Reorder failed', r1.error?.message ?? r2.error?.message ?? 'Unknown error');
+      return;
     }
+    await logAdminAction({
+      action: 'reorder_form_field',
+      tableAffected: 'form_fields',
+      recordKey: row.id,
+      oldValue: { field_key: row.field_key, sort_order: row.sort_order },
+      newValue: { field_key: row.field_key, sort_order: other.sort_order },
+      adminEmail: session?.user.email ?? null,
+    });
   };
 
   const removeField = async (row: FormFieldRow) => {
@@ -129,7 +141,24 @@ export const FormFieldsManager: React.FC = () => {
               .delete()
               .eq('id', row.id);
             setBusy((b) => ({ ...b, [row.id]: false }));
-            if (e) Alert.alert('Remove failed', e.message);
+            if (e) {
+              Alert.alert('Remove failed', e.message);
+              return;
+            }
+            await logAdminAction({
+              action: 'delete_form_field',
+              tableAffected: 'form_fields',
+              recordKey: row.id,
+              oldValue: {
+                strategy_name: row.strategy_name,
+                field_key: row.field_key,
+                field_label: row.field_label,
+                field_type: row.field_type,
+                required: row.required,
+              },
+              newValue: null,
+              adminEmail: session?.user.email ?? null,
+            });
           },
         },
       ],
@@ -159,6 +188,21 @@ export const FormFieldsManager: React.FC = () => {
       Alert.alert('Add failed', e.message);
       return;
     }
+    await logAdminAction({
+      action: 'create_form_field',
+      tableAffected: 'form_fields',
+      recordKey: `${activeStrategy}/${key}`,
+      oldValue: null,
+      newValue: {
+        strategy_name: activeStrategy,
+        field_key: key,
+        field_label: label,
+        field_type: draft.field_type || 'text',
+        required: draft.required,
+        sort_order: maxSort + 1,
+      },
+      adminEmail: session?.user.email ?? null,
+    });
     setDraft(EMPTY_DRAFT);
   };
 

@@ -2,6 +2,8 @@ import React, { useEffect, useMemo, useState } from 'react';
 import { Alert, ScrollView, StyleSheet, Text, View } from 'react-native';
 import { colors, spacing, typography } from '../../theme';
 import { supabase, type ComplianceRuleRow } from '../../services/supabase';
+import { useAuth } from '../../auth/AuthContext';
+import { logAdminAction } from '../../services/auditLog';
 import {
   AdminButton,
   AdminCard,
@@ -16,6 +18,7 @@ interface RulesEditorProps {
 }
 
 export const RulesEditor: React.FC<RulesEditorProps> = ({ prefill }) => {
+  const { session } = useAuth();
   const [rows, setRows] = useState<ComplianceRuleRow[] | null>(null);
   const [edits, setEdits] = useState<Record<string, string>>({});
   const [saving, setSaving] = useState<Record<string, boolean>>({});
@@ -88,6 +91,14 @@ export const RulesEditor: React.FC<RulesEditorProps> = ({ prefill }) => {
       Alert.alert('Save failed', e.message);
       return;
     }
+    await logAdminAction({
+      action: 'update_compliance_rule',
+      tableAffected: 'compliance_rules',
+      recordKey: row.rule_key,
+      oldValue: { rule_value: row.rule_value },
+      newValue: { rule_value: draft },
+      adminEmail: session?.user.email ?? null,
+    });
     setEdits((cur) => {
       const { [row.id]: _drop, ...rest } = cur;
       return rest;

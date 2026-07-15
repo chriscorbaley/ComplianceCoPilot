@@ -9,6 +9,7 @@
 // visible. A fetch failure must never hide a feature the user has paid for.
 
 import { supabase } from './supabase';
+import { logAdminAction } from './auditLog';
 
 // The ten flags seeded in the feature_flags table. `flag_key` is the stable
 // identity; keep these in sync with the DB rows.
@@ -133,29 +134,41 @@ export async function fetchAllFeatureFlags(): Promise<FeatureFlagRow[]> {
 
 // ── Admin write ───────────────────────────────────────────────────────────────
 
-// Flip a flag and best-effort append an admin_audit_log entry. The audit insert
-// is wrapped so a missing table never blocks the flag change itself (mirrors
-// updatePricingPlan).
+// Flip a flag and record it to the admin audit log. The audit insert is
+// best-effort (see logAdminAction) so it never blocks the flag change itself.
 export async function updateFeatureFlag(
   flagKey: string,
   isEnabled: boolean,
-  adminUserId: string | null,
+  adminEmail: string | null,
 ): Promise<void> {
+  // Snapshot the prior state for the audit "before" record.
+  let before: boolean | null = null;
+  try {
+    const { data } = await supabase
+      .from('feature_flags')
+      .select('is_enabled')
+      .eq('flag_key', flagKey)
+      .maybeSingle();
+    before =
+      data && typeof (data as { is_enabled?: unknown }).is_enabled === 'boolean'
+        ? (data as { is_enabled: boolean }).is_enabled
+        : null;
+  } catch {
+    before = null;
+  }
+
   const { error } = await supabase
     .from('feature_flags')
     .update({ is_enabled: isEnabled })
     .eq('flag_key', flagKey);
   if (error) throw error;
 
-  try {
-    await supabase.from('admin_audit_log').insert({
-      admin_id: adminUserId,
-      action: 'update_feature_flag',
-      table_name: 'feature_flags',
-      record_key: flagKey,
-      details: { is_enabled: isEnabled },
-    });
-  } catch {
-    /* admin_audit_log may not exist — flag update already succeeded */
-  }
+  await logAdminAction({
+    action: 'toggle_feature_flag',
+    tableAffected: 'feature_flags',
+    recordKey: flagKey,
+    oldValue: { is_enabled: before },
+    newValue: { is_enabled: isEnabled },
+    adminEmail,
+  });
 }

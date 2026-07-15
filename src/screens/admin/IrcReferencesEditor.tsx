@@ -2,6 +2,8 @@ import React, { useEffect, useMemo, useState } from 'react';
 import { Alert, ScrollView, StyleSheet, Text, View } from 'react-native';
 import { colors, spacing, typography } from '../../theme';
 import { supabase, type IrcReferenceRow } from '../../services/supabase';
+import { useAuth } from '../../auth/AuthContext';
+import { logAdminAction } from '../../services/auditLog';
 import {
   AdminButton,
   AdminCard,
@@ -17,6 +19,7 @@ interface Draft {
 }
 
 export const IrcReferencesEditor: React.FC = () => {
+  const { session } = useAuth();
   const [rows, setRows] = useState<IrcReferenceRow[] | null>(null);
   const [error, setError] = useState<string | null>(null);
   const [drafts, setDrafts] = useState<Record<string, Draft>>({});
@@ -119,6 +122,14 @@ export const IrcReferencesEditor: React.FC = () => {
       Alert.alert('Save failed', e.message);
       return;
     }
+    await logAdminAction({
+      action: 'update_irc_reference',
+      tableAffected: 'irc_references',
+      recordKey: row.id,
+      oldValue: { irc_section: row.irc_section, citation: row.citation },
+      newValue: { irc_section: d.irc_section.trim(), citation: d.citation },
+      adminEmail: session?.user.email ?? null,
+    });
     setDrafts((cur) => {
       const { [row.id]: _drop, ...rest } = cur;
       return rest;

@@ -20,6 +20,7 @@
 
 import { useCallback, useEffect, useState } from 'react';
 import { supabase } from './supabase';
+import { logAdminAction } from './auditLog';
 
 // Screen groupings (stored in the `content_type` column). The Admin editor
 // groups rows by this value and renders the label from GROUP_LABELS.
@@ -573,13 +574,13 @@ export async function fetchAllAppContent(): Promise<AppContentRow[]> {
   }));
 }
 
-// Persist an edit to a single content row and best-effort append an entry to
-// admin_audit_log. The audit insert is wrapped so a missing admin_audit_log
-// table never blocks the content update itself.
+// Persist an edit to a single content row and record it to the admin audit log.
+// The audit insert is best-effort (see logAdminAction) so it never blocks the
+// content update itself.
 export async function updateAppContent(
   contentKey: string,
   contentValue: string,
-  adminUserId: string | null,
+  adminEmail: string | null,
 ): Promise<void> {
   // Snapshot the current value for the audit "before" record.
   let before: string | null = null;
@@ -603,15 +604,12 @@ export async function updateAppContent(
     .eq('content_key', contentKey);
   if (error) throw error;
 
-  try {
-    await supabase.from('admin_audit_log').insert({
-      admin_id: adminUserId,
-      action: 'update_app_content',
-      table_name: 'app_content',
-      record_key: contentKey,
-      details: { before, after: contentValue },
-    });
-  } catch {
-    /* admin_audit_log may not exist — content update already succeeded */
-  }
+  await logAdminAction({
+    action: 'update_app_content',
+    tableAffected: 'app_content',
+    recordKey: contentKey,
+    oldValue: before,
+    newValue: contentValue,
+    adminEmail,
+  });
 }

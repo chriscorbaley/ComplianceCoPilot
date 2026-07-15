@@ -60,7 +60,7 @@ export const FeatureFlagsEditor: React.FC = () => {
         : cur,
     );
     try {
-      await updateFeatureFlag(row.flag_key, next, session?.user.id ?? null);
+      await updateFeatureFlag(row.flag_key, next, session?.user.email ?? null);
     } catch (e) {
       Alert.alert('Toggle failed', e instanceof Error ? e.message : String(e));
       // Roll back.

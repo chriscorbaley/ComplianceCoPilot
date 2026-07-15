@@ -85,7 +85,7 @@ export const AppContentEditor: React.FC = () => {
     }
     setSavingKey(row.content_key);
     try {
-      await updateAppContent(row.content_key, value, session?.user.id ?? null);
+      await updateAppContent(row.content_key, value, session?.user.email ?? null);
       // Reflect the saved value locally without a full refetch.
       setRows((prev) =>
         prev

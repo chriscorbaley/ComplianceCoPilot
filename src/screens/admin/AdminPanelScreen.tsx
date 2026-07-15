@@ -25,6 +25,7 @@ import { PricingEditor } from './PricingEditor';
 import { FeatureFlagsEditor } from './FeatureFlagsEditor';
 import { EmailTemplatesEditor } from './EmailTemplatesEditor';
 import { AppContentEditor } from './AppContentEditor';
+import { AuditLogViewer } from './AuditLogViewer';
 
 type AdminRoute = RouteProp<RootStackParamList, 'AdminPanel'>;
 
@@ -47,6 +48,7 @@ const TABS: TabSpec[] = [
   { key: 'Emails',     label: 'Emails',        icon: 'mail-open-outline' },
   { key: 'Content',    label: 'Content',       icon: 'text-outline' },
   { key: 'Legal',      label: 'Legal',         icon: 'shield-outline' },
+  { key: 'Audit',      label: 'Audit Log',     icon: 'receipt-outline' },
 ];
 
 export const AdminPanelScreen: React.FC = () => {
@@ -154,6 +156,7 @@ export const AdminPanelScreen: React.FC = () => {
         {tab === 'Emails' && <EmailTemplatesEditor />}
         {tab === 'Content' && <AppContentEditor />}
         {tab === 'Legal' && <LegalDocumentsEditor />}
+        {tab === 'Audit' && <AuditLogViewer />}
         {tab === 'Inbox' && <RegulatoryAlertsInbox onJumpToRules={(keys, values) => {
           navigation.setParams({
             initialTab: 'Rules',

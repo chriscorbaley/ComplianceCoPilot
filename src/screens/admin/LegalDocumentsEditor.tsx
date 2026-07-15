@@ -20,6 +20,8 @@ import {
   type LegalDocumentType,
 } from '../../services/supabase';
 import { formatEffectiveDate } from '../../services/legalDocuments';
+import { useAuth } from '../../auth/AuthContext';
+import { logAdminAction } from '../../services/auditLog';
 import { DateInputField } from '../../components/DateInputField';
 import {
   AdminButton,
@@ -60,6 +62,7 @@ interface EditorState {
 
 export const LegalDocumentsEditor: React.FC = () => {
   const insets = useSafeAreaInsets();
+  const { session } = useAuth();
   const [rows, setRows] = useState<LegalDocumentRow[] | null>(null);
   const [error, setError] = useState<string | null>(null);
   const [editor, setEditor] = useState<EditorState | null>(null);
@@ -173,6 +176,22 @@ export const LegalDocumentsEditor: React.FC = () => {
                 is_active: true,
               });
               if (insErr) throw insErr;
+
+              const prevActive = byType[editor.type].active;
+              await logAdminAction({
+                action: 'publish_legal_document',
+                tableAffected: 'legal_documents',
+                recordKey: `${editor.type}/${version}`,
+                oldValue: prevActive
+                  ? { version: prevActive.version, effective_date: prevActive.effective_date }
+                  : null,
+                newValue: {
+                  document_type: editor.type,
+                  version,
+                  effective_date: toISODate(editor.effectiveDate as Date),
+                },
+                adminEmail: session?.user.email ?? null,
+              });
 
               setEditor(null);
               await load();

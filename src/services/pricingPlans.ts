@@ -12,6 +12,7 @@
 
 import { useEffect, useState } from 'react';
 import { supabase, type SubscriptionTier } from './supabase';
+import { logAdminAction } from './auditLog';
 
 export interface PricingPlan {
   plan_key: SubscriptionTier;
@@ -231,13 +232,13 @@ export async function fetchAllPricingPlans(): Promise<PricingPlan[]> {
     .filter((p): p is PricingPlan => p !== null);
 }
 
-// Persist an edit to a plan and best-effort append an entry to admin_audit_log.
-// The audit insert is wrapped so a missing admin_audit_log table (the "if that
-// table exists" case) never blocks the pricing update.
+// Persist an edit to a plan and record it to the admin audit log. The audit
+// insert is best-effort (see logAdminAction) so it never blocks the pricing
+// update itself.
 export async function updatePricingPlan(
   planKey: SubscriptionTier,
   updates: PricingPlanUpdate,
-  adminUserId: string | null,
+  adminEmail: string | null,
 ): Promise<void> {
   // Snapshot the current values for the audit "before" record.
   let before: Record<string, unknown> | null = null;
@@ -258,17 +259,12 @@ export async function updatePricingPlan(
     .eq('plan_key', planKey);
   if (error) throw error;
 
-  // Best-effort audit log. Ignore any failure (table absent, RLS, offline) so
-  // it never blocks the price change itself.
-  try {
-    await supabase.from('admin_audit_log').insert({
-      admin_id: adminUserId,
-      action: 'update_pricing_plan',
-      table_name: 'pricing_plans',
-      record_key: planKey,
-      details: { before, after: updates },
-    });
-  } catch {
-    /* admin_audit_log may not exist — pricing update already succeeded */
-  }
+  await logAdminAction({
+    action: 'update_pricing',
+    tableAffected: 'pricing_plans',
+    recordKey: planKey,
+    oldValue: before,
+    newValue: updates,
+    adminEmail,
+  });
 }

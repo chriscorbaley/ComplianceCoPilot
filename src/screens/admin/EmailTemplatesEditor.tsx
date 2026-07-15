@@ -159,7 +159,7 @@ export const EmailTemplatesEditor: React.FC = () => {
         editor.template_key,
         subject,
         body,
-        session?.user.id ?? null,
+        session?.user.email ?? null,
       );
       setEditor(null);
       await load();
