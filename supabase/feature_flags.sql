@@ -82,7 +82,20 @@ values
   ('real_estate',                 'Real Estate / REPS strategy and material-participation tracking.', true)
 on conflict (flag_key) do nothing;
 
--- Confirm: should print all ten flags.
+-- ── App Store review mode (SEPARATE from the feature flags above) ────────────
+-- Operational kill switch, NOT a feature flag. When enabled it bypasses live
+-- billing during onboarding and grants Pro-level access to EVERY user at
+-- runtime (the stored subscription_tier is never changed). Seeded explicitly
+-- DISABLED — unlike the feature flags, it must default OFF (the column default
+-- is true, so is_enabled is passed explicitly here). Enable ONLY during an
+-- active App Store review from Admin → Flags, and disable immediately after
+-- approval. It must never be left on in production.
+insert into public.feature_flags (flag_key, description, is_enabled)
+values
+  ('review_mode', 'App Store review mode: bypasses live billing during onboarding and unlocks all features for EVERY user. Enable ONLY during active App Store review, then disable immediately.', false)
+on conflict (flag_key) do nothing;
+
+-- Confirm: should print all ten feature flags plus review_mode (is_enabled = f).
 select flag_key, is_enabled, description
 from public.feature_flags
 order by flag_key;

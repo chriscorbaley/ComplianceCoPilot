@@ -17,6 +17,7 @@ import { Ionicons } from '@expo/vector-icons';
 import { colors } from '../../theme';
 import { supabase } from '../../services/supabase';
 import { useAuth } from '../../auth/AuthContext';
+import { useReviewMode } from '../../context/FeatureFlagContext';
 import { usePricingPlans, formatPrice } from '../../services/pricingPlans';
 import type { OnboardingStackParamList } from '../../navigation/types';
 import { contentContainerStyle } from '../../constants/layout';
@@ -27,6 +28,7 @@ export const PaymentScreen: React.FC = () => {
   const insets = useSafeAreaInsets();
   const nav = useNavigation<Nav>();
   const { session, subscriptionTier, refreshProfile } = useAuth();
+  const reviewMode = useReviewMode();
   const { byKey } = usePricingPlans();
   const [cardNumber, setCardNumber] = useState('');
   const [expiry, setExpiry] = useState('');
@@ -49,13 +51,20 @@ export const PaymentScreen: React.FC = () => {
 
   const onPay = async () => {
     if (!session?.user.id) return;
-    if (!formValid) {
+    // Review mode bypasses live billing entirely, so card details are not
+    // required — reviewers can advance without entering a card. In normal
+    // (production) operation the card fields must be complete.
+    if (!reviewMode && !formValid) {
       Alert.alert('Missing info', 'Please complete all card fields.');
       return;
     }
     setBusy(true);
     try {
-      // Stubbed Stripe charge — record trial start on the user row.
+      // Live Stripe billing runs here in normal operation. When review_mode is
+      // on we skip it and advance as if payment succeeded, so App Store
+      // reviewers reach the full app without a real charge. Recording the trial
+      // start below is not a charge — it just marks the subscription state the
+      // rest of the app reads.
       const startIso = new Date().toISOString();
       const { error } = await supabase
         .from('users')
@@ -125,6 +134,13 @@ export const PaymentScreen: React.FC = () => {
         <View style={styles.formCard}>
           <Text style={styles.formTitle}>Payment details</Text>
           <Text style={styles.formSub}>Secured by Stripe</Text>
+
+          {reviewMode ? (
+            <View style={styles.reviewNote}>
+              <Ionicons name="flask-outline" size={12} color={colors.amber} />
+              <Text style={styles.reviewNoteText}>Review mode active</Text>
+            </View>
+          ) : null}
 
           <View style={styles.field}>
             <Text style={styles.fieldLabel}>Card number</Text>
@@ -267,6 +283,21 @@ const styles = StyleSheet.create({
     fontSize: 12,
     marginTop: -8,
     marginBottom: 4,
+  },
+  reviewNote: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    alignSelf: 'flex-start',
+    gap: 5,
+    backgroundColor: colors.amberLight,
+    paddingHorizontal: 10,
+    paddingVertical: 5,
+    borderRadius: 999,
+  },
+  reviewNoteText: {
+    color: colors.amber,
+    fontSize: 12,
+    fontWeight: '700',
   },
   field: {
     gap: 6,

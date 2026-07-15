@@ -1,11 +1,14 @@
 import React, { useEffect, useState } from 'react';
 import { Alert, ScrollView, StyleSheet, Switch, Text, View } from 'react-native';
+import { Ionicons } from '@expo/vector-icons';
 import { colors, spacing, typography } from '../../theme';
 import { useAuth } from '../../auth/AuthContext';
 import { supabase } from '../../services/supabase';
 import {
   featureFlagLabel,
   fetchAllFeatureFlags,
+  REVIEW_MODE_FLAG_KEY,
+  REVIEW_MODE_LABEL,
   updateFeatureFlag,
   type FeatureFlagRow,
 } from '../../services/featureFlags';
@@ -92,6 +95,30 @@ export const FeatureFlagsEditor: React.FC = () => {
     );
   };
 
+  // Review mode gets its own, stronger confirmation: enabling it bypasses live
+  // billing and unlocks every feature for ALL users, so we spell out the blast
+  // radius and require an explicit tap. Disabling (returning to normal, safe
+  // operation) applies immediately with no barrier — turning it off should be
+  // as frictionless as possible.
+  const confirmReviewMode = (row: FeatureFlagRow, next: boolean) => {
+    if (!next) {
+      void applyToggle(row, false);
+      return;
+    }
+    Alert.alert(
+      'Enable Review Mode?',
+      'This bypasses live billing for ALL users until you turn it off. Only use during active App Store review.',
+      [
+        { text: 'Cancel', style: 'cancel' },
+        {
+          text: 'Enable Review Mode',
+          style: 'destructive',
+          onPress: () => void applyToggle(row, true),
+        },
+      ],
+    );
+  };
+
   if (!rows && !error) return <AdminLoading label="Loading feature flags…" />;
   if (error) {
     return (
@@ -112,13 +139,19 @@ export const FeatureFlagsEditor: React.FC = () => {
     );
   }
 
+  // Review mode is an operational kill switch, not a normal feature flag, so it
+  // is pulled out of the list and rendered on its own with a distinct warning
+  // treatment below the feature flags.
+  const reviewRow = rows!.find((r) => r.flag_key === REVIEW_MODE_FLAG_KEY);
+  const featureRows = rows!.filter((r) => r.flag_key !== REVIEW_MODE_FLAG_KEY);
+
   return (
     <ScrollView style={listStyles.scroll} contentContainerStyle={listStyles.content}>
       <Text style={styles.intro}>
         Global on/off switches. A feature must be enabled here AND allowed by the
         user's plan to appear. Changes reach every client app within 60 seconds.
       </Text>
-      {rows!.map((row) => (
+      {featureRows.map((row) => (
         <AdminCard key={row.flag_key}>
           <View style={listStyles.rowHeader}>
             <View style={{ flex: 1 }}>
@@ -140,6 +173,34 @@ export const FeatureFlagsEditor: React.FC = () => {
           </View>
         </AdminCard>
       ))}
+
+      {reviewRow ? (
+        <AdminCard style={styles.warningCard}>
+          <View style={listStyles.rowHeader}>
+            <View style={{ flex: 1 }}>
+              <View style={styles.warningTitleRow}>
+                <Ionicons name="warning-outline" size={16} color={colors.amber} />
+                <Text style={styles.warningTitle}>{REVIEW_MODE_LABEL}</Text>
+              </View>
+              <Text style={styles.warningText}>
+                Enable ONLY during App Store review. This bypasses live billing
+                and unlocks all features for every user. Remember to disable
+                immediately after approval.
+              </Text>
+              <Text style={[listStyles.rowMeta, styles.warningMeta]}>
+                {reviewRow.flag_key} ·{' '}
+                {reviewRow.is_enabled ? 'ENABLED' : 'DISABLED'}
+              </Text>
+            </View>
+            <Switch
+              value={reviewRow.is_enabled}
+              onValueChange={(v) => confirmReviewMode(reviewRow, v)}
+              disabled={busy[reviewRow.flag_key]}
+              trackColor={{ true: colors.amber, false: undefined }}
+            />
+          </View>
+        </AdminCard>
+      ) : null}
     </ScrollView>
   );
 };
@@ -149,5 +210,30 @@ const styles = StyleSheet.create({
     ...typography.caption,
     color: colors.mutedText,
     paddingHorizontal: spacing.xs,
+  },
+  warningCard: {
+    backgroundColor: colors.amberLight,
+    borderColor: colors.amber,
+    borderWidth: 1,
+  },
+  warningTitleRow: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: 6,
+  },
+  warningTitle: {
+    ...typography.h3,
+    color: colors.amber,
+    fontSize: 14,
+  },
+  warningText: {
+    ...typography.caption,
+    color: colors.amber,
+    fontSize: 12,
+    marginTop: 4,
+  },
+  warningMeta: {
+    color: colors.amber,
+    opacity: 0.8,
   },
 });

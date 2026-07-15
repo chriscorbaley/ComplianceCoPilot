@@ -1,5 +1,6 @@
 import { useMemo } from 'react';
 import { useAuth } from '../auth/AuthContext';
+import { useReviewMode } from '../context/FeatureFlagContext';
 import type { SubscriptionTier } from '../services/supabase';
 
 export interface StrategyAccess {
@@ -23,6 +24,15 @@ const TIER_STRATEGIES: Record<SubscriptionTier, Set<string> | null> = {
 
 export function useStrategyAccess(): StrategyAccess {
   const { activeStrategies, subscriptionTier, isAdmin } = useAuth();
+  // App Store review mode grants Pro-level access to EVERY user at runtime so
+  // reviewers can exercise every strategy, voice, mileage, and travel without a
+  // paid tier. This overlays the access check ONLY — the stored
+  // subscription_tier is never touched. useReviewMode is fail-closed, so when
+  // review mode is off (the normal, production state) this changes nothing and
+  // regular tier gating applies. We treat review-mode users as Pro, NOT admin,
+  // so it never exposes admin-only surfaces.
+  const reviewMode = useReviewMode();
+  const proAccess = isAdmin || reviewMode;
 
   return useMemo<StrategyAccess>(() => {
     const set = new Set(activeStrategies);
@@ -30,14 +40,15 @@ export function useStrategyAccess(): StrategyAccess {
       activeStrategies,
       tier: subscriptionTier,
       isAdmin,
-      isPro: isAdmin || subscriptionTier === 'pro',
+      isPro: proAccess || subscriptionTier === 'pro',
       canUseVoice:
-        isAdmin || subscriptionTier === 'core' || subscriptionTier === 'pro',
-      hasStrategy: (key: string) => isAdmin || set.has(key),
-      hasAnyStrategy: (keys: string[]) => isAdmin || keys.some((k) => set.has(k)),
+        proAccess || subscriptionTier === 'core' || subscriptionTier === 'pro',
+      hasStrategy: (key: string) => proAccess || set.has(key),
+      hasAnyStrategy: (keys: string[]) =>
+        proAccess || keys.some((k) => set.has(k)),
       requiredTierFor: () => (subscriptionTier === 'starter' ? 'Core' : 'Pro'),
     };
-  }, [activeStrategies, subscriptionTier, isAdmin]);
+  }, [activeStrategies, subscriptionTier, isAdmin, proAccess]);
 }
 
 // Map display strategy IDs (s1, s2, s3, …) used by the dashboard StrategyCard

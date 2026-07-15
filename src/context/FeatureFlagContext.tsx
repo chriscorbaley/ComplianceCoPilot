@@ -10,6 +10,7 @@ import { supabase } from '../services/supabase';
 import {
   defaultFeatureFlagMap,
   fetchFeatureFlagMap,
+  REVIEW_MODE_FLAG_KEY,
   type FeatureFlagMap,
 } from '../services/featureFlags';
 
@@ -96,6 +97,23 @@ export function useFeatureFlag(flagKey: string): boolean {
   const ctx = useContext(FeatureFlagContext);
   if (!ctx) return true;
   return ctx.isEnabled(flagKey);
+}
+
+// App Store review mode. FAIL-CLOSED, and deliberately NOT built on
+// useFeatureFlag (which fails open). Returns true ONLY when the review_mode row
+// is explicitly enabled in the DB: outside the provider, before the flags have
+// loaded, or when the row is missing it returns false, so review mode can never
+// switch on by accident. review_mode is not in the fail-open default map, so
+// flags[REVIEW_MODE_FLAG_KEY] is undefined until the real DB value arrives and
+// the strict `=== true` keeps it off in every ambiguous case.
+//
+// It still rides the same realtime subscription as every other flag, so an
+// admin flipping it in the panel reaches (and, crucially, LEAVES) every client
+// app within seconds — a live kill switch.
+export function useReviewMode(): boolean {
+  const ctx = useContext(FeatureFlagContext);
+  if (!ctx) return false;
+  return ctx.flags[REVIEW_MODE_FLAG_KEY] === true;
 }
 
 // Full context accessor for callers that need the whole map or loading state.

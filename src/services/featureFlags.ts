@@ -52,6 +52,17 @@ export const FEATURE_FLAG_LABELS: Record<FeatureFlagKey, string> = {
   real_estate: 'Real Estate',
 };
 
+// App Store review mode. This is an OPERATIONAL flag, deliberately kept OUT of
+// FEATURE_FLAG_KEYS above so it is NOT part of the fail-open default map. Every
+// entry in FEATURE_FLAG_KEYS defaults to ENABLED (a read failure must never
+// hide a paid feature); review_mode is the inverse — it must FAIL CLOSED. It
+// counts as on ONLY when its feature_flags row is explicitly is_enabled = true,
+// because turning it on bypasses live billing and unlocks every feature for
+// ALL users. It must never switch on by accident (missing row, failed read, no
+// provider). Read it exclusively through useReviewMode(), never useFeatureFlag.
+export const REVIEW_MODE_FLAG_KEY = 'review_mode';
+export const REVIEW_MODE_LABEL = 'Review Mode';
+
 export interface FeatureFlagRow {
   flag_key: string;
   description: string | null;
