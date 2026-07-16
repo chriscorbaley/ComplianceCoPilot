@@ -22,6 +22,14 @@ export interface PricingPlan {
   sort_order: number;
   features: string[];
   is_active: boolean;
+  // Annual (paid-in-full) pricing. `annual_price` is the rounded whole-dollar
+  // charge billed once a year; `annual_discount_pct` is the % savings vs paying
+  // monthly (informational — the charged amount is always `annual_price`);
+  // `annual_enabled` gates whether the annual option is offered at all. NOTE:
+  // the monthly/annual toggle UI is not built yet — this is data only for now.
+  annual_price: number;
+  annual_discount_pct: number;
+  annual_enabled: boolean;
 }
 
 // ── Fallback plans (shipped in the binary) ──────────────────────────────────
@@ -40,6 +48,9 @@ export const PRICING_FALLBACK: Record<SubscriptionTier, PricingPlan> = {
       'Document storage',
     ],
     is_active: true,
+    annual_price: 529,
+    annual_discount_pct: 10,
+    annual_enabled: true,
   },
   core: {
     plan_key: 'core',
@@ -54,6 +65,9 @@ export const PRICING_FALLBACK: Record<SubscriptionTier, PricingPlan> = {
       'Priority support',
     ],
     is_active: true,
+    annual_price: 1069,
+    annual_discount_pct: 10,
+    annual_enabled: true,
   },
   pro: {
     plan_key: 'pro',
@@ -69,6 +83,9 @@ export const PRICING_FALLBACK: Record<SubscriptionTier, PricingPlan> = {
       'All Core and Basic features',
     ],
     is_active: true,
+    annual_price: 2149,
+    annual_discount_pct: 10,
+    annual_enabled: true,
   },
 };
 
@@ -105,6 +122,8 @@ function normalizePlan(row: Record<string, unknown>): PricingPlan | null {
   const price = Number(row.monthly_price);
   const trial = Number(row.trial_days);
   const sort = Number(row.sort_order);
+  const annualPrice = Number(row.annual_price);
+  const annualPct = Number(row.annual_discount_pct);
   return {
     plan_key: key,
     display_name:
@@ -116,6 +135,10 @@ function normalizePlan(row: Record<string, unknown>): PricingPlan | null {
     sort_order: Number.isFinite(sort) ? sort : fallback.sort_order,
     features: normalizeFeatures(row.features),
     is_active: row.is_active !== false,
+    annual_price: Number.isFinite(annualPrice) ? annualPrice : fallback.annual_price,
+    annual_discount_pct: Number.isFinite(annualPct) ? annualPct : fallback.annual_discount_pct,
+    // Default to enabled unless the row explicitly says false.
+    annual_enabled: row.annual_enabled !== false,
   };
 }
 
@@ -123,6 +146,20 @@ function normalizePlan(row: Record<string, unknown>): PricingPlan | null {
 // fractional prices show cents ($99.50).
 export function formatPrice(price: number): string {
   return Number.isInteger(price) ? `$${price}` : `$${price.toFixed(2)}`;
+}
+
+// Format the annual (paid-in-full) charge as a clean whole-dollar figure, e.g.
+// "$529/year". Annual prices are stored as rounded whole dollars, so the amount
+// is rounded here to guard against a stray fractional DB value.
+export function formatAnnualPrice(annualPrice: number): string {
+  return `$${Math.round(annualPrice)}/year`;
+}
+
+// Format the effective monthly-equivalent of the annual price for display, e.g.
+// "$44/mo billed annually" — the annual charge spread across 12 months. Screens
+// can use this later to show the per-month savings framing of the annual plan.
+export function formatAnnualMonthlyEquivalent(annualPrice: number): string {
+  return `$${Math.round(annualPrice / 12)}/mo billed annually`;
 }
 
 // ── Reads ───────────────────────────────────────────────────────────────────
@@ -218,6 +255,9 @@ export interface PricingPlanUpdate {
   features?: string[];
   is_active?: boolean;
   sort_order?: number;
+  annual_price?: number;
+  annual_discount_pct?: number;
+  annual_enabled?: boolean;
 }
 
 // Fetch ALL plans (active + inactive) for the Admin editor.
@@ -245,7 +285,9 @@ export async function updatePricingPlan(
   try {
     const { data } = await supabase
       .from('pricing_plans')
-      .select('display_name, monthly_price, trial_days, features, is_active, sort_order')
+      .select(
+        'display_name, monthly_price, trial_days, features, is_active, sort_order, annual_price, annual_discount_pct, annual_enabled',
+      )
       .eq('plan_key', planKey)
       .maybeSingle();
     before = (data as Record<string, unknown> | null) ?? null;

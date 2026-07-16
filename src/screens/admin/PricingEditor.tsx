@@ -21,6 +21,7 @@ import {
   fetchAllPricingPlans,
   updatePricingPlan,
   formatPrice,
+  formatAnnualPrice,
   type PricingPlan,
 } from '../../services/pricingPlans';
 import {
@@ -41,6 +42,9 @@ interface EditorState {
   trial_days: string;
   is_active: boolean;
   features: string[];
+  annual_price: string;
+  annual_discount_pct: string;
+  annual_enabled: boolean;
 }
 
 const toEditor = (p: PricingPlan): EditorState => ({
@@ -50,7 +54,19 @@ const toEditor = (p: PricingPlan): EditorState => ({
   trial_days: String(p.trial_days),
   is_active: p.is_active,
   features: [...p.features],
+  annual_price: String(p.annual_price),
+  annual_discount_pct: String(p.annual_discount_pct),
+  annual_enabled: p.annual_enabled,
 });
+
+// round(monthly * 12 * (1 - pct/100)) — the suggested paid-in-full annual charge.
+// Returns null when either input isn't a usable number so callers can no-op.
+const suggestedAnnual = (monthly: string, pct: string): number | null => {
+  const m = Number(monthly);
+  const p = Number(pct);
+  if (!Number.isFinite(m) || m < 0 || !Number.isFinite(p)) return null;
+  return Math.round(m * 12 * (1 - p / 100));
+};
 
 export const PricingEditor: React.FC = () => {
   const insets = useSafeAreaInsets();
@@ -117,6 +133,16 @@ export const PricingEditor: React.FC = () => {
       Alert.alert('Invalid trial length', 'Enter a whole number of trial days (≥ 0).');
       return;
     }
+    const annualPrice = Number(editor.annual_price);
+    if (!Number.isFinite(annualPrice) || annualPrice < 0) {
+      Alert.alert('Invalid annual price', 'Enter a valid annual price (a number ≥ 0).');
+      return;
+    }
+    const annualPct = Number(editor.annual_discount_pct);
+    if (!Number.isFinite(annualPct) || annualPct < 0 || annualPct > 100) {
+      Alert.alert('Invalid discount', 'Enter an annual discount between 0 and 100 percent.');
+      return;
+    }
     const features = editor.features.map((f) => f.trim()).filter((f) => f.length > 0);
 
     setSaving(true);
@@ -129,6 +155,9 @@ export const PricingEditor: React.FC = () => {
           trial_days: trial,
           is_active: editor.is_active,
           features,
+          annual_price: annualPrice,
+          annual_discount_pct: annualPct,
+          annual_enabled: editor.annual_enabled,
         },
         session?.user.email ?? null,
       );
@@ -180,6 +209,21 @@ export const PricingEditor: React.FC = () => {
                 <Text style={styles.priceText}>{formatPrice(p.monthly_price)}</Text>
                 <Text style={styles.priceUnit}>/month</Text>
                 <Text style={styles.trialText}>· {p.trial_days}-day trial</Text>
+              </View>
+
+              <View style={styles.annualRow}>
+                <Text style={styles.annualText}>
+                  {formatAnnualPrice(p.annual_price)} ({p.annual_discount_pct}% off)
+                </Text>
+                {p.annual_enabled ? (
+                  <View style={styles.annualOnPill}>
+                    <Text style={styles.annualOnText}>ANNUAL ON</Text>
+                  </View>
+                ) : (
+                  <View style={styles.annualOffPill}>
+                    <Text style={styles.annualOffText}>ANNUAL OFF</Text>
+                  </View>
+                )}
               </View>
 
               <View style={styles.featureList}>
@@ -250,6 +294,71 @@ export const PricingEditor: React.FC = () => {
                 keyboardType="number-pad"
                 placeholder="e.g. 3"
               />
+
+              <View style={styles.annualDivider} />
+              <Text style={styles.featuresLabel}>Annual (paid in full)</Text>
+
+              <AdminInput
+                label="Annual discount (%)"
+                value={editor.annual_discount_pct}
+                onChangeText={(t) =>
+                  setEditor({ ...editor, annual_discount_pct: t.replace(/[^0-9.]/g, '') })
+                }
+                keyboardType="decimal-pad"
+                placeholder="e.g. 10"
+              />
+
+              <AdminInput
+                label="Annual price (USD, billed once/year)"
+                value={editor.annual_price}
+                onChangeText={(t) => setEditor({ ...editor, annual_price: t.replace(/[^0-9.]/g, '') })}
+                keyboardType="decimal-pad"
+                placeholder="e.g. 529"
+              />
+
+              {(() => {
+                // Offer, don't force: compute round(monthly * 12 * (1 - pct/100))
+                // and surface it as a one-tap suggestion. The admin can ignore it
+                // and keep a hand-picked round number in the annual price field.
+                const suggestion = suggestedAnnual(editor.monthly_price, editor.annual_discount_pct);
+                if (suggestion === null) return null;
+                const matches = Number(editor.annual_price) === suggestion;
+                return (
+                  <TouchableOpacity
+                    onPress={() => setEditor({ ...editor, annual_price: String(suggestion) })}
+                    disabled={matches}
+                    activeOpacity={0.8}
+                    style={[styles.suggestRow, matches && styles.suggestRowMatch]}
+                  >
+                    <Ionicons
+                      name={matches ? 'checkmark-circle' : 'calculator-outline'}
+                      size={16}
+                      color={matches ? colors.teal : colors.midNavy}
+                    />
+                    <Text style={[styles.suggestText, matches && styles.suggestTextMatch]}>
+                      {matches
+                        ? `Annual price matches the ${editor.annual_discount_pct || 0}% calculation ($${suggestion})`
+                        : `Suggested: $${suggestion} (monthly × 12 − ${editor.annual_discount_pct || 0}%). Tap to apply.`}
+                    </Text>
+                  </TouchableOpacity>
+                );
+              })()}
+
+              <View style={styles.toggleRow}>
+                <View style={{ flex: 1 }}>
+                  <Text style={styles.toggleLabel}>Annual plan enabled</Text>
+                  <Text style={styles.toggleHint}>
+                    When off, the annual (paid-in-full) option is not offered for this plan.
+                  </Text>
+                </View>
+                <Switch
+                  value={editor.annual_enabled}
+                  onValueChange={(v) => setEditor({ ...editor, annual_enabled: v })}
+                  trackColor={{ true: colors.teal, false: colors.divider }}
+                />
+              </View>
+
+              <View style={styles.annualDivider} />
 
               <View style={styles.toggleRow}>
                 <View style={{ flex: 1 }}>
@@ -389,6 +498,67 @@ const styles = StyleSheet.create({
     color: colors.mutedText,
     fontSize: 12,
     marginLeft: 4,
+  },
+  annualRow: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: spacing.sm,
+    marginTop: 4,
+  },
+  annualText: {
+    ...typography.caption,
+    color: colors.mutedText,
+    fontSize: 12,
+  },
+  annualOnPill: {
+    backgroundColor: colors.tealLight,
+    paddingHorizontal: spacing.sm,
+    paddingVertical: 2,
+    borderRadius: radius.pill,
+  },
+  annualOnText: {
+    ...typography.micro,
+    color: colors.teal,
+    fontSize: 9,
+    letterSpacing: 0.5,
+  },
+  annualOffPill: {
+    backgroundColor: colors.divider,
+    paddingHorizontal: spacing.sm,
+    paddingVertical: 2,
+    borderRadius: radius.pill,
+  },
+  annualOffText: {
+    ...typography.micro,
+    color: colors.mutedText,
+    fontSize: 9,
+    letterSpacing: 0.5,
+  },
+  annualDivider: {
+    height: StyleSheet.hairlineWidth,
+    backgroundColor: colors.divider,
+    marginVertical: spacing.xs,
+  },
+  suggestRow: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: 6,
+    backgroundColor: colors.lightBlue,
+    borderRadius: radius.card,
+    paddingHorizontal: spacing.md,
+    paddingVertical: spacing.sm,
+  },
+  suggestRowMatch: {
+    backgroundColor: colors.tealLight,
+  },
+  suggestText: {
+    ...typography.caption,
+    color: colors.midNavy,
+    fontSize: 12,
+    flex: 1,
+  },
+  suggestTextMatch: {
+    color: colors.teal,
   },
   featureList: {
     marginTop: spacing.md,
