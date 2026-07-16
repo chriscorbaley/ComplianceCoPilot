@@ -1237,7 +1237,7 @@ const HoursScreenInner: React.FC = () => {
       <View
         style={[
           styles.voiceWrap,
-          { paddingBottom: Math.max(spacing.sm, insets.bottom ? 0 : spacing.sm) },
+          { paddingBottom: spacing.sm + insets.bottom },
         ]}
       >
         {voiceFeaturesEnabled ? (

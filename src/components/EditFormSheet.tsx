@@ -12,6 +12,7 @@ import {
   View,
 } from 'react-native';
 import { Ionicons } from '@expo/vector-icons';
+import { useSafeAreaInsets } from 'react-native-safe-area-context';
 import { colors, radius, spacing, typography } from '../theme';
 import { scaled } from '../constants/layout';
 
@@ -64,6 +65,7 @@ export const EditFormSheet: React.FC<EditFormSheetProps> = ({
   deleteConfirmMessage = 'This cannot be undone.',
   extraActions,
 }) => {
+  const insets = useSafeAreaInsets();
   const confirmDelete = () => {
     if (!onDelete) return;
     Alert.alert(deleteConfirmTitle, deleteConfirmMessage, [
@@ -107,7 +109,12 @@ export const EditFormSheet: React.FC<EditFormSheetProps> = ({
               {children}
             </ScrollView>
 
-            <View style={styles.footer}>
+            <View
+              style={[
+                styles.footer,
+                { paddingBottom: spacing.xl + insets.bottom },
+              ]}
+            >
               {extraActions}
               <TouchableOpacity
                 activeOpacity={0.85}

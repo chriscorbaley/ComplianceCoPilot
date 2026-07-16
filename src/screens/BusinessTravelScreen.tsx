@@ -568,6 +568,42 @@ const AnalyzerTab: React.FC<AnalyzerTabProps> = ({ rules, insets, onLogTrip }) =
     setAnalyzeError(null);
   };
 
+  // Tapping a day in the result grid cycles its type Business → Personal →
+  // Travel → Business (matching the tap-to-change interaction of the Log Trip
+  // grid, extended to all three types since the AI classifies travel days
+  // anywhere, not just at the endpoints). Recomputing the four count fields on
+  // `parsed` makes the `result` memo below re-run the exact same deductibility
+  // logic, so the verdict and breakdown update immediately, and because
+  // handleLogTrip builds its payload from `parsed`, the corrected breakdown is
+  // what gets saved.
+  const cycleDay = React.useCallback((index: number) => {
+    setParsed((prev) => {
+      if (!prev) return prev;
+      const order: DayKind[] = ['business', 'personal', 'travel'];
+      const days = prev.days.map((d, i) => {
+        if (i !== index) return d;
+        const next = order[(order.indexOf(d.kind) + 1) % order.length];
+        return { ...d, kind: next };
+      });
+      let business = 0;
+      let personal = 0;
+      let travel = 0;
+      for (const d of days) {
+        if (d.kind === 'business') business += 1;
+        else if (d.kind === 'personal') personal += 1;
+        else travel += 1;
+      }
+      return {
+        ...prev,
+        days,
+        business_days: business,
+        personal_days: personal,
+        travel_days: travel,
+        total_days: days.length,
+      };
+    });
+  }, []);
+
   const result = useMemo<DeductibilityResult | null>(() => {
     if (!parsed) return null;
     return evaluateDeductibility(parsed, rules);
@@ -726,6 +762,7 @@ const AnalyzerTab: React.FC<AnalyzerTabProps> = ({ rules, insets, onLogTrip }) =
           result={result}
           rules={rules}
           onLogTrip={onLogTrip}
+          onCycleDay={cycleDay}
         />
       ) : null}
       </View>
@@ -738,9 +775,16 @@ interface ResultBlockProps {
   result: DeductibilityResult;
   rules: ComplianceRules;
   onLogTrip: (prefill: TripPrefill) => void;
+  onCycleDay: (index: number) => void;
 }
 
-const ResultBlock: React.FC<ResultBlockProps> = ({ parsed, result, rules, onLogTrip }) => {
+const ResultBlock: React.FC<ResultBlockProps> = ({
+  parsed,
+  result,
+  rules,
+  onLogTrip,
+  onCycleDay,
+}) => {
   const v = verdictTheme[result.verdict];
   const tripBadgeLabel =
     result.trip_type === 'domestic' ? 'Domestic' : 'International';
@@ -830,12 +874,19 @@ const ResultBlock: React.FC<ResultBlockProps> = ({ parsed, result, rules, onLogT
 
       <Card padded>
         <SectionHeader title="Day-by-day" />
+        <Text style={styles.detailHint}>
+          The AI's classification is a starting point — tap any day to change it.
+          Each tap cycles Business (blue) → Personal (red) → Travel (green), and
+          the verdict and breakdown above update instantly.
+        </Text>
         <View style={styles.dayGrid}>
           {parsed.days.map((d, i) => {
             const th = dayTheme[d.kind];
             return (
-              <View
+              <TouchableOpacity
                 key={`${d.date}-${i}`}
+                activeOpacity={0.7}
+                onPress={() => onCycleDay(i)}
                 style={[styles.dayCell, { backgroundColor: th.bg }]}
               >
                 <Text style={[styles.dayNum, { color: th.fg }]}>
@@ -848,7 +899,7 @@ const ResultBlock: React.FC<ResultBlockProps> = ({ parsed, result, rules, onLogT
                 >
                   {d.label}
                 </Text>
-              </View>
+              </TouchableOpacity>
             );
           })}
         </View>

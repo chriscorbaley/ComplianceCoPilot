@@ -3,6 +3,7 @@ import { Modal, Pressable, StyleSheet, Text, TouchableOpacity, View } from 'reac
 import { Ionicons } from '@expo/vector-icons';
 import { useNavigation } from '@react-navigation/native';
 import type { NativeStackNavigationProp } from '@react-navigation/native-stack';
+import { useSafeAreaInsets } from 'react-native-safe-area-context';
 import { colors } from '../theme';
 import { scaled } from '../constants/layout';
 import { usePricingPlans, formatPrice } from '../services/pricingPlans';
@@ -23,6 +24,7 @@ export const VoiceUpgradeSheet: React.FC<VoiceUpgradeSheetProps> = ({
   const navigation =
     useNavigation<NativeStackNavigationProp<RootStackParamList>>();
   const { byKey } = usePricingPlans();
+  const insets = useSafeAreaInsets();
 
   const goUpgrade = (tier: 'core' | 'pro') => {
     onClose();
@@ -32,7 +34,10 @@ export const VoiceUpgradeSheet: React.FC<VoiceUpgradeSheetProps> = ({
   return (
     <Modal visible={visible} transparent animationType="slide" onRequestClose={onClose}>
       <Pressable style={styles.backdrop} onPress={onClose}>
-        <Pressable style={styles.sheet} onPress={() => undefined}>
+        <Pressable
+          style={[styles.sheet, { paddingBottom: 28 + insets.bottom }]}
+          onPress={() => undefined}
+        >
           <View style={styles.handle} />
           <View style={styles.header}>
             <View style={styles.iconWrap}>

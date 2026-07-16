@@ -15,6 +15,7 @@ import {
   View,
 } from 'react-native';
 import { Ionicons } from '@expo/vector-icons';
+import { useSafeAreaInsets } from 'react-native-safe-area-context';
 import { colors, radius, shadow, spacing, typography } from '../theme';
 import { scaled } from '../constants/layout';
 import { SignaturePad } from './SignaturePad';
@@ -46,6 +47,7 @@ export const AugustaDocsModal: React.FC<Props> = ({
   onClose,
   onGenerated,
 }) => {
+  const insets = useSafeAreaInsets();
   const [ownerName, setOwnerName] = useState(defaultOwnerName);
   const [entity, setEntity] = useState('');
   const [tenantRepName, setTenantRepName] = useState(defaultOwnerName);
@@ -156,7 +158,10 @@ export const AugustaDocsModal: React.FC<Props> = ({
 
           <ScrollView
             style={styles.scroll}
-            contentContainerStyle={styles.scrollContent}
+            contentContainerStyle={[
+              styles.scrollContent,
+              { paddingBottom: spacing.xxl + insets.bottom },
+            ]}
             showsVerticalScrollIndicator={false}
             scrollEnabled={scrollEnabled}
             keyboardShouldPersistTaps="handled"

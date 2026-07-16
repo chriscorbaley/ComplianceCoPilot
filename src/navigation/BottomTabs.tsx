@@ -1,6 +1,7 @@
 import React from 'react';
 import { Platform, StyleSheet } from 'react-native';
 import { createBottomTabNavigator } from '@react-navigation/bottom-tabs';
+import { useSafeAreaInsets } from 'react-native-safe-area-context';
 import { Ionicons } from '@expo/vector-icons';
 import { colors, typography } from '../theme';
 import {
@@ -19,6 +20,10 @@ import { useFeatureFlag } from '../context/FeatureFlagContext';
 import type { TabParamList } from './types';
 
 const Tab = createBottomTabNavigator<TabParamList>();
+
+// Tab bar height WITHOUT the bottom safe-area inset. The Android system nav bar
+// inset (and, on iOS, the home indicator) is added on top of this at runtime.
+const BASE_TAB_HEIGHT = Platform.select({ ios: 84, android: 64, default: 64 });
 
 type IconName = keyof typeof Ionicons.glyphMap;
 
@@ -44,13 +49,25 @@ export const BottomTabs: React.FC = () => {
   // (Tier gating still applies inside each screen when the flag is on.)
   const businessTravelEnabled = useFeatureFlag('business_travel');
   const mileageEnabled = useFeatureFlag('mileage_tracker');
+  // Safe-area bottom inset keeps the tab bar above the Android system navigation
+  // bar (back/home/recent). iOS already accounts for the home indicator via the
+  // fixed BASE_TAB_HEIGHT below, so we only add the actual inset on Android to
+  // avoid changing the iOS appearance.
+  const insets = useSafeAreaInsets();
+  const bottomInset = Platform.OS === 'android' ? insets.bottom : 0;
+  const tabBarInset = {
+    height: BASE_TAB_HEIGHT + bottomInset,
+    paddingBottom: bottomInset,
+  };
   return (
     <Tab.Navigator
       screenOptions={({ route }) => ({
         headerShown: false,
         tabBarActiveTintColor: colors.navy,
         tabBarInactiveTintColor: colors.subtleText,
-        tabBarStyle: isTablet ? [styles.tabBar, styles.tabBarTablet] : styles.tabBar,
+        tabBarStyle: isTablet
+          ? [styles.tabBar, styles.tabBarTablet, tabBarInset]
+          : [styles.tabBar, tabBarInset],
         tabBarLabelStyle: styles.label,
         tabBarItemStyle: styles.item,
         tabBarIcon: ({ focused, color, size }) => (
@@ -83,7 +100,8 @@ const styles = StyleSheet.create({
     backgroundColor: colors.white,
     borderTopWidth: StyleSheet.hairlineWidth,
     borderTopColor: colors.divider,
-    height: Platform.select({ ios: 84, android: 64, default: 64 }),
+    // height + paddingBottom are applied dynamically via `tabBarInset` so the
+    // bar clears the Android system navigation bar (see BASE_TAB_HEIGHT).
     paddingTop: 8,
   },
   // On tablets, constrain the tab bar to the 600px content column and center it

@@ -145,7 +145,7 @@ export const VoiceLogStrip: React.FC<VoiceLogStripProps> = ({
       <View
         style={[
           styles.container,
-          { paddingBottom: Math.max(spacing.sm, insets.bottom ? 0 : spacing.sm) },
+          { paddingBottom: spacing.sm + insets.bottom },
         ]}
       >
         <VoiceUnavailableNotice />
@@ -157,7 +157,7 @@ export const VoiceLogStrip: React.FC<VoiceLogStripProps> = ({
     <View
       style={[
         styles.container,
-        { paddingBottom: Math.max(spacing.sm, insets.bottom ? 0 : spacing.sm) },
+        { paddingBottom: spacing.sm + insets.bottom },
       ]}
     >
       <TouchableOpacity

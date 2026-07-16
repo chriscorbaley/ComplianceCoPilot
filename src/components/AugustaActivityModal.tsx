@@ -19,6 +19,7 @@ import {
 } from 'react-native';
 import { Ionicons } from '@expo/vector-icons';
 import { Audio } from 'expo-av';
+import { useSafeAreaInsets } from 'react-native-safe-area-context';
 import { colors, radius, shadow, spacing, typography } from '../theme';
 import { scaled } from '../constants/layout';
 import {
@@ -73,6 +74,7 @@ export const AugustaActivityModal: React.FC<AugustaActivityModalProps> = ({
   onSaved,
 }) => {
   const { activeBusinessId, activeBusiness } = useBusiness();
+  const insets = useSafeAreaInsets();
   const { canUseVoice } = useStrategyAccess();
   // Global voice kill-switch, independent of tier gating.
   const voiceFeaturesEnabled = useFeatureFlag('voice_features');
@@ -288,7 +290,10 @@ export const AugustaActivityModal: React.FC<AugustaActivityModalProps> = ({
 
           <ScrollView
             style={styles.scroll}
-            contentContainerStyle={styles.scrollContent}
+            contentContainerStyle={[
+              styles.scrollContent,
+              { paddingBottom: spacing.xxl + insets.bottom },
+            ]}
             showsVerticalScrollIndicator={false}
             keyboardShouldPersistTaps="handled"
           >
