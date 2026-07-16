@@ -25,7 +25,7 @@ import { createClient } from '@supabase/supabase-js';
 const SUPABASE_URL = Deno.env.get('SUPABASE_URL') ?? '';
 const SERVICE_ROLE = Deno.env.get('SUPABASE_SERVICE_ROLE_KEY') ?? '';
 const RESEND_KEY = Deno.env.get('RESEND_API_KEY') ?? '';
-const FROM_EMAIL = Deno.env.get('WELCOME_FROM_EMAIL') ?? 'no-reply@example.com';
+const FROM_EMAIL = Deno.env.get('WELCOME_FROM_EMAIL') ?? 'Compliance Co-Pilot <noreply@send.thecopilot.app>';
 const APP_LINK = Deno.env.get('WELCOME_APP_LINK') ?? 'https://compliancecopilot.com';
 
 const PLAN_PRICES: Record<string, number> = {
