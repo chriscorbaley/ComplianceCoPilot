@@ -9,7 +9,6 @@ import {
   ScrollView,
   StyleSheet,
   Text,
-  TextInput,
   TouchableOpacity,
   View,
 } from 'react-native';
@@ -32,7 +31,7 @@ import { Card } from '../components/Card';
 import { ProgressBar } from '../components/ProgressBar';
 import { SectionHeader } from '../components/SectionHeader';
 import { EditableListRow } from '../components/EditableListRow';
-import { EditFormSheet } from '../components/EditFormSheet';
+import { ActivityLogSheet } from '../components/ActivityLogSheet';
 import { DatePickerModal } from '../components/DateInputField';
 import { type ActivityHoursType } from '../services/activityLog';
 import {
@@ -186,17 +185,7 @@ const toISODateLocal = (date: Date): string => {
   return `${date.getFullYear()}-${month}-${day}`;
 };
 
-// Parse a stored ISO calendar date (YYYY-MM-DD) into a local Date with no
-// time-zone shift.
-const parseISODateLocal = (iso: string | null): Date | null => {
-  if (!iso) return null;
-  const m = /^(\d{4})-(\d{2})-(\d{2})/.exec(iso);
-  if (m) return new Date(Number(m[1]), Number(m[2]) - 1, Number(m[3]));
-  const d = new Date(iso);
-  return Number.isNaN(d.getTime()) ? null : d;
-};
-
-// MM/DD/YYYY display for the edit-sheet date field.
+// MM/DD/YYYY display for the filter-sheet date fields.
 const formatDateMMDDYYYY = (date: Date): string => {
   const month = String(date.getMonth() + 1).padStart(2, '0');
   const day = String(date.getDate()).padStart(2, '0');
@@ -239,13 +228,6 @@ const DATE_RANGE_OPTIONS: Array<{ key: DateRangeKey; label: string }> = [
 
 const HOURS_TYPE_OPTIONS: Array<{ key: HoursTypeFilter; label: string }> = [
   { key: 'all', label: 'All types' },
-  { key: 'reps_general', label: 'REPS General' },
-  { key: 'material_participation', label: 'Material Participation' },
-  { key: 'str_participation', label: 'STR Participation' },
-];
-
-// The three editable hours_type buckets (no "all" — every row has one).
-const HOURS_TYPE_EDIT_OPTIONS: Array<{ key: ActivityHoursType; label: string }> = [
   { key: 'reps_general', label: 'REPS General' },
   { key: 'material_participation', label: 'Material Participation' },
   { key: 'str_participation', label: 'STR Participation' },
@@ -1343,7 +1325,9 @@ const HoursScreenInner: React.FC = () => {
         onReset={() => setFilters(DEFAULT_FILTERS)}
       />
 
-      <HoursEditSheet
+      <ActivityLogSheet
+        mode="edit"
+        visible={!!editingRow}
         row={editingRow}
         properties={properties}
         onClose={() => setEditingRow(null)}
@@ -1558,30 +1542,6 @@ const ReTrackerRow: React.FC<ReTrackerRowProps> = ({
 
 // ── Shared form bits ─────────────────────────────────────────────────────────
 
-const FieldLabel: React.FC<{ text: string }> = ({ text }) => (
-  <Text style={editStyles.fieldLabel}>{text}</Text>
-);
-
-const OptionRow: React.FC<{
-  label: string;
-  active: boolean;
-  onPress: () => void;
-}> = ({ label, active, onPress }) => (
-  <TouchableOpacity
-    activeOpacity={0.8}
-    onPress={onPress}
-    style={[editStyles.option, active && editStyles.optionActive]}
-  >
-    <Text
-      style={[editStyles.optionText, active && editStyles.optionTextActive]}
-      numberOfLines={1}
-    >
-      {label}
-    </Text>
-    {active ? <Ionicons name="checkmark" size={18} color={colors.white} /> : null}
-  </TouchableOpacity>
-);
-
 const FilterChip: React.FC<{
   label: string;
   active: boolean;
@@ -1785,186 +1745,6 @@ const HoursFilterSheet: React.FC<HoursFilterSheetProps> = ({
         </View>
       </View>
     </Modal>
-  );
-};
-
-// ── Activity edit sheet (Fix 2) ──────────────────────────────────────────────
-
-interface HoursEditSheetProps {
-  row: HoursLogRow | null;
-  properties: PropertyRow[];
-  onClose: () => void;
-  onSaved: () => Promise<void> | void;
-}
-
-const HoursEditSheet: React.FC<HoursEditSheetProps> = ({
-  row,
-  properties,
-  onClose,
-  onSaved,
-}) => {
-  const [description, setDescription] = useState('');
-  const [date, setDate] = useState<Date | null>(null);
-  const [hours, setHours] = useState('');
-  const [hoursType, setHoursType] = useState<ActivityHoursType>('reps_general');
-  const [propertyId, setPropertyId] = useState<string | null>(null);
-  const [showDatePicker, setShowDatePicker] = useState(false);
-  const [saving, setSaving] = useState(false);
-
-  // Pre-fill every field from the tapped record whenever a new row opens.
-  useEffect(() => {
-    if (!row) return;
-    setDescription(row.description ?? '');
-    setDate(parseISODateLocal(row.activity_date));
-    setHours(row.hours != null ? String(row.hours) : '');
-    setHoursType((row.hours_type as ActivityHoursType) ?? 'reps_general');
-    setPropertyId(row.property_id ?? null);
-  }, [row]);
-
-  const handleSave = async () => {
-    if (!row) return;
-    const hoursNum = parseFloat(hours);
-    setSaving(true);
-    try {
-      const userId = await requireUserId();
-      const { error } = await supabase
-        .from('hours_log')
-        .update({
-          description: description.trim() || null,
-          activity_date: date ? toISODateLocal(date) : row.activity_date,
-          hours: Number.isFinite(hoursNum) ? hoursNum : 0,
-          hours_type: hoursType,
-          property_id: propertyId,
-        })
-        .eq('id', row.id)
-        .eq('user_id', userId);
-      if (error) throw new Error(error.message);
-      await onSaved();
-      onClose();
-    } catch (e) {
-      Alert.alert('Could not save activity', e instanceof Error ? e.message : String(e));
-    } finally {
-      setSaving(false);
-    }
-  };
-
-  const handleDelete = async () => {
-    if (!row) return;
-    setSaving(true);
-    try {
-      const userId = await requireUserId();
-      const { error } = await supabase
-        .from('hours_log')
-        .delete()
-        .eq('id', row.id)
-        .eq('user_id', userId);
-      if (error) throw new Error(error.message);
-      await onSaved();
-      onClose();
-    } catch (e) {
-      Alert.alert('Could not delete activity', e instanceof Error ? e.message : String(e));
-    } finally {
-      setSaving(false);
-    }
-  };
-
-  return (
-    <EditFormSheet
-      title="Edit Activity"
-      visible={!!row}
-      onClose={onClose}
-      onSave={handleSave}
-      onDelete={handleDelete}
-      saving={saving}
-      deleteLabel="Delete Activity"
-      deleteConfirmTitle="Delete this activity?"
-      deleteConfirmMessage="Delete this activity? This cannot be undone."
-    >
-      <View>
-        <FieldLabel text="Activity description" />
-        <TextInput
-          style={[editStyles.input, editStyles.inputMulti]}
-          value={description}
-          onChangeText={setDescription}
-          placeholder="What did you do?"
-          placeholderTextColor={colors.subtleText}
-          multiline
-        />
-      </View>
-
-      <View>
-        <FieldLabel text="Date" />
-        <TouchableOpacity
-          activeOpacity={0.7}
-          onPress={() => setShowDatePicker(true)}
-          style={editStyles.dateField}
-        >
-          <Text style={[editStyles.dateText, !date && editStyles.datePlaceholder]}>
-            {date ? formatDateMMDDYYYY(date) : 'MM/DD/YYYY'}
-          </Text>
-          <Ionicons name="calendar-outline" size={20} color={colors.midNavy} />
-        </TouchableOpacity>
-      </View>
-
-      <View>
-        <FieldLabel text="Hours" />
-        <TextInput
-          style={editStyles.input}
-          value={hours}
-          onChangeText={setHours}
-          keyboardType="decimal-pad"
-          placeholder="0"
-          placeholderTextColor={colors.subtleText}
-        />
-      </View>
-
-      <View>
-        <FieldLabel text="Hours type" />
-        <View style={editStyles.optionList}>
-          {HOURS_TYPE_EDIT_OPTIONS.map((opt) => (
-            <OptionRow
-              key={opt.key}
-              label={opt.label}
-              active={hoursType === opt.key}
-              onPress={() => setHoursType(opt.key)}
-            />
-          ))}
-        </View>
-      </View>
-
-      {properties.length > 0 ? (
-        <View>
-          <FieldLabel text="Property" />
-          <View style={editStyles.optionList}>
-            <OptionRow
-              label="General / Administrative"
-              active={propertyId === null}
-              onPress={() => setPropertyId(null)}
-            />
-            {properties.map((p) => (
-              <OptionRow
-                key={p.id}
-                label={p.property_name}
-                active={propertyId === p.id}
-                onPress={() => setPropertyId(p.id)}
-              />
-            ))}
-          </View>
-        </View>
-      ) : null}
-
-      <DatePickerModal
-        visible={showDatePicker}
-        title="Activity Date"
-        value={date}
-        minimumDate={MIN_ACTIVITY_DATE}
-        onConfirm={(d) => {
-          setDate(d);
-          setShowDatePicker(false);
-        }}
-        onCancel={() => setShowDatePicker(false)}
-      />
-    </EditFormSheet>
   );
 };
 

@@ -26,7 +26,9 @@ import { AugustaActivityModal } from '../components/AugustaActivityModal';
 import { RealEstateSettingsSheet } from '../components/RealEstateSettingsSheet';
 import { ManualMinutesModal } from '../components/ManualMinutesModal';
 import { ComplianceReportButton } from '../components/ComplianceReportButton';
-import { supabase } from '../services/supabase';
+import { ActivityLogSheet } from '../components/ActivityLogSheet';
+import { supabase, type PropertyRow } from '../services/supabase';
+import { listProperties } from '../services/properties';
 import { generateRealEstateReport } from '../services/realEstateReport';
 import { generateAugustaReport } from '../services/complianceReports';
 import { useAuth } from '../auth/AuthContext';
@@ -56,6 +58,8 @@ export const StrategyDetailScreen: React.FC = () => {
   const [augustaFormOpen, setAugustaFormOpen] = useState(false);
   const [manualOpen, setManualOpen] = useState(false);
   const [settingsOpen, setSettingsOpen] = useState(false);
+  const [logOpen, setLogOpen] = useState(false);
+  const [properties, setProperties] = useState<PropertyRow[]>([]);
   const [generating, setGenerating] = useState(false);
   const businessName = activeBusiness?.business_name ?? null;
 
@@ -102,13 +106,52 @@ export const StrategyDetailScreen: React.FC = () => {
     if (!error && count != null) setAugustaDays(count);
   }, [activeBusinessId]);
 
+  // For real-estate / material participation, mirror the Dashboard's hoursYTD:
+  // sum every hours_log row this tax year. Seeded from the value passed in, then
+  // refreshed live (on focus and after a manual log) so a new entry shows at
+  // once without an app restart.
+  const [reHours, setReHours] = useState(strategy.progress);
+
+  const loadReHours = useCallback(async () => {
+    const year = new Date().getFullYear();
+    let q = supabase
+      .from('hours_log')
+      .select('hours')
+      .gte('activity_date', `${year}-01-01`)
+      .lte('activity_date', `${year}-12-31`);
+    if (activeBusinessId) q = q.eq('business_id', activeBusinessId);
+    const { data, error } = await q;
+    if (!error && data) {
+      const total = data.reduce((sum, r) => sum + (Number(r.hours) || 0), 0);
+      setReHours(Math.round(total));
+    }
+  }, [activeBusinessId]);
+
+  // Load the property list once (for the Log Activity picker) and keep the
+  // material-participation hours count fresh whenever the screen regains focus.
   useFocusEffect(
     useCallback(() => {
       if (isAugusta) loadAugustaCount().catch(() => undefined);
-    }, [isAugusta, loadAugustaCount]),
+      if (showProperties) {
+        loadReHours().catch(() => undefined);
+        listProperties(activeBusinessId)
+          .then(setProperties)
+          .catch(() => undefined);
+      }
+    }, [
+      isAugusta,
+      loadAugustaCount,
+      showProperties,
+      loadReHours,
+      activeBusinessId,
+    ]),
   );
 
-  const progress = isAugusta ? augustaDays : strategy.progress;
+  const progress = isAugusta
+    ? augustaDays
+    : showProperties
+    ? reHours
+    : strategy.progress;
   const pct = Math.round((progress / strategy.total) * 100);
   const accent = strategy.accentColor ?? colors.midNavy;
   const remaining = Math.max(0, strategy.total - progress);
@@ -301,6 +344,10 @@ export const StrategyDetailScreen: React.FC = () => {
               setAugustaFormOpen(true);
               return;
             }
+            if (showProperties) {
+              setLogOpen(true);
+              return;
+            }
             Alert.alert('Log activity', `Logging activity for ${strategy.name}…`);
           }}
           style={[styles.btn, styles.btnPrimary]}
@@ -346,6 +393,18 @@ export const StrategyDetailScreen: React.FC = () => {
         <RealEstateSettingsSheet
           visible={settingsOpen}
           onClose={() => setSettingsOpen(false)}
+        />
+      ) : null}
+
+      {showProperties ? (
+        <ActivityLogSheet
+          mode="create"
+          visible={logOpen}
+          properties={properties}
+          businessId={activeBusinessId}
+          defaultHoursType="material_participation"
+          onClose={() => setLogOpen(false)}
+          onSaved={() => loadReHours().catch(() => undefined)}
         />
       ) : null}
       </View>
