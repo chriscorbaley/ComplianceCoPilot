@@ -43,3 +43,58 @@ export const STRATEGY_COMPLIANCE_ROUTE: Record<string, string> = {
   home_office: 'HomeOfficeCompliance',
   family_management: 'FamilyMgmtCompliance',
 };
+
+// ── Single source of truth for compliance completion ──────────────────────
+//
+// The Home Office screen, the Dashboard compliance cards, and the Documents
+// tab all score completion through the two functions below so they can never
+// disagree. A slot is "satisfied" only when an uploaded row exists for its
+// document_key WITH a non-null file_url — a metadata-only row (file_url null)
+// does not count. `strategyKey` is matched too, so callers can pass rows for
+// every strategy without pre-filtering.
+
+// The minimal shape these helpers need from a strategy_documents row. Any
+// StrategyDocumentRow satisfies this structurally.
+export interface CompletionRow {
+  strategy_key: string;
+  document_key: string;
+  file_url: string | null;
+}
+
+export interface StrategyCompletion {
+  satisfied: Set<string>;
+  completed: number;
+  total: number;
+  isComplete: boolean;
+}
+
+// Which of a strategy's slots are satisfied by the given uploaded rows. The
+// Home Office residence slot is satisfied by either a closing disclosure or a
+// lease agreement — encoded here so every caller agrees.
+export function satisfiedSlotKeys(
+  strategyKey: string,
+  rows: CompletionRow[],
+): Set<string> {
+  const satisfied = new Set(
+    rows
+      .filter((r) => r.strategy_key === strategyKey && r.file_url)
+      .map((r) => r.document_key),
+  );
+  if (strategyKey === 'home_office' && satisfied.has('lease_agreement')) {
+    satisfied.add('closing_disclosure');
+  }
+  return satisfied;
+}
+
+// Full completion snapshot for a strategy: the satisfied slot set, the
+// completed/total counts, and whether every required slot is satisfied.
+export function computeStrategyCompletion(
+  strategyKey: string,
+  rows: CompletionRow[],
+): StrategyCompletion {
+  const slots = STRATEGY_COMPLIANCE_SLOTS[strategyKey] ?? [];
+  const satisfied = satisfiedSlotKeys(strategyKey, rows);
+  const completed = slots.reduce((n, s) => n + (satisfied.has(s.key) ? 1 : 0), 0);
+  const total = slots.length;
+  return { satisfied, completed, total, isComplete: total > 0 && completed === total };
+}

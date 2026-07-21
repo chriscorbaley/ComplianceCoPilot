@@ -2,13 +2,16 @@
 //
 // Four sections:
 //   1. Square-footage calculator + supporting doc upload
-//   2. Utility expenses: per-category monthly/annual tracker (no uploads)
+//   2. Utility expenses: required utility-bill upload + per-category tracker
 //   3. Residence documentation: own (closing disclosure) or rent (lease)
 //   4. Renovation receipts: multiple uploads with per-receipt amount + total
 //
-// The four-of-four progress indicator at the top considers a section complete
-// when at least one file is present for that section's document_key — except the
-// Utility Expenses section, which is complete once any category has data entered.
+// The four-of-four progress indicator uses computeStrategyCompletion — the same
+// shared source of truth the Dashboard cards and Documents tab use — so a
+// section counts complete only when a file is present for its registry slot
+// (square_footage, utilities, closing_disclosure/lease, renovation_receipt).
+// The numeric utility tracker is supplementary metadata that feeds the
+// deduction report; the required "utilities" slot is the uploaded utility bill.
 
 import React, { useCallback, useEffect, useMemo, useState } from 'react';
 import {
@@ -44,10 +47,15 @@ import {
   getStrategyDocumentSignedUrl,
   type StrategyDocumentRow,
 } from '../../services/strategyDocuments';
+import { computeStrategyCompletion } from '../../services/strategyComplianceSlots';
 
 const STRATEGY_KEY = 'home_office';
 
 const DOC_SQUARE_FOOTAGE = 'square_footage';
+// Uploaded utility bill — the required document the compliance registry scores
+// (key 'utilities'). Distinct from DOC_UTILITY_DATA below, which is the
+// metadata-only numeric tracker that feeds the deduction estimate/report.
+const DOC_UTILITY_BILL = 'utilities';
 const DOC_UTILITY_DATA = 'utility_expenses';
 const DOC_CLOSING = 'closing_disclosure';
 const DOC_LEASE = 'lease_agreement';
@@ -182,6 +190,10 @@ export const HomeOfficeComplianceScreen: React.FC = () => {
   );
   const renovationRows = useMemo(
     () => rows.filter((r) => r.document_key === DOC_RENOVATION),
+    [rows],
+  );
+  const utilityBillRow = useMemo(
+    () => rows.find((r) => r.document_key === DOC_UTILITY_BILL) ?? null,
     [rows],
   );
 
@@ -472,18 +484,20 @@ export const HomeOfficeComplianceScreen: React.FC = () => {
   }, 0);
   const deductiblePortion = pct !== null ? renovationTotal * (pct / 100) : 0;
 
-  // Section completion: each of the four sections counts independently. The
-  // utility section is complete once any category has data entered.
-  const section1Done = squareFootageRow !== null && squareFootageRow.file_url !== null;
-  const section2Done = enteredCategories.length > 0;
-  const section3Done =
-    (residence === 'own' && closingRow !== null) ||
-    (residence === 'rent' && leaseRow !== null) ||
-    closingRow !== null ||
-    leaseRow !== null;
-  const section4Done = renovationRows.length > 0;
-  const sectionsComplete =
-    Number(section1Done) + Number(section2Done) + Number(section3Done) + Number(section4Done);
+  // Section completion is derived from the SHARED source of truth
+  // (computeStrategyCompletion) so this screen's "4 of 4" can never disagree
+  // with the Dashboard card or the Documents tab. A slot counts only when a
+  // file is uploaded for its document_key; the closing-disclosure slot is also
+  // satisfied by a lease agreement (alias handled inside the helper).
+  const completion = useMemo(
+    () => computeStrategyCompletion(STRATEGY_KEY, rows),
+    [rows],
+  );
+  const section1Done = completion.satisfied.has(DOC_SQUARE_FOOTAGE);
+  const section2Done = completion.satisfied.has(DOC_UTILITY_BILL);
+  const section3Done = completion.satisfied.has(DOC_CLOSING);
+  const section4Done = completion.satisfied.has(DOC_RENOVATION);
+  const sectionsComplete = completion.completed;
 
   const pctLabel = pct !== null ? `${pct.toFixed(1)}%` : 'your calculated percentage';
 
@@ -595,6 +609,29 @@ export const HomeOfficeComplianceScreen: React.FC = () => {
           Track each home expense category to calculate your home office
           deduction
         </Text>
+
+        {/* Required utility bill upload — this is the document the compliance
+            tracker scores (slot 'utilities'). The numeric tracker below is
+            supplementary and feeds the deduction report. */}
+        <DocumentUploadRow
+          title="UTILITY BILLS"
+          description="Upload a utility bill (electricity, gas, water, internet, etc.) as your supporting record. This is the document required to complete this section."
+          uploaded={
+            utilityBillRow && utilityBillRow.file_url
+              ? {
+                  fileName: utilityBillRow.document_name ?? 'Document',
+                  uploadedAt: utilityBillRow.uploaded_at,
+                }
+              : null
+          }
+          onUpload={() => handleUpload(DOC_UTILITY_BILL, utilityBillRow?.id ?? null)}
+          onReplace={
+            utilityBillRow ? () => handleUpload(DOC_UTILITY_BILL, utilityBillRow.id) : undefined
+          }
+          onView={
+            utilityBillRow && utilityBillRow.file_url ? () => viewDoc(utilityBillRow) : undefined
+          }
+        />
 
         {/* Category selector */}
         <Text style={styles.inputLabel}>Expense category</Text>

@@ -471,7 +471,7 @@ insert into public.compliance_rules (strategy_name, rule_key, rule_value, displa
   ('business_travel_intl',    'short_trip_day_limit',      '7',                                                        'Intl short-trip exception (days)'),
   ('business_travel_intl',    'personal_day_threshold',    '25',                                                       'Intl personal-day allocation threshold (%)'),
   ('business_travel_meals',   'deduct_pct',                '50',                                                       'Meals deduction (%) — IRC §274(n)'),
-  ('home_office',             'required_docs',             'square_footage,expense_log,exclusive_use',                  'Home office — required documents'),
+  ('home_office',             'required_docs',             'square_footage,utilities,closing_disclosure,renovation_receipt', 'Home office — required documents'),
   ('family_management',       'required_docs',             'entity_docs,employment_agreements,meeting_records',         'Family management — required documents')
 on conflict (strategy_name, rule_key) do nothing;
 

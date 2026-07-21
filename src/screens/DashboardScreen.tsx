@@ -59,8 +59,8 @@ import {
   type StrategyDocumentRow,
 } from '../services/strategyDocuments';
 import {
-  STRATEGY_COMPLIANCE_SLOTS,
   STRATEGY_COMPLIANCE_ROUTE,
+  computeStrategyCompletion,
 } from '../services/strategyComplianceSlots';
 
 type DashboardNavigationProp = NativeStackNavigationProp<RootStackParamList>;
@@ -515,17 +515,14 @@ export const DashboardScreen: React.FC = () => {
     { strategyKey: 'family_management', title: 'Family Mgmt', icon: 'people-outline' },
   ];
   const complianceCards: ComplianceCard[] = complianceCardDefs.map((c) => {
-    const slots = STRATEGY_COMPLIANCE_SLOTS[c.strategyKey] ?? [];
-    const rows = data.complianceDocs.filter(
-      (r) => r.strategy_key === c.strategyKey && r.file_url,
+    // Shared source of truth (registry slots + file_url presence, with the
+    // Home Office lease→closing alias). Keeps the cards in lockstep with the
+    // strategy screens and the Documents tab.
+    const { completed, total } = computeStrategyCompletion(
+      c.strategyKey,
+      data.complianceDocs,
     );
-    const satisfied = new Set(rows.map((r) => r.document_key));
-    // Home Office residence: lease satisfies the closing-disclosure slot.
-    if (c.strategyKey === 'home_office' && satisfied.has('lease_agreement')) {
-      satisfied.add('closing_disclosure');
-    }
-    const completed = slots.reduce((n, s) => n + (satisfied.has(s.key) ? 1 : 0), 0);
-    return { ...c, completed, total: slots.length };
+    return { ...c, completed, total };
   });
 
   const hoursPct = Math.min(100, Math.round((data.hoursYTD / Math.max(1, effectiveTarget)) * 100));

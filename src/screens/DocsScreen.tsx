@@ -47,6 +47,8 @@ import {
 import {
   STRATEGY_COMPLIANCE_SLOTS,
   STRATEGY_COMPLIANCE_ROUTE,
+  satisfiedSlotKeys,
+  computeStrategyCompletion,
 } from '../services/strategyComplianceSlots';
 
 type DocsNavigationProp = NativeStackNavigationProp<RootStackParamList>;
@@ -271,21 +273,22 @@ const comparableRowToDoc = (row: ComparableRow): DocEntry => {
   };
 };
 
-// Which compliance slots are "satisfied" for a strategy given the uploaded
-// rows. The Home Office residence slot is satisfied by either a closing
-// disclosure or a lease agreement — encoded here so the missing list is
-// correct.
-const satisfiedSlotKeys = (
-  strategyKey: string,
-  rows: StrategyDocumentRow[],
-): Set<string> => {
-  const uploaded = new Set(rows.filter((r) => r.file_url).map((r) => r.document_key));
-  if (strategyKey === 'home_office' && uploaded.has('lease_agreement')) {
-    uploaded.add('closing_disclosure');
-  }
-  return uploaded;
-};
+// Completion-status badge colors, shared with the strategy screens' visual
+// language: amber = required documents still missing, green = all required
+// documents present. Only the three slot-based strategies (see
+// SLOT_STRATEGY_KEYS) have a well-defined "documents complete" state, so only
+// they use these; every other strategy keeps its category color below.
+const INCOMPLETE_BADGE = { bg: colors.amberLight, fg: colors.amber };
+const COMPLETE_BADGE = { bg: colors.tealLight, fg: colors.teal };
 
+// Strategy db-keys that have a document-slot completion definition (registry in
+// strategyComplianceSlots). Real Estate / Augusta / Travel are scored by
+// activity (hours/days/trips) on the Dashboard, not documents, so their labels
+// keep the category colors in BADGE_COLORS.
+const SLOT_STRATEGY_KEYS = new Set(['s_corp', 'home_office', 'family_management']);
+
+// Category colors for the non-slot strategies (and the default look). Slot
+// strategies are recolored by completion status at render time.
 const BADGE_COLORS: Record<Strategy, { bg: string; fg: string }> = {
   'Real Estate': { bg: '#E1F5EE', fg: '#085041' },
   Augusta: { bg: '#E6F1FB', fg: '#0C447C' },
@@ -511,6 +514,18 @@ export const DocsScreen: React.FC = () => {
       return d.searchBlob.includes(q);
     });
   }, [filter, docs, trimmedSearch]);
+
+  // Per-strategy completion for the slot-based strategies, from the SHARED
+  // source of truth (same computeStrategyCompletion the Dashboard cards and the
+  // strategy screens use). Drives the amber/green label colors below so a
+  // document's label reflects whether its parent strategy is complete.
+  const strategyComplete = useMemo<Record<string, boolean>>(() => {
+    const out: Record<string, boolean> = {};
+    SLOT_STRATEGY_KEYS.forEach((key) => {
+      out[key] = computeStrategyCompletion(key, complianceRows).isComplete;
+    });
+    return out;
+  }, [complianceRows]);
 
   // Missing compliance slots for the active filter. Only computed when the
   // filter is one of the three compliance strategies — "All" stays clean.
@@ -815,17 +830,37 @@ export const DocsScreen: React.FC = () => {
             const isInvoice = doc.fileType === 'invoice';
             const isComparable = doc.fileType === 'rate_comparables';
             const invoicePaid = isInvoice && invoicePaidMap[doc.id];
-            const badge = isActivity
-              ? ACTIVITY_BADGE
-              : isMinutes
-                ? MINUTES_BADGE
-                : isInvoice
-                  ? invoicePaid
-                    ? { bg: colors.tealLight, fg: colors.teal }
-                    : { bg: colors.amberLight, fg: colors.amber }
-                  : isComparable
-                    ? AUGUSTA_BADGE
-                    : BADGE_COLORS[doc.strategy];
+            // Slot-based strategies (S-Corp, Home Office, Family Mgmt) color
+            // their labels by completion status — amber if the parent strategy
+            // still has missing required docs, green once complete — overriding
+            // the category/file-type colors so the label always tells the same
+            // story as the Dashboard card. Other strategies keep their colors.
+            const slotStrategyKey =
+              doc.strategyKey && SLOT_STRATEGY_KEYS.has(doc.strategyKey)
+                ? doc.strategyKey
+                : null;
+            const badge = slotStrategyKey
+              ? strategyComplete[slotStrategyKey]
+                ? COMPLETE_BADGE
+                : INCOMPLETE_BADGE
+              : isActivity
+                ? ACTIVITY_BADGE
+                : isMinutes
+                  ? MINUTES_BADGE
+                  : isInvoice
+                    ? invoicePaid
+                      ? { bg: colors.tealLight, fg: colors.teal }
+                      : { bg: colors.amberLight, fg: colors.amber }
+                    : isComparable
+                      ? AUGUSTA_BADGE
+                      : BADGE_COLORS[doc.strategy];
+            // The green shield reinforces completion, so it must agree with the
+            // label: on slot strategies it appears only when the strategy is
+            // complete (never a green shield beside an amber label); on other
+            // strategies it keeps its "this is a compliance upload" meaning.
+            const showShield =
+              doc.isCompliance &&
+              (slotStrategyKey ? strategyComplete[slotStrategyKey] : true);
             const badgeLabel = isActivity
               ? 'Real Estate'
               : isMinutes
@@ -866,7 +901,7 @@ export const DocsScreen: React.FC = () => {
                     <Text style={styles.docName} numberOfLines={1}>
                       {doc.name}
                     </Text>
-                    {doc.isCompliance ? (
+                    {showShield ? (
                       <Ionicons
                         name="shield-checkmark"
                         size={13}
