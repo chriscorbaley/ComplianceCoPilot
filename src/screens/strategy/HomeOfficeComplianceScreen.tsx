@@ -95,6 +95,14 @@ const UTILITY_CATEGORIES: Array<{ key: string; label: string }> = [
 const categoryLabel = (key: string): string =>
   UTILITY_CATEGORIES.find((c) => c.key === key)?.label ?? key;
 
+// Selectable labels for an uploaded utility bill, stored on the row as
+// metadata.utility_type. Purely descriptive — the completion check only cares
+// that at least one utility file exists, not its label.
+const UTILITY_BILL_TYPES = ['Electric', 'Gas', 'Water', 'Internet', 'Other'] as const;
+const DEFAULT_UTILITY_TYPE = 'Other';
+const utilityTypeOf = (row: StrategyDocumentRow): string =>
+  typeof row.metadata?.utility_type === 'string' ? row.metadata.utility_type : DEFAULT_UTILITY_TYPE;
+
 // Month keys stored in metadata.categories[*].monthly_entries and display labels.
 const UTILITY_MONTHS: Array<{ key: string; label: string }> = [
   { key: 'january', label: 'January' },
@@ -160,6 +168,8 @@ export const HomeOfficeComplianceScreen: React.FC = () => {
   const [catAnnual, setCatAnnual] = useState('');
   const [catPickerOpen, setCatPickerOpen] = useState(false);
   const [utilityHydrated, setUtilityHydrated] = useState(false);
+  // Id of the utility-bill row whose label dropdown is open (null = closed).
+  const [utilLabelPickerId, setUtilLabelPickerId] = useState<string | null>(null);
 
   const refresh = useCallback(async () => {
     try {
@@ -192,8 +202,11 @@ export const HomeOfficeComplianceScreen: React.FC = () => {
     () => rows.filter((r) => r.document_key === DOC_RENOVATION),
     [rows],
   );
-  const utilityBillRow = useMemo(
-    () => rows.find((r) => r.document_key === DOC_UTILITY_BILL) ?? null,
+  // Uploaded utility bills — multiple files supported under one document_key,
+  // modeled on renovation receipts. Each row carries a descriptive
+  // metadata.utility_type label.
+  const utilityRows = useMemo(
+    () => rows.filter((r) => r.document_key === DOC_UTILITY_BILL && r.file_url),
     [rows],
   );
 
@@ -478,6 +491,55 @@ export const HomeOfficeComplianceScreen: React.FC = () => {
     }
   };
 
+  // ── Utility bills (multi-file, renovation-receipt pattern) ───────────────
+  // Add a new utility bill file. Always inserts (no existingId), so each upload
+  // is an additional file rather than a replacement. Defaults the label to
+  // "Other"; the user can change it via the per-row dropdown afterward.
+  const addUtilityBill = async () => {
+    try {
+      const file = await pickFile();
+      if (!file) return;
+      await uploadStrategyDocument({
+        strategyKey: STRATEGY_KEY,
+        documentKey: DOC_UTILITY_BILL,
+        businessId: activeBusinessId,
+        localUri: file.uri,
+        fileName: file.name,
+        mimeType: file.mimeType ?? null,
+        metadata: { utility_type: DEFAULT_UTILITY_TYPE },
+      });
+      await refresh();
+    } catch (e) {
+      Alert.alert('Upload failed', e instanceof Error ? e.message : String(e));
+    }
+  };
+
+  // Update a utility bill's descriptive label. Optimistic local update so the
+  // pill changes immediately, then persist the metadata.
+  const setUtilityLabel = async (row: StrategyDocumentRow, label: string) => {
+    setUtilLabelPickerId(null);
+    setRows((prev) =>
+      prev.map((r) =>
+        r.id === row.id ? { ...r, metadata: { ...r.metadata, utility_type: label } } : r,
+      ),
+    );
+    try {
+      await updateStrategyDocumentMetadata(row.id, { ...row.metadata, utility_type: label });
+    } catch (e) {
+      Alert.alert('Could not update label', e instanceof Error ? e.message : String(e));
+      await refresh();
+    }
+  };
+
+  const removeUtilityBill = async (row: StrategyDocumentRow) => {
+    try {
+      await deleteStrategyDocument(row.id);
+      await refresh();
+    } catch (e) {
+      Alert.alert('Could not remove', e instanceof Error ? e.message : String(e));
+    }
+  };
+
   const renovationTotal = renovationRows.reduce((sum, r) => {
     const amt = r.metadata?.amount;
     return sum + (typeof amt === 'number' ? amt : 0);
@@ -610,28 +672,60 @@ export const HomeOfficeComplianceScreen: React.FC = () => {
           deduction
         </Text>
 
-        {/* Required utility bill upload — this is the document the compliance
-            tracker scores (slot 'utilities'). The numeric tracker below is
-            supplementary and feeds the deduction report. */}
-        <DocumentUploadRow
-          title="UTILITY BILLS"
-          description="Upload a utility bill (electricity, gas, water, internet, etc.) as your supporting record. This is the document required to complete this section."
-          uploaded={
-            utilityBillRow && utilityBillRow.file_url
-              ? {
-                  fileName: utilityBillRow.document_name ?? 'Document',
-                  uploadedAt: utilityBillRow.uploaded_at,
-                }
-              : null
-          }
-          onUpload={() => handleUpload(DOC_UTILITY_BILL, utilityBillRow?.id ?? null)}
-          onReplace={
-            utilityBillRow ? () => handleUpload(DOC_UTILITY_BILL, utilityBillRow.id) : undefined
-          }
-          onView={
-            utilityBillRow && utilityBillRow.file_url ? () => viewDoc(utilityBillRow) : undefined
-          }
-        />
+        {/* Required utility bill uploads — the documents the compliance tracker
+            scores (slot 'utilities'). Multiple files supported, each with a
+            descriptive label. The numeric tracker below is supplementary and
+            feeds the deduction report. */}
+        <View style={styles.utilBillsBlock}>
+          <Text style={styles.utilBillsTitle}>UTILITY BILLS</Text>
+          <Text style={styles.utilBillsDesc}>
+            Upload your utility bills (electricity, gas, water, internet, etc.).
+            Add as many as you like and label each one. At least one bill
+            completes this section.
+          </Text>
+
+          {utilityRows.map((row) => {
+            const label = utilityTypeOf(row);
+            return (
+              <View key={row.id} style={styles.receiptCard}>
+                <TouchableOpacity
+                  activeOpacity={0.85}
+                  onPress={() => viewDoc(row)}
+                  style={styles.receiptHeader}
+                >
+                  <Ionicons name="document-text" size={16} color={colors.teal} />
+                  <View style={styles.receiptHeaderText}>
+                    <Text style={styles.receiptName} numberOfLines={1}>
+                      {row.document_name ?? 'Utility bill'}
+                    </Text>
+                    <Text style={styles.receiptMeta}>
+                      {new Date(row.uploaded_at).toLocaleDateString()}
+                    </Text>
+                  </View>
+                  <TouchableOpacity onPress={() => removeUtilityBill(row)} hitSlop={8}>
+                    <Ionicons name="close-circle" size={20} color={colors.mutedText} />
+                  </TouchableOpacity>
+                </TouchableOpacity>
+                <View style={styles.receiptAmountRow}>
+                  <Text style={styles.receiptAmountLabel}>Bill type</Text>
+                  <TouchableOpacity
+                    activeOpacity={0.8}
+                    onPress={() => setUtilLabelPickerId(row.id)}
+                    style={styles.utilTypePill}
+                  >
+                    <Text style={styles.utilTypePillText}>{label}</Text>
+                    <Ionicons name="chevron-down" size={14} color={colors.midNavy} />
+                  </TouchableOpacity>
+                </View>
+              </View>
+            );
+          })}
+
+          <TouchableOpacity activeOpacity={0.85} onPress={addUtilityBill} style={styles.addReceiptBtn}>
+            <Ionicons name="add-circle-outline" size={18} color={colors.navy} />
+            <Text style={styles.addReceiptText}>Add Utility Bill</Text>
+          </TouchableOpacity>
+        </View>
 
         {/* Category selector */}
         <Text style={styles.inputLabel}>Expense category</Text>
@@ -949,6 +1043,46 @@ export const HomeOfficeComplianceScreen: React.FC = () => {
                 );
               })}
             </ScrollView>
+          </View>
+        </TouchableOpacity>
+      </Modal>
+
+      {/* Utility bill label picker */}
+      <Modal
+        visible={utilLabelPickerId !== null}
+        transparent
+        animationType="fade"
+        onRequestClose={() => setUtilLabelPickerId(null)}
+      >
+        <TouchableOpacity
+          style={catPicker.backdrop}
+          activeOpacity={1}
+          onPress={() => setUtilLabelPickerId(null)}
+        >
+          <View style={catPicker.menu}>
+            <Text style={catPicker.menuTitle}>Bill type</Text>
+            {UTILITY_BILL_TYPES.map((type) => {
+              const row = utilityRows.find((r) => r.id === utilLabelPickerId);
+              const active = row ? utilityTypeOf(row) === type : false;
+              return (
+                <TouchableOpacity
+                  key={type}
+                  activeOpacity={0.8}
+                  style={[catPicker.menuItem, active && catPicker.menuItemActive]}
+                  onPress={() => {
+                    if (row) void setUtilityLabel(row, type);
+                    else setUtilLabelPickerId(null);
+                  }}
+                >
+                  <Text style={[catPicker.menuItemText, active && catPicker.menuItemTextActive]}>
+                    {type}
+                  </Text>
+                  {active ? (
+                    <Ionicons name="checkmark-circle" size={16} color={colors.white} />
+                  ) : null}
+                </TouchableOpacity>
+              );
+            })}
           </View>
         </TouchableOpacity>
       </Modal>
@@ -1471,6 +1605,40 @@ const styles = StyleSheet.create({
   addReceiptText: {
     ...typography.bodyMedium,
     color: colors.navy,
+    fontSize: 13,
+    fontWeight: '600',
+  },
+  utilBillsBlock: {
+    marginBottom: 20,
+  },
+  utilBillsTitle: {
+    ...typography.bodyMedium,
+    color: colors.navy,
+    fontSize: 14,
+    fontWeight: '700',
+  },
+  utilBillsDesc: {
+    ...typography.caption,
+    color: '#888888',
+    fontSize: 12,
+    marginTop: 4,
+    marginBottom: 10,
+    lineHeight: 16,
+  },
+  utilTypePill: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: 6,
+    backgroundColor: colors.background,
+    borderWidth: 1,
+    borderColor: colors.divider,
+    borderRadius: 8,
+    paddingHorizontal: 12,
+    paddingVertical: 7,
+  },
+  utilTypePillText: {
+    ...typography.bodyMedium,
+    color: colors.bodyText,
     fontSize: 13,
     fontWeight: '600',
   },

@@ -207,12 +207,23 @@ const rowToDoc = (row: DocumentRow): DocEntry => {
 const complianceRowToDoc = (row: StrategyDocumentRow): DocEntry => {
   const strategy = STRATEGY_LABEL[row.strategy_key] ?? 'Real Estate';
   const created = row.uploaded_at ?? row.created_at;
-  const meta = `${formatDocDate(created)}${row.file_type ? ` · ${row.file_type}` : ''}`;
+  // Utility bills carry a descriptive label (Electric, Gas, …) so each file is
+  // distinguishable in the list. Surface it in the name, meta, and search text.
+  const utilityType =
+    row.document_key === 'utilities' && typeof row.metadata?.utility_type === 'string'
+      ? row.metadata.utility_type
+      : null;
+  const baseName = row.document_name ?? 'Compliance document';
+  const name = utilityType ? `${utilityType} — ${baseName}` : baseName;
+  const meta = `${formatDocDate(created)}${
+    utilityType ? ` · ${utilityType} bill` : row.file_type ? ` · ${row.file_type}` : ''
+  }`;
   const searchBlob = [
     row.document_name ?? '',
     strategy,
     row.strategy_key,
     row.document_key,
+    utilityType ?? '',
     row.file_type ?? '',
     ...dateSearchTokens(created),
     'compliance',
@@ -221,7 +232,7 @@ const complianceRowToDoc = (row: StrategyDocumentRow): DocEntry => {
     .toLowerCase();
   return {
     id: `compliance:${row.id}`,
-    name: row.document_name ?? 'Compliance document',
+    name,
     meta,
     strategy,
     strategyKey: row.strategy_key,
