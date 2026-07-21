@@ -234,6 +234,16 @@ const dayTheme = {
   personal: { bg: '#FCEBEB', fg: '#791F1F', icon: 'sunny' as const },
 };
 
+// The authoritative type word for a day, derived from its `kind`. Rendered as a
+// badge on the day cell so the type text always agrees with the cell color even
+// after the user taps to re-classify a day (the AI's descriptive label is kept
+// separately, as context, and is NOT a type claim).
+const dayKindLabel: Record<DayKind, string> = {
+  business: 'Business',
+  travel: 'Travel',
+  personal: 'Personal',
+};
+
 const NOT_DEDUCT_RED = '#B33A3A';
 // Amber used for the draft button, draft badge, and future-trip info banner.
 const DRAFT_AMBER = '#BA7517';
@@ -892,7 +902,15 @@ const ResultBlock: React.FC<ResultBlockProps> = ({
                 <Text style={[styles.dayNum, { color: th.fg }]}>
                   D{i + 1}
                 </Text>
-                <Ionicons name={th.icon} size={12} color={th.fg} />
+                <View style={styles.dayKindRow}>
+                  <Ionicons name={th.icon} size={12} color={th.fg} />
+                  <Text
+                    style={[styles.dayKind, { color: th.fg }]}
+                    numberOfLines={1}
+                  >
+                    {dayKindLabel[d.kind]}
+                  </Text>
+                </View>
                 <Text
                   style={[styles.dayLabel, { color: th.fg }]}
                   numberOfLines={2}
@@ -3047,6 +3065,17 @@ const styles = StyleSheet.create({
     ...typography.caption,
     fontSize: 10,
     fontWeight: '700',
+  },
+  dayKindRow: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: 3,
+  },
+  dayKind: {
+    ...typography.caption,
+    fontSize: 9,
+    fontWeight: '700',
+    flexShrink: 1,
   },
   dayLabel: {
     ...typography.caption,
