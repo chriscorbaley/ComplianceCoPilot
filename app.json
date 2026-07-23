@@ -4,10 +4,10 @@
     "slug": "compliance-copilot",
     "version": "1.0.0",
     "orientation": "portrait",
-    "icon": "./assets/AppIcon.png",
+    "icon": "./assets/AppIcon-new.png",
     "userInterfaceStyle": "light",
     "splash": {
-      "image": "./assets/AppIcon.png",
+      "image": "./assets/AppIcon-new.png",
       "resizeMode": "contain",
       "backgroundColor": "#042C53"
     },
@@ -24,8 +24,8 @@
     },
     "android": {
       "adaptiveIcon": {
-        "foregroundImage": "./assets/AppIcon-adaptive.png",
-        "backgroundColor": "#042C53"
+        "foregroundImage": "./assets/AppIcon-adaptive-new.png",
+        "backgroundColor": "#0B1D31"
       },
       "package": "com.compliancecopilot.app",
       "permissions": [
