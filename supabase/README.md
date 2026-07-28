@@ -50,6 +50,69 @@ supabase functions schedule create rss-scanner --cron "0 9 * * *"
 the Supabase runtime. The function records every processed item's GUID in
 `processed_rss_items` so it never re-analyzes the same article.
 
+## Edge function — revenuecat-webhook
+
+Keeps `users.subscription_tier` / `users.subscription_status` in sync with
+native App Store and Play Store subscriptions.
+
+This consumes **RevenueCat's** webhook rather than Apple's raw App Store Server
+Notifications V2. RevenueCat normalizes Apple, Google and Stripe into one
+payload, so a single function covers every store; its `app_user_id` is already
+our `public.users.id` (set by `identifyRevenueCatUser()` in `App.tsx`); and it
+authenticates with a shared header / HMAC instead of Apple's JWS x5c
+certificate-chain verification.
+
+Apply the migration first, or every delivery 500s:
+
+```sql
+-- SQL Editor → paste supabase/revenuecat_webhook.sql → Run
+```
+
+Then set secrets and deploy. **`--no-verify-jwt` is required** — RevenueCat
+does not send a Supabase JWT:
+
+```bash
+supabase secrets set REVENUECAT_WEBHOOK_AUTH='<random string>'
+# optional, if you enable signature signing in the RevenueCat dashboard:
+supabase secrets set REVENUECAT_WEBHOOK_SIGNING_SECRET='<signing secret>'
+supabase functions deploy revenuecat-webhook --no-verify-jwt
+```
+
+In RevenueCat → Integrations → Webhooks, set the URL to
+`https://<project-ref>.supabase.co/functions/v1/revenuecat-webhook` and the
+Authorization header to the same value as `REVENUECAT_WEBHOOK_AUTH`. Use the
+dashboard's "Send test event" to confirm a 200.
+
+Optional secrets:
+
+- `REVENUECAT_IGNORE_SANDBOX=true` — skip `environment=SANDBOX` events. Leave
+  unset while testing; **set it before public launch** so sandbox purchases
+  can't move production tiers.
+- `REVENUECAT_REVOKE_ON_BILLING_ISSUE=true` — downgrade immediately on
+  `BILLING_ISSUE`. Off by default: a billing issue starts the store's retry and
+  grace period, during which the customer still holds the entitlement, and
+  `EXPIRATION` fires if the retries are exhausted. Turning this on locks out
+  paying customers who recover from a declined card.
+
+Every processed notification is written to `admin_audit_log` with
+`action = 'apple_subscription_event'` and an `outcome` in `details`.
+
+Event-name mapping, since RevenueCat's names differ from Apple's:
+
+| Apple ASSN V2 | RevenueCat |
+| --- | --- |
+| `REFUND` | `CANCELLATION` with `cancel_reason = CUSTOMER_SUPPORT` |
+| `DID_RENEW` | `RENEWAL` |
+| `EXPIRED` | `EXPIRATION` |
+| `DID_FAIL_TO_RENEW` | `BILLING_ISSUE` |
+| `CANCEL` | `CANCELLATION` with `cancel_reason = UNSUBSCRIBE` |
+
+There is no standalone `REFUND` event type in RevenueCat. Note also that
+`CANCELLATION` is not revocation — Apple and Google subscriptions stay usable
+until the paid period ends, so the function marks the status `cancelled` but
+keeps the tier until `EXPIRATION` arrives. The one exception is a store-issued
+refund, which revokes immediately.
+
 ## Notes
 
 - `users.travel_days_count_as_business` is not stored in `compliance_rules`. The

@@ -17,6 +17,12 @@ import { FeatureFlagProvider } from './src/context/FeatureFlagContext';
 import { LoginScreen } from './src/screens/LoginScreen';
 import { SignUpScreen } from './src/screens/SignUpScreen';
 import { SplashScreen } from './src/screens/SplashScreen';
+import {
+  configureRevenueCat,
+  identifyRevenueCatUser,
+  logOutRevenueCatUser,
+  getOfferings,
+} from './src/services/revenueCat';
 
 const navTheme = {
   ...DefaultTheme,
@@ -52,6 +58,42 @@ const Gate: React.FC = () => {
   const onReacceptanceComplete = useCallback(() => {
     void refreshProfile();
   }, [refreshProfile]);
+
+  // Configure RevenueCat once and keep its app user ID in sync with the signed-
+  // in Supabase user, so native purchases (Apple/Google) are tied to the right
+  // account across devices. Configure is idempotent; identify/logOut track the
+  // session. RevenueCat is a no-op until its platform API key env var is set.
+  const revenueCatUserId = session?.user.id ?? null;
+  useEffect(() => {
+    configureRevenueCat(revenueCatUserId);
+    void (async () => {
+      if (revenueCatUserId) {
+        await identifyRevenueCatUser(revenueCatUserId);
+      } else {
+        await logOutRevenueCatUser();
+      }
+      // TEMPORARY (RevenueCat bring-up): print available offerings to verify the
+      // SDK connection. Remove once the paywall UI is built.
+      const offerings = await getOfferings();
+      console.log(
+        '[RevenueCat] offerings:',
+        JSON.stringify(
+          {
+            current: offerings?.current?.identifier ?? null,
+            all: offerings ? Object.keys(offerings.all) : null,
+            currentPackages:
+              offerings?.current?.availablePackages.map((p) => ({
+                identifier: p.identifier,
+                productId: p.product.identifier,
+                priceString: p.product.priceString,
+              })) ?? null,
+          },
+          null,
+          2,
+        ),
+      );
+    })();
+  }, [revenueCatUserId]);
 
   if (loading || !splashElapsed) return <SplashScreen />;
   if (!session) {

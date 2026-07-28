@@ -2,6 +2,7 @@ import React, { useState } from 'react';
 import {
   ActivityIndicator,
   Alert,
+  Platform,
   ScrollView,
   StyleSheet,
   Text,
@@ -20,6 +21,11 @@ import {
   formatDeletionDate,
 } from '../services/cancellation';
 import { requireUserId } from '../services/supabase';
+import {
+  canRequestRefund,
+  openManageSubscriptions,
+  requestRefund,
+} from '../services/revenueCat';
 import type { RootStackParamList } from '../navigation/types';
 
 export const SettingsScreen: React.FC = () => {
@@ -27,6 +33,12 @@ export const SettingsScreen: React.FC = () => {
   const { session, signOut, refreshProfile } = useAuth();
   const [busy, setBusy] = useState(false);
   const [cancelling, setCancelling] = useState(false);
+  const [managing, setManaging] = useState(false);
+  const [refunding, setRefunding] = useState(false);
+  // Apple's refund sheet is a StoreKit API with no Android equivalent, so the
+  // row only exists on iOS. Google refunds are handled on the Play website,
+  // reachable from the Manage Subscription row below.
+  const refundSupported = canRequestRefund();
   // When the double-signature flow is turned off firm-wide, cancellation uses a
   // simple confirmation dialog instead. (Tier/subscription behavior unchanged.)
   const signatureFlowEnabled = useFeatureFlag('cancellation_signature');
@@ -78,6 +90,77 @@ export const SettingsScreen: React.FC = () => {
     } finally {
       setCancelling(false);
     }
+  };
+
+  // Opens the store's own subscription management UI: Apple's native sheet on
+  // iOS, Google Play's subscription page on Android.
+  const onManagePress = async () => {
+    setManaging(true);
+    try {
+      const result = await openManageSubscriptions();
+      if (result !== 'opened') {
+        Alert.alert(
+          'Could not open subscriptions',
+          Platform.OS === 'ios'
+            ? 'Open the Settings app, tap your name, then Subscriptions to manage your plan.'
+            : 'Open the Google Play Store app, then Menu → Payments & subscriptions to manage your plan.',
+        );
+      }
+    } finally {
+      setManaging(false);
+    }
+  };
+
+  // Presents Apple's refund sheet. Apple — not us — decides the outcome and
+  // notifies the user by email, so the copy here promises nothing.
+  const runRefundRequest = async () => {
+    setRefunding(true);
+    try {
+      const result = await requestRefund();
+      switch (result) {
+        case 'submitted':
+          Alert.alert(
+            'Request sent',
+            'Apple has received your refund request. They review it directly and will email you their decision. Your access continues until Apple processes the refund.',
+          );
+          break;
+        case 'no_subscription':
+          Alert.alert(
+            'No active subscription',
+            'There is no active subscription on this account to request a refund for.',
+          );
+          break;
+        case 'unsupported':
+          Alert.alert(
+            'Not available',
+            'Refund requests can only be made on the device where the subscription was purchased.',
+          );
+          break;
+        case 'error':
+          Alert.alert(
+            'Request failed',
+            'We could not open Apple’s refund form. You can request a refund at reportaproblem.apple.com.',
+          );
+          break;
+        case 'cancelled':
+        default:
+          // User dismissed Apple's sheet — no message needed.
+          break;
+      }
+    } finally {
+      setRefunding(false);
+    }
+  };
+
+  const onRefundPress = () => {
+    Alert.alert(
+      'Request Refund',
+      'This opens Apple’s refund request form for your most recent subscription charge. Apple reviews and decides all refunds.',
+      [
+        { text: 'Not now', style: 'cancel' },
+        { text: 'Continue', onPress: () => void runRefundRequest() },
+      ],
+    );
   };
 
   const onCancelPress = () => {
@@ -135,6 +218,65 @@ export const SettingsScreen: React.FC = () => {
           </TouchableOpacity>
         </View>
 
+        <View style={styles.section}>
+          <Text style={styles.sectionLabel}>Subscription</Text>
+          <TouchableOpacity
+            activeOpacity={0.85}
+            style={styles.card}
+            onPress={() => void onManagePress()}
+            disabled={managing}
+          >
+            <View style={styles.row}>
+              <Ionicons name="card-outline" size={20} color={colors.midNavy} />
+              <View style={styles.rowText}>
+                <Text style={styles.rowLabel}>Manage subscription</Text>
+                <Text style={styles.rowValue}>
+                  {Platform.OS === 'ios'
+                    ? 'Change or cancel your plan in the App Store'
+                    : 'Change or cancel your plan in Google Play'}
+                </Text>
+              </View>
+              {managing ? (
+                <ActivityIndicator color={colors.midNavy} />
+              ) : (
+                <Ionicons name="chevron-forward" size={18} color={colors.subtleText} />
+              )}
+            </View>
+          </TouchableOpacity>
+
+          {refundSupported && (
+            <TouchableOpacity
+              activeOpacity={0.85}
+              style={styles.card}
+              onPress={onRefundPress}
+              disabled={refunding}
+            >
+              <View style={styles.row}>
+                <Ionicons
+                  name="return-down-back-outline"
+                  size={20}
+                  color={colors.midNavy}
+                />
+                <View style={styles.rowText}>
+                  <Text style={styles.rowLabel}>Request refund</Text>
+                  <Text style={styles.rowValue}>
+                    Ask Apple to refund a recent charge
+                  </Text>
+                </View>
+                {refunding ? (
+                  <ActivityIndicator color={colors.midNavy} />
+                ) : (
+                  <Ionicons
+                    name="chevron-forward"
+                    size={18}
+                    color={colors.subtleText}
+                  />
+                )}
+              </View>
+            </TouchableOpacity>
+          )}
+        </View>
+
         <TouchableOpacity
           activeOpacity={0.85}
           onPress={confirmLogout}
@@ -152,7 +294,7 @@ export const SettingsScreen: React.FC = () => {
         </TouchableOpacity>
 
         <View style={styles.dangerSection}>
-          <Text style={styles.dangerLabel}>Subscription</Text>
+          <Text style={styles.dangerLabel}>Danger Zone</Text>
           <TouchableOpacity
             activeOpacity={0.85}
             onPress={onCancelPress}
