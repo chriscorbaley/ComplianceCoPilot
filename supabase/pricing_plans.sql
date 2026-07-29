@@ -90,13 +90,19 @@ on conflict (plan_key) do nothing;
 -- best-effort in the client: if this table is absent the pricing edit still
 -- succeeds. Creating it here enables the audit trail.
 
+-- Columns must match src/services/auditLog.ts, which is the only write path in
+-- the app. This DDL previously declared admin_id / table_name / details; the
+-- live table was since changed to the shape below, and the stale version here
+-- is what the revenuecat-webhook function was written against — every one of
+-- its audit inserts failed silently. Do not reintroduce the old names.
 create table if not exists public.admin_audit_log (
   id uuid primary key default uuid_generate_v4(),
-  admin_id uuid references auth.users(id),
+  admin_email text,
   action text not null,
-  table_name text,
+  table_affected text,
   record_key text,
-  details jsonb,
+  old_value jsonb,
+  new_value jsonb,
   created_at timestamptz not null default now()
 );
 

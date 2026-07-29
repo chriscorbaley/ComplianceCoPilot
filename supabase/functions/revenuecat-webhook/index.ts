@@ -279,8 +279,12 @@ async function markCancelledKeepAccess(userId: string): Promise<void> {
 }
 
 /**
- * Best-effort audit trail. admin_id is nullable and references auth.users, so
- * we store the affected user there (the actor is the store, not an admin).
+ * Best-effort audit trail. Columns mirror src/services/auditLog.ts — the live
+ * table is admin_email / action / table_affected / record_key / old_value /
+ * new_value. There is no acting admin here (the actor is the store), so
+ * admin_email carries a system sentinel rather than null: the viewer renders a
+ * null admin as "unknown admin", which would be misleading, and a stable
+ * sentinel makes these rows filterable.
  * Never throws: losing an audit row must not cause an infinite retry loop.
  */
 async function logAudit(
@@ -290,12 +294,13 @@ async function logAudit(
 ): Promise<void> {
   if (!supabase) return;
   try {
-    await supabase.from('admin_audit_log').insert({
-      admin_id: userId,
+    const { error } = await supabase.from('admin_audit_log').insert({
+      admin_email: 'revenuecat-webhook (system)',
       action: 'apple_subscription_event',
-      table_name: 'users',
+      table_affected: 'users',
       record_key: userId ?? event?.app_user_id ?? null,
-      details: {
+      old_value: null,
+      new_value: {
         source: 'revenuecat',
         outcome,
         event_id: event?.id ?? null,
@@ -313,6 +318,10 @@ async function logAudit(
         app_user_id: event?.app_user_id ?? null,
       },
     });
+    // supabase-js RESOLVES with { error } rather than rejecting, so without this
+    // check a schema mismatch or RLS denial fails silently and the catch below
+    // never fires. This is what hid the previous column mismatch.
+    if (error) throw error;
   } catch (e) {
     console.error('[revenuecat-webhook] audit log insert failed', e);
   }

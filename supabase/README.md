@@ -95,7 +95,8 @@ Optional secrets:
   paying customers who recover from a declined card.
 
 Every processed notification is written to `admin_audit_log` with
-`action = 'apple_subscription_event'` and an `outcome` in `details`.
+`action = 'apple_subscription_event'`, `admin_email = 'revenuecat-webhook
+(system)'` and an `outcome` inside `new_value`.
 
 Event-name mapping, since RevenueCat's names differ from Apple's:
 
