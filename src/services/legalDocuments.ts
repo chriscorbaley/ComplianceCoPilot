@@ -45,7 +45,7 @@ Compliance Co-Pilot and its owners, employees, contractors, and affiliates are n
 Users are responsible for reviewing and verifying all documents, records, and generated content with a qualified tax professional before relying on any information.
 
 7. Billing and Subscription Terms
-Subscriptions are billed monthly through Stripe. Payments for a billing cycle are non-refundable once charged. If a user cancels a subscription, access will remain active until the end of the current billing cycle and will automatically deactivate at the start of the next cycle.
+Subscriptions are billed through the app store on your device (Apple App Store or Google Play) and managed in your store account settings. Payments for a billing cycle are non-refundable once charged. If a user cancels a subscription, access will remain active until the end of the current billing cycle and will automatically deactivate at the start of the next cycle.
 
 8. Account Security
 Users are responsible for maintaining the confidentiality of their login credentials and for all activity under their account.
