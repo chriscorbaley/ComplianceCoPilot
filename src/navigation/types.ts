@@ -114,6 +114,13 @@ export type RootStackParamList = {
     deletionDate: string;
     // false when the confirmation email could not be sent.
     emailSent?: boolean;
+    // false when the store's subscription-management UI could not be opened, so
+    // the user still has to go there themselves to stop the billing.
+    manageOpened?: boolean;
+    // true when the store still reported a renewing subscription right after
+    // the hand-off (they may have dismissed the sheet without cancelling).
+    // Advisory only; null/undefined when unknowable.
+    stillRenewing?: boolean | null;
   };
   Businesses: undefined;
   BusinessEdit: { businessId?: string } | undefined;

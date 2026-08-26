@@ -2,6 +2,7 @@ import React, { useCallback, useMemo, useRef, useState } from 'react';
 import {
   ActivityIndicator,
   Alert,
+  Platform,
   ScrollView,
   StyleSheet,
   Text,
@@ -18,7 +19,6 @@ import {
   deletionDateFromNow,
   formatDeletionDate,
 } from '../services/cancellation';
-import { useAuth } from '../auth/AuthContext';
 import type { RootStackParamList } from '../navigation/types';
 
 // Spec colors for the cancellation flow.
@@ -29,7 +29,6 @@ export const CancelWarning2Screen: React.FC = () => {
   const navigation = useNavigation<NativeStackNavigationProp<RootStackParamList>>();
   const route = useRoute<RouteProp<RootStackParamList, 'CancelWarning2'>>();
   const { signature1, documentCount } = route.params;
-  const { refreshProfile } = useAuth();
 
   const sigRef = useRef<SignatureViewRef>(null);
   const [signature2, setSignature2] = useState<string | null>(null);
@@ -97,21 +96,20 @@ export const CancelWarning2Screen: React.FC = () => {
         signature2DataUrl: signature2,
         documentCount,
       });
-      // Re-read the (now downgraded) profile so gating re-locks paid features.
-      try {
-        await refreshProfile();
-      } catch {
-        // non-fatal; Dashboard refreshes on focus anyway
-      }
+      // No refreshProfile() here on purpose: cancelling no longer changes the
+      // tier. Apple and Google keep a subscription usable until the paid period
+      // ends, and the RevenueCat webhook writes the tier when it actually ends.
       navigation.replace('CancelSuccess', {
         deletionDate: formatDeletionDate(new Date(result.deletionScheduledFor)),
         emailSent: result.emailSent,
+        manageOpened: result.manageOpened,
+        stillRenewing: result.stillRenewing,
       });
     } catch (err) {
       Alert.alert('Cancellation failed', err instanceof Error ? err.message : String(err));
       setSubmitting(false);
     }
-  }, [documentCount, navigation, refreshProfile, signature1, signature2, submitting]);
+  }, [documentCount, navigation, signature1, signature2, submitting]);
 
   return (
     <ScrollView
@@ -207,11 +205,17 @@ export const CancelWarning2Screen: React.FC = () => {
           <ActivityIndicator color={colors.white} />
         ) : (
           <>
-            <Ionicons name="close-circle" size={18} color={colors.white} />
-            <Text style={styles.cancelText}>Cancel My Subscription</Text>
+            <Ionicons name="open-outline" size={18} color={colors.white} />
+            <Text style={styles.cancelText}>Continue to Cancel</Text>
           </>
         )}
       </TouchableOpacity>
+
+      <Text style={styles.handoffNote}>
+        We'll record your request, then take you to the{' '}
+        {Platform.OS === 'ios' ? 'App Store' : 'Play Store'} to finish cancelling — only the store
+        can stop your billing. Your plan stays active until the period you've paid for ends.
+      </Text>
     </ScrollView>
   );
 };
@@ -357,6 +361,13 @@ const styles = StyleSheet.create({
     color: colors.white,
     fontSize: 15,
     fontWeight: '700',
+  },
+  handoffNote: {
+    color: colors.mutedText,
+    fontSize: 12,
+    lineHeight: 17,
+    textAlign: 'center',
+    marginTop: spacing.md,
   },
   btnDisabled: {
     opacity: 0.4,

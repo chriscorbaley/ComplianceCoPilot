@@ -30,7 +30,7 @@ import type { RootStackParamList } from '../navigation/types';
 
 export const SettingsScreen: React.FC = () => {
   const navigation = useNavigation<NativeStackNavigationProp<RootStackParamList>>();
-  const { session, signOut, refreshProfile } = useAuth();
+  const { session, signOut } = useAuth();
   const [busy, setBusy] = useState(false);
   const [cancelling, setCancelling] = useState(false);
   const [managing, setManaging] = useState(false);
@@ -73,14 +73,14 @@ export const SettingsScreen: React.FC = () => {
       const uid = await requireUserId();
       const documentCount = await fetchDocumentCount(uid).catch(() => 0);
       const result = await completeCancellation({ documentCount });
-      try {
-        await refreshProfile();
-      } catch {
-        // non-fatal; Dashboard refreshes on focus anyway
-      }
+      // No refreshProfile() here on purpose: cancelling no longer changes the
+      // tier. Access runs until the paid period ends and the RevenueCat webhook
+      // revokes it then.
       navigation.replace('CancelSuccess', {
         deletionDate: formatDeletionDate(new Date(result.deletionScheduledFor)),
         emailSent: result.emailSent,
+        manageOpened: result.manageOpened,
+        stillRenewing: result.stillRenewing,
       });
     } catch (err) {
       Alert.alert(
@@ -170,11 +170,13 @@ export const SettingsScreen: React.FC = () => {
     }
     Alert.alert(
       'Cancel Subscription',
-      'This cancels your subscription and schedules your documents for deletion in 30 days. This cannot be undone. Continue?',
+      `This schedules your documents for deletion in 30 days, which cannot be undone. We'll then take you to the ${
+        Platform.OS === 'ios' ? 'App Store' : 'Play Store'
+      } to finish cancelling — only the store can stop your billing. Continue?`,
       [
         { text: 'Keep Subscription', style: 'cancel' },
         {
-          text: 'Cancel Subscription',
+          text: 'Continue',
           style: 'destructive',
           onPress: () => void runSimpleCancellation(),
         },

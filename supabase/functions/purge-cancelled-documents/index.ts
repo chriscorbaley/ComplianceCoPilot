@@ -1,7 +1,16 @@
 // Supabase Edge Function: purge-cancelled-documents
 //
+// SUPERSEDED by `process-deletions`, which removes strictly more data. Schedule
+// that one, not this. This file is kept for reference only — but because it
+// destroys data, it carries the same cancellation-confirmed guard: a
+// cancellations row records the user's INTENT (it is written before the hand-off
+// to the store's subscription sheet), never the outcome, so purging on the row
+// alone would wipe an active paying subscriber's documents. See the full
+// explanation in process-deletions/index.ts.
+//
 // Runs daily. For each cancellation whose deletion_scheduled_for is in the
-// past and is_deleted = false:
+// past, is_deleted = false, voided_at IS NULL, and whose owner is confirmed
+// cancelled:
 //   1. Delete every object in storage owned by that user (documents/<user_id>/*
 //      across all known buckets that the app uses for user documents).
 //   2. Delete every row in public.documents for that user.
@@ -87,6 +96,23 @@ async function purgeUser(admin: SupabaseClient, cancellation: { id: string; user
   }
 }
 
+/** See process-deletions/index.ts for why this guard exists. */
+async function cancellationConfirmed(admin: SupabaseClient, userId: string): Promise<boolean> {
+  const { data, error } = await admin
+    .from('users')
+    .select('subscription_status, revenuecat_original_transaction_id')
+    .eq('id', userId)
+    .maybeSingle();
+  // A read failure must never be read as "go ahead and delete".
+  if (error) return false;
+  if (!data) return true;
+  const row = data as {
+    subscription_status: string | null;
+    revenuecat_original_transaction_id: string | null;
+  };
+  return row.subscription_status === 'cancelled' || !row.revenuecat_original_transaction_id;
+}
+
 Deno.serve(async (_req) => {
   if (!SUPABASE_URL || !SERVICE_ROLE) return json({ error: 'Supabase env missing' }, 500);
 
@@ -97,12 +123,19 @@ Deno.serve(async (_req) => {
     .from('cancellations')
     .select('id, user_id')
     .lte('deletion_scheduled_for', today)
-    .eq('is_deleted', false);
+    .eq('is_deleted', false)
+    .is('voided_at', null);
   if (dueErr) return json({ error: dueErr.message }, 500);
 
   const queue = (due ?? []) as Array<{ id: string; user_id: string }>;
   const results = [];
+  let skipped = 0;
   for (const c of queue) {
+    if (!(await cancellationConfirmed(admin, c.user_id))) {
+      console.log(`[purge-cancelled-documents] SKIPPED user=${c.user_id} — not confirmed cancelled`);
+      skipped += 1;
+      continue;
+    }
     results.push(await purgeUser(admin, c));
   }
 
@@ -111,6 +144,7 @@ Deno.serve(async (_req) => {
     processed: results.length,
     succeeded: results.filter((r) => r.ok).length,
     failed: results.filter((r) => !r.ok).length,
+    skipped,
     results,
   });
 });

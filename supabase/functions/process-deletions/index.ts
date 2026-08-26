@@ -1,14 +1,40 @@
 // Supabase Edge Function: process-deletions
 //
 // Runs on a daily schedule. For every cancellation whose grace period has
-// elapsed (deletion_scheduled_for <= now AND is_deleted = false) it permanently
-// removes the user's compliance data:
+// elapsed (deletion_scheduled_for <= now AND is_deleted = false AND
+// voided_at IS NULL) AND whose owner is confirmed to have actually cancelled,
+// it permanently removes the user's compliance data:
 //   1. All files in the `documents` storage bucket under <user_id>/*
 //   2. All rows in public.documents for that user
 //   3. All rows in hours_log, business_trips, meeting_minutes,
 //      strategy_documents for that user
 //   4. Marks the cancellation row is_deleted = true, deleted_at = now()
 // Each deletion is logged (user_id + document count) for audit purposes.
+//
+// ─── The cancellation-confirmed guard ─────────────────────────────────────
+// The app records a cancellations row BEFORE handing the user to Apple's /
+// Google's subscription-management sheet, because that is when the signatures
+// exist. No app can cancel an IAP subscription on a user's behalf, and the
+// store gives no callback saying whether the user went through with it — so a
+// row here proves INTENT, not outcome. Someone can sign, get handed to the
+// store, dismiss the sheet, and keep paying.
+//
+// Deleting on intent alone would wipe an active paying subscriber's entire
+// compliance history 30 days later, silently. So before purging we require one
+// of two things to be true of the owner:
+//
+//   • users.subscription_status = 'cancelled' — written ONLY by the RevenueCat
+//     webhook, on a real store CANCELLATION or EXPIRATION event. It also
+//     self-heals: re-subscribing flips it back to 'active', which correctly
+//     stands this purge down.
+//   • users.revenuecat_original_transaction_id IS NULL — the user never had a
+//     store subscription at all (free / Basic, never purchased), so no webhook
+//     will ever fire for them and a status check alone would trap their
+//     deletion request forever.
+//
+// Anything else means they are still subscribed 30 days after asking to cancel:
+// void the row (voided_at = now) so it is visibly recorded and not retried
+// nightly. A genuine later cancellation creates a fresh row.
 //
 // This supersedes the earlier `purge-cancelled-documents` function (which only
 // removed the documents bucket + table). Schedule ONLY this one to avoid double
@@ -152,6 +178,39 @@ async function purgeUser(
   }
 }
 
+/**
+ * Is this cancellation confirmed enough to destroy data for? See the guard
+ * explanation in the file header. Returns a reason string when it is NOT, so
+ * the skip is legible in the logs and the response.
+ */
+async function cancellationConfirmed(
+  admin: SupabaseClient,
+  userId: string,
+): Promise<{ confirmed: boolean; reason?: string }> {
+  const { data, error } = await admin
+    .from('users')
+    .select('subscription_status, revenuecat_original_transaction_id')
+    .eq('id', userId)
+    .maybeSingle();
+
+  // A read failure must NOT be read as "go ahead and delete". Skip without
+  // voiding so the next run can try again.
+  if (error) return { confirmed: false, reason: `user lookup failed: ${error.message}` };
+  // No user row at all — the account is gone; nothing is being billed.
+  if (!data) return { confirmed: true };
+
+  const row = data as {
+    subscription_status: string | null;
+    revenuecat_original_transaction_id: string | null;
+  };
+  if (row.subscription_status === 'cancelled') return { confirmed: true };
+  if (!row.revenuecat_original_transaction_id) return { confirmed: true };
+  return {
+    confirmed: false,
+    reason: `still subscribed (status=${row.subscription_status ?? 'null'})`,
+  };
+}
+
 Deno.serve(async (_req) => {
   if (!SUPABASE_URL || !SERVICE_ROLE) return json({ error: 'Supabase env missing' }, 500);
 
@@ -162,7 +221,8 @@ Deno.serve(async (_req) => {
     .from('cancellations')
     .select('id, user_id, document_count_at_cancellation')
     .lte('deletion_scheduled_for', now)
-    .eq('is_deleted', false);
+    .eq('is_deleted', false)
+    .is('voided_at', null);
   if (dueErr) return json({ error: dueErr.message }, 500);
 
   const queue = (due ?? []) as Array<{
@@ -172,7 +232,30 @@ Deno.serve(async (_req) => {
   }>;
 
   const results = [];
+  const skipped = [];
   for (const c of queue) {
+    const { confirmed, reason } = await cancellationConfirmed(admin, c.user_id);
+    if (!confirmed) {
+      // "still subscribed" is a settled answer 30 days on — void it so it is
+      // recorded rather than silently retried every night. A transient lookup
+      // failure is not settled, so leave that row alone for the next run.
+      const settled = reason?.startsWith('still subscribed') ?? false;
+      if (settled) {
+        const { error: voidErr } = await admin
+          .from('cancellations')
+          .update({ voided_at: new Date().toISOString(), void_reason: reason })
+          .eq('id', c.id);
+        if (voidErr) {
+          console.error(`[process-deletions] void failed for ${c.id}: ${voidErr.message}`);
+        }
+      }
+      console.log(
+        `[process-deletions] SKIPPED user=${c.user_id} cancellation=${c.id} ` +
+          `reason="${reason}" voided=${settled}`,
+      );
+      skipped.push({ cancellation_id: c.id, user_id: c.user_id, reason, voided: settled });
+      continue;
+    }
     results.push(await purgeUser(admin, c));
   }
 
@@ -181,6 +264,8 @@ Deno.serve(async (_req) => {
     processed: results.length,
     succeeded: results.filter((r) => r.ok).length,
     failed: results.filter((r) => !r.ok).length,
+    skipped: skipped.length,
     results,
+    skipped_details: skipped,
   });
 });

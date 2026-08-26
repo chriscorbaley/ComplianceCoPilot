@@ -315,6 +315,34 @@ async function openUrl(url: string): Promise<ManageSubscriptionResult> {
   }
 }
 
+/**
+ * Does the store still report a subscription that will renew?
+ *
+ * ADVISORY ONLY — never treat this as authoritative. StoreKit's local cache can
+ * lag a cancellation the user genuinely completed, so a `true` here does NOT
+ * prove they are still subscribed. It exists purely to catch the obvious case
+ * where someone opened the manage-subscriptions sheet and dismissed it without
+ * doing anything, so we can nudge them in the moment.
+ *
+ * The durable signals remain users.subscription_status (written by the
+ * RevenueCat webhook on a real CANCELLATION event) and the purge-time guard in
+ * the process-deletions function.
+ *
+ * Returns null when the answer isn't knowable (SDK unconfigured, fetch failed).
+ */
+export async function hasRenewingSubscription(): Promise<boolean | null> {
+  if (!configured) return null;
+  try {
+    const info = await Purchases.getCustomerInfo();
+    const active = Object.values(info.entitlements.active);
+    if (active.length === 0) return false;
+    return active.some((e) => e.willRenew);
+  } catch (err) {
+    console.warn('[RevenueCat] getCustomerInfo failed', err);
+    return null;
+  }
+}
+
 /** Android package name, needed to deep link Play's subscription page. */
 function applicationId(): string | null {
   // Required lazily rather than imported: expo-constants ships with `expo`

@@ -1,11 +1,30 @@
 // Cancellation flow helpers: document counts, bulk download, signature uploads,
-// cancellation record insert, and edge-function calls (Stripe + email).
+// cancellation record insert, and the hand-off to the store's own subscription
+// management UI.
+//
+// BILLING vs RETENTION — these are two separate things and this module only
+// owns one of them:
+//   • RETENTION (ours): the signed cancellations row and its 30-day deletion
+//     clock. Recorded here, exactly as before.
+//   • BILLING (the store's): only Apple/Google can stop charging someone. There
+//     is no API that lets an app cancel an IAP subscription on the user's
+//     behalf, so the actual cancellation is the user acting in the store's own
+//     sheet, which we open for them.
+//
+// This module deliberately does NOT write users.subscription_tier /
+// subscription_status. It used to, which revoked access the instant someone
+// cancelled — wrong for IAP, where Apple and Google keep a subscription usable
+// until the paid period ends. The RevenueCat webhook owns those columns and
+// already models this correctly (markCancelledKeepAccess on CANCELLATION,
+// revoke on EXPIRATION).
 
+import { Platform } from 'react-native';
 import { File, Paths } from 'expo-file-system';
 import * as Sharing from 'expo-sharing';
 import { decode as decodeBase64 } from 'base64-arraybuffer';
 import { supabase, requireUserId, type DocumentRow } from './supabase';
 import { renderHtmlToPdfUri } from './pdfDocuments';
+import { hasRenewingSubscription, openManageSubscriptions } from './revenueCat';
 
 // Escape user text for safe embedding in the generated PDF's <pre> block.
 function escapeHtml(s: string): string {
@@ -171,7 +190,14 @@ const NO_SIGNATURE_MARKER = 'simple-confirmation';
 export interface CancellationResult {
   cancellationId: string;
   deletionScheduledFor: string;
-  stripeCancelled: boolean;
+  // The store's subscription-management UI was successfully presented. False
+  // means we couldn't open it and the user must be told to go there themselves.
+  manageOpened: boolean;
+  // ADVISORY: the store still reported a renewing subscription after the
+  // hand-off, so the user may have dismissed the sheet without cancelling.
+  // null when unknowable (Android, SDK unconfigured, probe failed). Never
+  // treated as proof — see hasRenewingSubscription().
+  stillRenewing: boolean | null;
   emailSent: boolean;
 }
 
@@ -192,14 +218,16 @@ export async function completeCancellation(
 
   const deletionScheduledFor = deletionDateFromNow().toISOString();
 
-  const { data: userRow } = await supabase
-    .from('users')
-    .select('stripe_subscription_id')
-    .eq('id', userId)
-    .maybeSingle();
-  const stripeSubscriptionId =
-    (userRow as { stripe_subscription_id?: string | null } | null)?.stripe_subscription_id ?? null;
-
+  // The retention record. Written FIRST and unconditionally: it captures the
+  // signatures and the document count, which are true regardless of what
+  // happens next in the store's sheet. If the user backs out without actually
+  // cancelling, the purge-time guard in the process-deletions function refuses
+  // to delete and voids this row — deferring the insert instead would throw the
+  // signatures away, which is the one thing this flow exists to capture.
+  //
+  // cancellations.stripe_subscription_id is intentionally left null: it was
+  // only ever populated by the never-deployed Stripe webhook, and nothing reads
+  // it now that the Stripe cancel call is gone.
   const { data: inserted, error: insertErr } = await supabase
     .from('cancellations')
     .insert({
@@ -208,7 +236,6 @@ export async function completeCancellation(
       signature_1_url: sig1Path,
       signature_2_url: sig2Path,
       document_count_at_cancellation: input.documentCount,
-      stripe_subscription_id: stripeSubscriptionId,
     })
     .select('id')
     .single();
@@ -217,25 +244,8 @@ export async function completeCancellation(
   }
   const cancellationId = (inserted as { id: string }).id;
 
-  // Downgrade the account immediately: mark cancelled and drop to the free
-  // ("starter") tier. Documents stay readable until the scheduled purge date;
-  // gating (useStrategyAccess) re-locks paid strategies on the next render.
-  const { error: userUpdateErr } = await supabase
-    .from('users')
-    .update({ subscription_status: 'cancelled', subscription_tier: 'starter' })
-    .eq('id', userId);
-  if (userUpdateErr) throw userUpdateErr;
-
-  let stripeCancelled = false;
-  try {
-    const { error: cancelErr } = await supabase.functions.invoke('cancel-subscription', {
-      body: { cancellation_id: cancellationId },
-    });
-    stripeCancelled = !cancelErr;
-  } catch {
-    stripeCancelled = false;
-  }
-
+  // Courtesy confirmation of the request. Sent before the hand-off so the store
+  // sheet isn't interrupted by an in-flight network call, and never fatal.
   let emailSent = false;
   try {
     const { error: emailErr } = await supabase.functions.invoke('send-cancellation-email', {
@@ -246,5 +256,19 @@ export async function completeCancellation(
     emailSent = false;
   }
 
-  return { cancellationId, deletionScheduledFor, stripeCancelled, emailSent };
+  // The actual cancellation: hand the user to Apple's / Google's own
+  // subscription management. Nothing else can stop the billing.
+  const manageResult = await openManageSubscriptions();
+  const manageOpened = manageResult === 'opened';
+
+  // Advisory probe. Only meaningful on iOS, where showManageSubscriptions()
+  // resolves after the sheet is dismissed. On Android the deep link resolves
+  // immediately with the app backgrounded, so anything we read here predates
+  // the user acting — don't ask.
+  let stillRenewing: boolean | null = null;
+  if (manageOpened && Platform.OS === 'ios') {
+    stillRenewing = await hasRenewingSubscription();
+  }
+
+  return { cancellationId, deletionScheduledFor, manageOpened, stillRenewing, emailSent };
 }

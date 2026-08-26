@@ -4,6 +4,7 @@ import {
   Alert,
   Image,
   Modal,
+  Platform,
   ScrollView,
   StyleSheet,
   Text,
@@ -19,6 +20,7 @@ import { colors } from '../../theme';
 import { supabase, type SubscriptionTier } from '../../services/supabase';
 import { useAuth } from '../../auth/AuthContext';
 import { usePricingPlans, formatPrice, type PricingPlan } from '../../services/pricingPlans';
+import { openManageSubscriptions } from '../../services/revenueCat';
 import type { OnboardingStackParamList, RootStackParamList } from '../../navigation/types';
 import { contentContainerStyle } from '../../constants/layout';
 
@@ -32,10 +34,14 @@ interface PlanCardProps {
   features: string[];
   highlighted: boolean;
   busy: boolean;
+  // Button label. Normally "Select Plan", but a paying subscriber picking Basic
+  // is handed off to the store instead of changing plan in-app, so the label
+  // says so (see selectPlan).
+  selectLabel: string;
   onSelect: () => void;
 }
 
-const StarterCard: React.FC<PlanCardProps> = ({ name, price, trialDays, features, highlighted, busy, onSelect }) => (
+const StarterCard: React.FC<PlanCardProps> = ({ name, price, trialDays, features, highlighted, busy, selectLabel, onSelect }) => (
   <View style={[styles.cardWhite, highlighted && styles.cardHighlighted]}>
     <Text style={styles.planNameNavy}>{name}</Text>
     <View style={styles.priceRow}>
@@ -51,12 +57,12 @@ const StarterCard: React.FC<PlanCardProps> = ({ name, price, trialDays, features
       </View>
     ))}
     <TouchableOpacity activeOpacity={0.85} disabled={busy} onPress={onSelect} style={styles.selectBtnOutline}>
-      {busy ? <ActivityIndicator color={colors.navy} /> : <Text style={styles.selectBtnOutlineText}>Select Plan</Text>}
+      {busy ? <ActivityIndicator color={colors.navy} /> : <Text style={styles.selectBtnOutlineText}>{selectLabel}</Text>}
     </TouchableOpacity>
   </View>
 );
 
-const CoreCard: React.FC<PlanCardProps> = ({ name, price, trialDays, features, highlighted, busy, onSelect }) => (
+const CoreCard: React.FC<PlanCardProps> = ({ name, price, trialDays, features, highlighted, busy, selectLabel, onSelect }) => (
   <View style={[styles.cardWhite, styles.cardCoreBorder, highlighted && styles.cardHighlighted]}>
     <Text style={styles.planNameNavy}>{name}</Text>
     <View style={styles.priceRow}>
@@ -72,12 +78,12 @@ const CoreCard: React.FC<PlanCardProps> = ({ name, price, trialDays, features, h
       </View>
     ))}
     <TouchableOpacity activeOpacity={0.85} disabled={busy} onPress={onSelect} style={styles.selectBtnOutline}>
-      {busy ? <ActivityIndicator color={colors.navy} /> : <Text style={styles.selectBtnOutlineText}>Select Plan</Text>}
+      {busy ? <ActivityIndicator color={colors.navy} /> : <Text style={styles.selectBtnOutlineText}>{selectLabel}</Text>}
     </TouchableOpacity>
   </View>
 );
 
-const ProCard: React.FC<PlanCardProps> = ({ name, price, trialDays, features, highlighted, busy, onSelect }) => (
+const ProCard: React.FC<PlanCardProps> = ({ name, price, trialDays, features, highlighted, busy, selectLabel, onSelect }) => (
   <View style={[styles.cardNavy, highlighted && styles.cardNavyHighlighted]}>
     <View style={styles.badge}>
       <Text style={styles.badgeText}>MOST POPULAR</Text>
@@ -96,7 +102,7 @@ const ProCard: React.FC<PlanCardProps> = ({ name, price, trialDays, features, hi
       </View>
     ))}
     <TouchableOpacity activeOpacity={0.85} disabled={busy} onPress={onSelect} style={styles.selectBtnGold}>
-      {busy ? <ActivityIndicator color={colors.white} /> : <Text style={styles.selectBtnGoldText}>Select Plan</Text>}
+      {busy ? <ActivityIndicator color={colors.white} /> : <Text style={styles.selectBtnGoldText}>{selectLabel}</Text>}
     </TouchableOpacity>
   </View>
 );
@@ -113,13 +119,21 @@ export const ChoosePlanScreen: React.FC = () => {
   const insets = useSafeAreaInsets();
   const nav = useNavigation<Nav>();
   const route = useRoute<Route>();
-  const { session, refreshProfile, onboardingCompleted } = useAuth();
+  const { session, subscriptionTier, refreshProfile, onboardingCompleted } = useAuth();
   const { plans, loading } = usePricingPlans();
   const highlight = route.params?.highlight ?? null;
   const [busyTier, setBusyTier] = useState<SubscriptionTier | null>(null);
   const [codeOpen, setCodeOpen] = useState(false);
   const [code, setCode] = useState('');
   const [codeApplied, setCodeApplied] = useState(false);
+
+  // Someone who finished onboarding AND holds a paid tier has a real store
+  // subscription behind them. Their plan changes have to go through the store,
+  // not through a database write (see selectPlan).
+  const isPaidSubscriber =
+    onboardingCompleted && (subscriptionTier === 'core' || subscriptionTier === 'pro');
+
+  const storeName = Platform.OS === 'ios' ? 'App Store' : 'Play Store';
 
   const selectPlan = async (tier: SubscriptionTier) => {
     if (!session?.user.id) return;
@@ -131,6 +145,29 @@ export const ChoosePlanScreen: React.FC = () => {
       rootNav.navigate('UpgradeConfirm', { tier });
       return;
     }
+    // Paying subscriber dropping to Basic. This used to write subscription_tier
+    // straight to the database, which downgraded them in-app while Apple/Google
+    // kept charging the old price indefinitely. Only the store can change what
+    // someone is billed, so hand off to its subscription management UI — within
+    // one Subscription Group the store handles the cross-grade and its timing,
+    // and the RevenueCat webhook writes the new tier when it takes effect.
+    if (isPaidSubscriber && tier === 'starter') {
+      setBusyTier(tier);
+      try {
+        const result = await openManageSubscriptions();
+        if (result !== 'opened') {
+          Alert.alert(
+            'Could not open subscriptions',
+            Platform.OS === 'ios'
+              ? 'Open the Settings app, tap your name, then Subscriptions to change your plan.'
+              : 'Open the Google Play Store app, then Menu → Payments & subscriptions to change your plan.',
+          );
+        }
+      } finally {
+        setBusyTier(null);
+      }
+      return;
+    }
     setBusyTier(tier);
     try {
       const { error } = await supabase
@@ -139,9 +176,11 @@ export const ChoosePlanScreen: React.FC = () => {
         .eq('id', session.user.id);
       if (error) throw error;
       await refreshProfile();
-      // Post-onboarding downgrade to Starter: the new tier takes effect
-      // immediately (gating reads subscription_tier at render) — confirm and
-      // return.
+      // Post-onboarding selection by someone with no paid store subscription
+      // (already on Basic, or never purchased). Nothing is being billed, so the
+      // tier can safely change immediately — gating reads subscription_tier at
+      // render. Paying subscribers never reach here; they were handed to the
+      // store above.
       if (onboardingCompleted) {
         const label = tier === 'pro' ? 'Pro' : tier === 'core' ? 'Core' : 'Basic';
         Alert.alert('Plan updated', `You're now on the ${label} plan.`);
@@ -215,12 +254,25 @@ export const ChoosePlanScreen: React.FC = () => {
                   features={p.features}
                   highlighted={highlight === p.plan_key}
                   busy={busyTier === p.plan_key}
+                  selectLabel={
+                    isPaidSubscriber && p.plan_key === 'starter'
+                      ? `Change in ${storeName}`
+                      : 'Select Plan'
+                  }
                   onSelect={() => selectPlan(p.plan_key)}
                 />
               );
             })}
           </View>
         )}
+
+        {isPaidSubscriber ? (
+          <Text style={styles.handoffNote}>
+            Moving to {plans.find((p) => p.plan_key === 'starter')?.display_name ?? 'Basic'} changes
+            what you're billed, so the {storeName} handles it. We'll take you there — your plan
+            updates here once the change takes effect.
+          </Text>
+        ) : null}
 
         <Text style={styles.trialNote}>Cancel anytime.</Text>
 
@@ -461,6 +513,13 @@ const styles = StyleSheet.create({
   trialNote: {
     color: '#888888',
     fontSize: 12,
+    textAlign: 'center',
+    marginTop: 16,
+  },
+  handoffNote: {
+    color: '#85B7EB',
+    fontSize: 12,
+    lineHeight: 17,
     textAlign: 'center',
     marginTop: 16,
   },
