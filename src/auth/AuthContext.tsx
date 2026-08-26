@@ -24,6 +24,12 @@ interface AuthState {
   signUp: (email: string, password: string, fullName: string) => Promise<void>;
   signOut: () => Promise<void>;
   refreshProfile: () => Promise<void>;
+  // Optimistic, in-memory only: update subscriptionTier immediately after a
+  // successful purchase or restore so gating unlocks without waiting on the
+  // RevenueCat webhook. Writes nothing to the database — the webhook remains
+  // the durable writer of users.subscription_tier, and the next
+  // refreshProfile() / sign-in overwrites this with the stored value.
+  setLocalSubscriptionTier: (tier: SubscriptionTier | null) => void;
 }
 
 const AuthContext = createContext<AuthState | null>(null);
@@ -92,6 +98,12 @@ export const AuthProvider: React.FC<React.PropsWithChildren> = ({ children }) =>
     setSubscriptionTier(p.subscriptionTier);
     setActiveStrategies(p.activeStrategies);
   }, []);
+
+  // See the AuthState declaration: local state only, never a DB write.
+  const setLocalSubscriptionTier = useCallback(
+    (tier: SubscriptionTier | null) => setSubscriptionTier(tier),
+    [],
+  );
 
   // Compute whether the user must re-accept updated legal documents. Only
   // relevant for a fully-onboarded non-admin user: brand-new users accept via
@@ -190,6 +202,7 @@ export const AuthProvider: React.FC<React.PropsWithChildren> = ({ children }) =>
         signUp,
         signOut,
         refreshProfile,
+        setLocalSubscriptionTier,
       }}
     >
       {children}

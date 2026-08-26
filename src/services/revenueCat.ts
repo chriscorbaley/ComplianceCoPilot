@@ -345,6 +345,15 @@ export interface PurchaseOutcome {
  * Initiate a purchase for the given package. Returns a structured outcome so
  * callers can distinguish success, user-cancellation, and failure without
  * try/catch. On success, tier reflects the newly-effective entitlement.
+ *
+ * Optimistic client update: on ok, `tier` is already the post-purchase
+ * effective DB tier (derived from the returned CustomerInfo, which StoreKit /
+ * RevenueCat has fully updated by the time purchasePackage resolves), and
+ * `customerInfo` is exposed for anything else the caller needs (expiry,
+ * willRenew, entitlement ids). That is everything the gating layer keys off —
+ * useStrategyAccess reads a single SubscriptionTier — so callers can push
+ * `tier` straight into auth state and let the RevenueCat webhook remain the
+ * durable write to users.subscription_tier. No extra round-trip needed.
  */
 export async function purchasePackage(
   pkg: PurchasesPackage,
@@ -373,4 +382,193 @@ export async function purchasePackage(
       error: err,
     };
   }
+}
+
+// ─── Restore purchases ─────────────────────────────────────────────────────
+
+export interface RestoreOutcome {
+  // The restore call itself succeeded. Note ok === true with tier === null is
+  // the normal "nothing to restore" case (the store had no prior purchase for
+  // this Apple/Google account) — not an error, but worth telling the user.
+  ok: boolean;
+  customerInfo: CustomerInfo | null;
+  tier: SubscriptionTier | null;
+  error?: unknown;
+}
+
+/**
+ * Re-sync entitlements from the store for the signed-in store account, e.g.
+ * after a reinstall or on a second device.
+ *
+ * Required by App Store Review guideline 3.1.1: any app selling a
+ * non-consumable/subscription must expose a Restore Purchases control.
+ *
+ * Mirrors purchasePackage's outcome shape, so the same optimistic client
+ * update applies — push `tier` into local gating state immediately and let the
+ * webhook do the durable DB write.
+ */
+export async function restorePurchases(): Promise<RestoreOutcome> {
+  if (!configured) {
+    return { ok: false, customerInfo: null, tier: null };
+  }
+  try {
+    const customerInfo = await Purchases.restorePurchases();
+    return {
+      ok: true,
+      customerInfo,
+      tier: effectiveTierFromCustomerInfo(customerInfo),
+    };
+  } catch (err) {
+    console.warn('[RevenueCat] restorePurchases failed', err);
+    return { ok: false, customerInfo: null, tier: null, error: err };
+  }
+}
+
+// ─── Offerings → paywall structure ─────────────────────────────────────────
+//
+// Our "default" offering carries six packages across three tiers. RevenueCat
+// allows only ONE package per offering to claim each standard duration
+// identifier, so Basic took the standard "monthly" / "annual" slots and Core
+// and Pro were forced onto custom identifiers. Consequence: packageType is
+// 'CUSTOM' for four of the six packages, so it cannot be used to derive the
+// billing period. The identifier string is the single source of truth here.
+//
+// RevenueCat prefixes standard identifiers with "$rc_" in the SDK payload
+// (a package created as "Monthly" reports identifier "$rc_monthly"), so both
+// the bare and prefixed forms are recognised for the Basic pair.
+
+export type BillingPeriod = 'monthly' | 'annual';
+
+export interface PackageDescriptor {
+  /** RevenueCat entitlement this package grants. */
+  entitlement: RevenueCatEntitlement;
+  /** Corresponding DB tier ("basic" entitlement ⇒ "starter" tier). */
+  tier: SubscriptionTier;
+  billingPeriod: BillingPeriod;
+}
+
+const PACKAGE_IDENTIFIERS: Record<
+  string,
+  { entitlement: RevenueCatEntitlement; billingPeriod: BillingPeriod }
+> = {
+  // Basic — the standard duration identifiers, bare and $rc_-prefixed.
+  monthly: { entitlement: 'basic', billingPeriod: 'monthly' },
+  annual: { entitlement: 'basic', billingPeriod: 'annual' },
+  $rc_monthly: { entitlement: 'basic', billingPeriod: 'monthly' },
+  $rc_annual: { entitlement: 'basic', billingPeriod: 'annual' },
+  // Defensive aliases in case Basic is ever re-created with explicit ones.
+  basic_monthly: { entitlement: 'basic', billingPeriod: 'monthly' },
+  basic_annual: { entitlement: 'basic', billingPeriod: 'annual' },
+  // Core and Pro — custom identifiers (packageType === 'CUSTOM').
+  core_monthly: { entitlement: 'core', billingPeriod: 'monthly' },
+  core_annual: { entitlement: 'core', billingPeriod: 'annual' },
+  pro_monthly: { entitlement: 'pro', billingPeriod: 'monthly' },
+  pro_annual: { entitlement: 'pro', billingPeriod: 'annual' },
+};
+
+/**
+ * Pure: map a RevenueCat package identifier to the tier and billing period it
+ * represents. Returns null (after a warning) for anything unrecognised, so a
+ * stray package added in the dashboard is skipped rather than crashing the
+ * paywall.
+ */
+export function parsePackageIdentifier(
+  identifier: string,
+): PackageDescriptor | null {
+  const key = identifier.trim().toLowerCase();
+  const match = PACKAGE_IDENTIFIERS[key];
+  if (!match) {
+    console.warn(
+      `[RevenueCat] Unrecognised package identifier "${identifier}". ` +
+        'Expected one of: monthly, annual, core_monthly, core_annual, ' +
+        'pro_monthly, pro_annual. Package skipped.',
+    );
+    return null;
+  }
+  return {
+    entitlement: match.entitlement,
+    tier: ENTITLEMENT_TO_TIER[match.entitlement],
+    billingPeriod: match.billingPeriod,
+  };
+}
+
+/** One tier's purchasable packages, ready to render as a paywall card. */
+export interface TierOffering {
+  entitlement: RevenueCatEntitlement;
+  /** DB tier to compare against users.subscription_tier. */
+  tier: SubscriptionTier;
+  monthly: PurchasesPackage | null;
+  annual: PurchasesPackage | null;
+}
+
+// Display order, cheapest first.
+const TIER_ORDER: RevenueCatEntitlement[] = ['basic', 'core', 'pro'];
+
+/**
+ * Turn the raw offerings response into the structure the paywall renders from:
+ * one entry per tier, each holding its monthly and annual PurchasesPackage.
+ * Screens never touch package identifiers or packageType.
+ *
+ * Uses the current offering, falling back to the "default" offering by name.
+ * Tiers with no packages at all are omitted (with a warning) so the UI cannot
+ * render a card the user has no way to buy. Returns [] when offerings are
+ * unavailable — callers should treat that as "show an error / retry" state.
+ */
+export function groupOfferingsByTier(
+  offerings: PurchasesOfferings | null,
+): TierOffering[] {
+  const offering = offerings?.current ?? offerings?.all?.default ?? null;
+  if (!offering) {
+    if (offerings) console.warn('[RevenueCat] No current/default offering found');
+    return [];
+  }
+
+  const byTier = new Map<RevenueCatEntitlement, TierOffering>(
+    TIER_ORDER.map((entitlement) => [
+      entitlement,
+      {
+        entitlement,
+        tier: ENTITLEMENT_TO_TIER[entitlement],
+        monthly: null,
+        annual: null,
+      },
+    ]),
+  );
+
+  for (const pkg of offering.availablePackages) {
+    const descriptor = parsePackageIdentifier(pkg.identifier);
+    if (!descriptor) continue; // parsePackageIdentifier already warned.
+    const slot = byTier.get(descriptor.entitlement)!;
+    if (slot[descriptor.billingPeriod]) {
+      console.warn(
+        `[RevenueCat] Duplicate ${descriptor.entitlement} ` +
+          `${descriptor.billingPeriod} package ("${pkg.identifier}") — keeping the first.`,
+      );
+      continue;
+    }
+    slot[descriptor.billingPeriod] = pkg;
+  }
+
+  const empty = TIER_ORDER.filter((t) => {
+    const slot = byTier.get(t)!;
+    return !slot.monthly && !slot.annual;
+  });
+  if (empty.length > 0) {
+    console.warn(
+      `[RevenueCat] Offering "${offering.identifier}" has no packages for ` +
+        `tier(s): ${empty.join(', ')}. They will not appear on the paywall.`,
+    );
+  }
+
+  return TIER_ORDER.map((t) => byTier.get(t)!).filter(
+    (o) => o.monthly !== null || o.annual !== null,
+  );
+}
+
+/**
+ * Convenience: fetch the offerings and group them in one call. Returns [] on
+ * any failure (getOfferings already warns).
+ */
+export async function getTierOfferings(): Promise<TierOffering[]> {
+  return groupOfferingsByTier(await getOfferings());
 }
