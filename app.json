@@ -40,13 +40,6 @@
           "microphonePermission": "Compliance Co-Pilot needs microphone access to record meeting minutes and log compliance activities by voice."
         }
       ],
-      [
-        "@stripe/stripe-react-native",
-        {
-          "merchantIdentifier": "merchant.com.compliancecopilot.app",
-          "enableGooglePay": false
-        }
-      ],
       "@react-native-community/datetimepicker",
       "expo-notifications",
       [
