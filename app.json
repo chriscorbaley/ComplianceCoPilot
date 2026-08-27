@@ -30,7 +30,8 @@
       "package": "com.compliancecopilot.app",
       "permissions": [
         "android.permission.RECORD_AUDIO",
-        "android.permission.CAMERA"
+        "android.permission.CAMERA",
+        "android.permission.MODIFY_AUDIO_SETTINGS"
       ]
     },
     "plugins": [
@@ -49,6 +50,11 @@
           "cameraPermission": "Compliance Co-Pilot needs camera access so you can take a photo of your business logo."
         }
       ]
-    ]
+    ],
+    "extra": {
+      "eas": {
+        "projectId": "3a9e6c5d-4eff-4df7-bd5f-78b8bc4fa8e5"
+      }
+    }
   }
 }
