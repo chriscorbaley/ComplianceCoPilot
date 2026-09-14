@@ -3,12 +3,10 @@ import {
   ActivityIndicator,
   Alert,
   Image,
-  Modal,
   Platform,
   ScrollView,
   StyleSheet,
   Text,
-  TextInput,
   TouchableOpacity,
   View,
 } from 'react-native';
@@ -123,9 +121,6 @@ export const ChoosePlanScreen: React.FC = () => {
   const { plans, loading } = usePricingPlans();
   const highlight = route.params?.highlight ?? null;
   const [busyTier, setBusyTier] = useState<SubscriptionTier | null>(null);
-  const [codeOpen, setCodeOpen] = useState(false);
-  const [code, setCode] = useState('');
-  const [codeApplied, setCodeApplied] = useState(false);
 
   // Someone who finished onboarding AND holds a paid tier has a real store
   // subscription behind them. Their plan changes have to go through the store,
@@ -201,15 +196,6 @@ export const ChoosePlanScreen: React.FC = () => {
     }
   };
 
-  const applyCode = () => {
-    if (code.trim().toUpperCase() === 'TAXLAB') {
-      setCodeApplied(true);
-      Alert.alert('Code applied', 'Your discount will be applied at checkout.');
-    } else {
-      Alert.alert('Invalid code', 'That code is not recognized.');
-    }
-  };
-
   return (
     <View style={styles.root}>
       <ScrollView
@@ -275,45 +261,8 @@ export const ChoosePlanScreen: React.FC = () => {
         ) : null}
 
         <Text style={styles.trialNote}>Cancel anytime.</Text>
-
-        <TouchableOpacity onPress={() => setCodeOpen(true)} style={styles.codeWrap}>
-          <Text style={styles.codeText}>
-            {codeApplied ? 'Code applied ✓' : 'Already have a code?'}
-          </Text>
-        </TouchableOpacity>
         </View>
       </ScrollView>
-
-      <Modal visible={codeOpen} transparent animationType="fade" onRequestClose={() => setCodeOpen(false)}>
-        <View style={styles.modalBackdrop}>
-          <View style={styles.modalCard}>
-            <Text style={styles.modalTitle}>Enter discount code</Text>
-            <TextInput
-              style={styles.codeInput}
-              value={code}
-              onChangeText={setCode}
-              placeholder="Enter code"
-              placeholderTextColor={colors.subtleText}
-              autoCapitalize="characters"
-              autoCorrect={false}
-            />
-            <View style={styles.modalActions}>
-              <TouchableOpacity onPress={() => setCodeOpen(false)} style={styles.modalCancel}>
-                <Text style={styles.modalCancelText}>Cancel</Text>
-              </TouchableOpacity>
-              <TouchableOpacity
-                onPress={() => {
-                  applyCode();
-                  setCodeOpen(false);
-                }}
-                style={styles.modalApply}
-              >
-                <Text style={styles.modalApplyText}>Apply</Text>
-              </TouchableOpacity>
-            </View>
-          </View>
-        </View>
-      </Modal>
     </View>
   );
 };
@@ -522,64 +471,5 @@ const styles = StyleSheet.create({
     lineHeight: 17,
     textAlign: 'center',
     marginTop: 16,
-  },
-  codeWrap: {
-    alignItems: 'center',
-    paddingVertical: 12,
-  },
-  codeText: {
-    color: '#85B7EB',
-    fontSize: 13,
-    fontWeight: '600',
-    textDecorationLine: 'underline',
-  },
-  modalBackdrop: {
-    flex: 1,
-    backgroundColor: 'rgba(0,0,0,0.55)',
-    justifyContent: 'center',
-    paddingHorizontal: 32,
-  },
-  modalCard: {
-    backgroundColor: colors.white,
-    borderRadius: 12,
-    padding: 20,
-    gap: 12,
-  },
-  modalTitle: {
-    color: '#042C53',
-    fontSize: 16,
-    fontWeight: '700',
-  },
-  codeInput: {
-    borderWidth: 1,
-    borderColor: colors.divider,
-    borderRadius: 8,
-    paddingHorizontal: 12,
-    paddingVertical: 10,
-    fontSize: 14,
-    color: colors.bodyText,
-  },
-  modalActions: {
-    flexDirection: 'row',
-    justifyContent: 'flex-end',
-    gap: 8,
-  },
-  modalCancel: {
-    paddingHorizontal: 14,
-    paddingVertical: 10,
-  },
-  modalCancelText: {
-    color: colors.mutedText,
-    fontWeight: '600',
-  },
-  modalApply: {
-    backgroundColor: '#185FA5',
-    borderRadius: 8,
-    paddingHorizontal: 16,
-    paddingVertical: 10,
-  },
-  modalApplyText: {
-    color: colors.white,
-    fontWeight: '700',
   },
 });
