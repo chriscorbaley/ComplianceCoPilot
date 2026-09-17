@@ -3,6 +3,7 @@ import {
   supabase,
   type LegalDocumentType,
   type Session,
+  type SubscriptionStatus,
   type SubscriptionTier,
 } from '../services/supabase';
 import { fetchLegalReacceptanceNeeded } from '../services/legalDocuments';
@@ -15,6 +16,11 @@ interface AuthState {
   onboardingCompleted: boolean;
   businessOnboardingCompleted: boolean;
   subscriptionTier: SubscriptionTier | null;
+  // Billing state for the tier above. Needed because 'starter' is ambiguous on
+  // its own: the RevenueCat webhook uses it both for a paying Basic subscriber
+  // and as the floor it writes on expiration/refund, so only the status
+  // separates "active Basic" from "lapsed or never subscribed".
+  subscriptionStatus: SubscriptionStatus | null;
   activeStrategies: string[];
   emailVerified: boolean;
   // Legal documents whose active version no longer matches what this user last
@@ -40,6 +46,7 @@ interface UserProfile {
   onboardingCompleted: boolean;
   businessOnboardingCompleted: boolean;
   subscriptionTier: SubscriptionTier | null;
+  subscriptionStatus: SubscriptionStatus | null;
   activeStrategies: string[];
 }
 
@@ -47,7 +54,7 @@ async function fetchUserProfile(userId: string): Promise<UserProfile> {
   const { data, error } = await supabase
     .from('users')
     .select(
-      'is_admin, full_name, onboarding_completed, business_onboarding_completed, subscription_tier, active_strategies',
+      'is_admin, full_name, onboarding_completed, business_onboarding_completed, subscription_tier, subscription_status, active_strategies',
     )
     .eq('id', userId)
     .maybeSingle();
@@ -58,6 +65,7 @@ async function fetchUserProfile(userId: string): Promise<UserProfile> {
       onboardingCompleted: false,
       businessOnboardingCompleted: false,
       subscriptionTier: null,
+      subscriptionStatus: null,
       activeStrategies: [],
     };
   }
@@ -67,6 +75,7 @@ async function fetchUserProfile(userId: string): Promise<UserProfile> {
     onboarding_completed?: boolean | null;
     business_onboarding_completed?: boolean | null;
     subscription_tier?: SubscriptionTier | null;
+    subscription_status?: SubscriptionStatus | null;
     active_strategies?: string[] | null;
   };
   return {
@@ -75,6 +84,7 @@ async function fetchUserProfile(userId: string): Promise<UserProfile> {
     onboardingCompleted: Boolean(row.onboarding_completed),
     businessOnboardingCompleted: Boolean(row.business_onboarding_completed),
     subscriptionTier: row.subscription_tier ?? null,
+    subscriptionStatus: row.subscription_status ?? null,
     activeStrategies: Array.isArray(row.active_strategies) ? row.active_strategies : [],
   };
 }
@@ -87,6 +97,7 @@ export const AuthProvider: React.FC<React.PropsWithChildren> = ({ children }) =>
   const [onboardingCompleted, setOnboardingCompleted] = useState(false);
   const [businessOnboardingCompleted, setBusinessOnboardingCompleted] = useState(false);
   const [subscriptionTier, setSubscriptionTier] = useState<SubscriptionTier | null>(null);
+  const [subscriptionStatus, setSubscriptionStatus] = useState<SubscriptionStatus | null>(null);
   const [activeStrategies, setActiveStrategies] = useState<string[]>([]);
   const [legalReacceptanceNeeded, setLegalReacceptanceNeeded] = useState<LegalDocumentType[]>([]);
 
@@ -96,6 +107,7 @@ export const AuthProvider: React.FC<React.PropsWithChildren> = ({ children }) =>
     setOnboardingCompleted(p.onboardingCompleted);
     setBusinessOnboardingCompleted(p.businessOnboardingCompleted);
     setSubscriptionTier(p.subscriptionTier);
+    setSubscriptionStatus(p.subscriptionStatus);
     setActiveStrategies(p.activeStrategies);
   }, []);
 
@@ -153,6 +165,7 @@ export const AuthProvider: React.FC<React.PropsWithChildren> = ({ children }) =>
           onboardingCompleted: false,
           businessOnboardingCompleted: false,
           subscriptionTier: null,
+          subscriptionStatus: null,
           activeStrategies: [],
         });
         setLegalReacceptanceNeeded([]);
@@ -195,6 +208,7 @@ export const AuthProvider: React.FC<React.PropsWithChildren> = ({ children }) =>
         onboardingCompleted,
         businessOnboardingCompleted,
         subscriptionTier,
+        subscriptionStatus,
         activeStrategies,
         emailVerified,
         legalReacceptanceNeeded,

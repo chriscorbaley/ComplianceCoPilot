@@ -1,11 +1,10 @@
 import React, { useEffect } from 'react';
 import { Image, StyleSheet, Text, TouchableOpacity, View } from 'react-native';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
-import { useNavigation } from '@react-navigation/native';
+import { useNavigation, useRoute, type RouteProp } from '@react-navigation/native';
 import type { NativeStackNavigationProp } from '@react-navigation/native-stack';
 import { Ionicons } from '@expo/vector-icons';
 import { colors } from '../../theme';
-import { useAuth } from '../../auth/AuthContext';
 import { usePricingPlans, formatPrice } from '../../services/pricingPlans';
 import { useAppContent } from '../../services/appContent';
 import { contentContainerStyle } from '../../constants/layout';
@@ -13,6 +12,7 @@ import type { OnboardingStackParamList } from '../../navigation/types';
 import type { SubscriptionTier } from '../../services/supabase';
 
 type Nav = NativeStackNavigationProp<OnboardingStackParamList, 'UpgradeTeaser'>;
+type Route = RouteProp<OnboardingStackParamList, 'UpgradeTeaser'>;
 
 // Copy is editable from Admin → Content. The `*Key` fields point at app_content
 // rows; the sibling strings are the shipped fallbacks rendered until the DB
@@ -61,24 +61,26 @@ const CORE_TEASER: TeaserContent = {
 export const UpgradeTeaserScreen: React.FC = () => {
   const insets = useSafeAreaInsets();
   const nav = useNavigation<Nav>();
-  const { subscriptionTier } = useAuth();
+  // The tier picked on ChoosePlan, passed forward rather than read from the
+  // profile — nothing has been purchased yet, so the profile has no tier.
+  const { tier } = useRoute<Route>().params;
   const { byKey } = usePricingPlans();
   const appContent = useAppContent();
 
   // Defensive: Pro shouldn't see this; skip straight to the Business Travel
   // value screen (which then continues to payment).
   useEffect(() => {
-    if (subscriptionTier === 'pro') {
-      nav.replace('BusinessTravelIntro');
+    if (tier === 'pro') {
+      nav.replace('BusinessTravelIntro', { tier });
     }
-  }, [subscriptionTier, nav]);
+  }, [tier, nav]);
 
-  if (subscriptionTier !== 'starter' && subscriptionTier !== 'core') return null;
+  if (tier !== 'starter' && tier !== 'core') return null;
 
-  const content = subscriptionTier === 'starter' ? STARTER_TEASER : CORE_TEASER;
+  const content = tier === 'starter' ? STARTER_TEASER : CORE_TEASER;
   const target = byKey[content.upgradeTarget];
   const upgradeLabel = `Upgrade to ${target.display_name} — ${formatPrice(target.monthly_price)}/mo`;
-  const skipLabel = `Continue with ${byKey[subscriptionTier].display_name}`;
+  const skipLabel = `Continue with ${byKey[tier].display_name}`;
 
   return (
     <View style={[styles.root, { paddingTop: insets.top + 16, paddingBottom: insets.bottom + 16 }]}>
@@ -116,7 +118,7 @@ export const UpgradeTeaserScreen: React.FC = () => {
           <Text style={styles.upgradeText}>{upgradeLabel}</Text>
         </TouchableOpacity>
 
-        <TouchableOpacity activeOpacity={0.7} style={styles.skipWrap} onPress={() => nav.replace('BusinessTravelIntro')}>
+        <TouchableOpacity activeOpacity={0.7} style={styles.skipWrap} onPress={() => nav.replace('BusinessTravelIntro', { tier })}>
           <Text style={styles.skipText}>{skipLabel}</Text>
         </TouchableOpacity>
       </View>

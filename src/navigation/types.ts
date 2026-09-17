@@ -26,11 +26,15 @@ export type OnboardingStackParamList = {
   NotificationsPermission: undefined;
   Privacy: undefined;
   ChoosePlan: { highlight?: SubscriptionTier } | undefined;
-  UpgradeTeaser: undefined;
-  BusinessTravelIntro: undefined;
+  // Everything from here to Payment carries the tier picked on ChoosePlan as a
+  // route param. Nothing is purchased yet during onboarding, so the tier is NOT
+  // on the profile — users.subscription_tier only becomes real after the
+  // RevenueCat purchase completes on PaymentScreen.
+  UpgradeTeaser: { tier: SubscriptionTier };
+  BusinessTravelIntro: { tier: SubscriptionTier };
   // Core-only upsell screen shown between Business Travel intro and Payment.
-  MileageIntro: undefined;
-  Payment: undefined;
+  MileageIntro: { tier: SubscriptionTier };
+  Payment: { tier: SubscriptionTier };
   StrategySelection: undefined;
   // Real estate v2 onboarding flow.
   RealEstateType: { selectedStrategies: string[] };
@@ -57,9 +61,13 @@ export type RootStackParamList = {
   // The onboarding plan-selection screen, also reachable post-onboarding so
   // clients can upgrade from inside the app at any time.
   ChoosePlan: { highlight?: SubscriptionTier } | undefined;
-  // Post-onboarding upgrade flow: confirm → process → pick additional
-  // strategies → dashboard (with a welcome banner).
-  UpgradeConfirm: { tier: 'core' | 'pro' };
+  // Post-onboarding purchase flow: confirm → purchase → pick additional
+  // strategies → dashboard (with a welcome banner). Accepts 'starter' too —
+  // Basic is a real paid product, so selecting it post-onboarding goes through
+  // the same confirm-then-purchase screen rather than a direct tier write. A
+  // Basic purchase skips the add-strategies step (it grants no new slots).
+  UpgradeConfirm: { tier: SubscriptionTier };
+  // Only the tiers that actually raise the strategy limit reach this step.
   UpgradeStrategySelect: { tier: 'core' | 'pro' };
   // Real-estate onboarding flow, also mounted here so it can be entered after an
   // in-app upgrade when Real Estate is newly added to active_strategies. Same

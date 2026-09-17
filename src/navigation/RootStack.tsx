@@ -77,7 +77,13 @@ export const RootStack: React.FC = () => {
         name="UpgradeConfirm"
         component={UpgradeConfirmScreen}
         options={({ route }) => ({
-          title: `Upgrade to ${route.params.tier === 'pro' ? 'Pro' : 'Core'}`,
+          // Basic is the entry tier — there is no plan to "upgrade" from.
+          title:
+            route.params.tier === 'pro'
+              ? 'Upgrade to Pro'
+              : route.params.tier === 'core'
+                ? 'Upgrade to Core'
+                : 'Subscribe to Basic',
         })}
       />
       <Stack.Screen

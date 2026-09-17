@@ -584,8 +584,11 @@ export const DashboardScreen: React.FC = () => {
         <View style={styles.upgradeBanner}>
           <Ionicons name="checkmark-circle" size={18} color={colors.white} />
           <Text style={styles.upgradeBannerText}>
-            Welcome to {upgradeBannerTier === 'pro' ? 'Pro' : 'Core'}! Your new
-            strategies are now active.
+            {upgradeBannerTier === 'starter'
+              ? 'Welcome to Basic! Your subscription is now active.'
+              : `Welcome to ${
+                  upgradeBannerTier === 'pro' ? 'Pro' : 'Core'
+                }! Your new strategies are now active.`}
           </Text>
         </View>
       )}

@@ -19,7 +19,8 @@
       "infoPlist": {
         "NSMicrophoneUsageDescription": "Compliance Co-Pilot needs microphone access to record meeting minutes and log compliance activities by voice.",
         "NSPhotoLibraryUsageDescription": "Compliance Co-Pilot needs access to your photo library so you can select your business logo for generated compliance documents.",
-        "NSCameraUsageDescription": "Compliance Co-Pilot needs camera access so you can take a photo of your business logo."
+        "NSCameraUsageDescription": "Compliance Co-Pilot needs camera access so you can take a photo of your business logo.",
+        "ITSAppUsesNonExemptEncryption": false
       }
     },
     "android": {

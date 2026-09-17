@@ -15,7 +15,7 @@ import { useNavigation, useRoute } from '@react-navigation/native';
 import type { NativeStackNavigationProp, NativeStackScreenProps } from '@react-navigation/native-stack';
 import { Ionicons } from '@expo/vector-icons';
 import { colors } from '../../theme';
-import { supabase, type SubscriptionTier } from '../../services/supabase';
+import type { SubscriptionTier } from '../../services/supabase';
 import { useAuth } from '../../auth/AuthContext';
 import { usePricingPlans, formatPrice, type PricingPlan } from '../../services/pricingPlans';
 import { openManageSubscriptions } from '../../services/revenueCat';
@@ -117,16 +117,32 @@ export const ChoosePlanScreen: React.FC = () => {
   const insets = useSafeAreaInsets();
   const nav = useNavigation<Nav>();
   const route = useRoute<Route>();
-  const { session, subscriptionTier, refreshProfile, onboardingCompleted } = useAuth();
+  const { session, subscriptionTier, subscriptionStatus, onboardingCompleted } = useAuth();
   const { plans, loading } = usePricingPlans();
   const highlight = route.params?.highlight ?? null;
   const [busyTier, setBusyTier] = useState<SubscriptionTier | null>(null);
 
-  // Someone who finished onboarding AND holds a paid tier has a real store
-  // subscription behind them. Their plan changes have to go through the store,
-  // not through a database write (see selectPlan).
+  // Does this user have a real, currently-active store subscription behind them?
+  // If so, their plan changes have to go through the store, not through a
+  // database write (see selectPlan).
+  //
+  // Core/Pro need no status check: those tiers are only ever written while the
+  // user is entitled, and markCancelledKeepAccess() deliberately leaves the
+  // tier intact during a cancellation that still has paid time left on it — so
+  // tier alone already means "entitled".
+  //
+  // 'starter' is different, because the webhook overloads it. It's both the
+  // tier of a paying Basic subscriber AND the floor written on
+  // EXPIRATION/refund/billing-revoke, so an active Basic subscriber and a
+  // lapsed-or-never-subscribed user are indistinguishable by tier. Only
+  // subscription_status separates them: 'active'/'trial' means they really are
+  // paying for Basic and must be sent to the store, while 'cancelled'/null
+  // means there is nothing to manage and they need a real purchase.
   const isPaidSubscriber =
-    onboardingCompleted && (subscriptionTier === 'core' || subscriptionTier === 'pro');
+    onboardingCompleted &&
+    ((subscriptionTier === 'core' || subscriptionTier === 'pro') ||
+      (subscriptionTier === 'starter' &&
+        (subscriptionStatus === 'active' || subscriptionStatus === 'trial')));
 
   const storeName = Platform.OS === 'ios' ? 'App Store' : 'Play Store';
 
@@ -163,37 +179,35 @@ export const ChoosePlanScreen: React.FC = () => {
       }
       return;
     }
-    setBusyTier(tier);
-    try {
-      const { error } = await supabase
-        .from('users')
-        .update({ subscription_tier: tier })
-        .eq('id', session.user.id);
-      if (error) throw error;
-      await refreshProfile();
-      // Post-onboarding selection by someone with no paid store subscription
-      // (already on Basic, or never purchased). Nothing is being billed, so the
-      // tier can safely change immediately — gating reads subscription_tier at
-      // render. Paying subscribers never reach here; they were handed to the
-      // store above.
-      if (onboardingCompleted) {
-        const label = tier === 'pro' ? 'Pro' : tier === 'core' ? 'Core' : 'Basic';
-        Alert.alert('Plan updated', `You're now on the ${label} plan.`);
-        if (nav.canGoBack()) nav.goBack();
-        return;
-      }
+    // Onboarding path. Nothing has been bought yet, so nothing is written: the
+    // chosen tier rides forward as a route param and only reaches
+    // users.subscription_tier once the purchase succeeds on PaymentScreen (the
+    // RevenueCat webhook is the durable writer). Writing it here would have
+    // granted the tier before a single cent was charged.
+    if (!onboardingCompleted) {
       if (tier === 'pro') {
         // Pro skips the upgrade teaser but still sees the Business Travel value
         // screen before payment.
-        nav.replace('BusinessTravelIntro');
+        nav.replace('BusinessTravelIntro', { tier });
       } else {
-        nav.replace('UpgradeTeaser');
+        nav.replace('UpgradeTeaser', { tier });
       }
-    } catch (err) {
-      Alert.alert('Could not save plan', err instanceof Error ? err.message : String(err));
-    } finally {
-      setBusyTier(null);
+      return;
     }
+    // Post-onboarding Basic selection by someone with no paid store
+    // subscription — never purchased, or lapsed (the RevenueCat webhook writes
+    // tier 'starter' on EXPIRATION, so a revoked user looks like this too).
+    // Only Basic reaches here: paid tiers went to UpgradeConfirm above, and
+    // paying subscribers were handed to the store.
+    //
+    // Basic is a real paid product, so it needs a real purchase. This used to
+    // write subscription_tier straight to the database and tell the user
+    // "You're now on the Basic plan" without charging anything — a false
+    // confirmation for anyone with no subscription, and a tier write that
+    // desynchronized from the subscription_status the webhook owns. Route to
+    // the same confirm-then-purchase screen the paid tiers use.
+    const rootNav = nav as unknown as NativeStackNavigationProp<RootStackParamList>;
+    rootNav.navigate('UpgradeConfirm', { tier });
   };
 
   return (

@@ -1,6 +1,6 @@
-// Paywall for the tier the user picked on ChoosePlanScreen (the tier is already
-// on the profile by the time we get here, so it is read from AuthContext rather
-// than route params).
+// Paywall for the tier the user picked on ChoosePlanScreen. The tier arrives as
+// a route param, threaded through the upsell screens — it is deliberately NOT on
+// the profile yet, because nothing has been purchased at this point.
 //
 // Purchases run through RevenueCat / StoreKit — there is no card form and no
 // third-party processor referenced anywhere on this screen. Apple rejects apps
@@ -29,7 +29,7 @@ import {
   View,
 } from 'react-native';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
-import { useNavigation } from '@react-navigation/native';
+import { useNavigation, useRoute, type RouteProp } from '@react-navigation/native';
 import type { NativeStackNavigationProp } from '@react-navigation/native-stack';
 import { Ionicons } from '@expo/vector-icons';
 import { colors } from '../../theme';
@@ -50,17 +50,19 @@ import type { OnboardingStackParamList } from '../../navigation/types';
 import { contentContainerStyle } from '../../constants/layout';
 
 type Nav = NativeStackNavigationProp<OnboardingStackParamList, 'Payment'>;
+type Route = RouteProp<OnboardingStackParamList, 'Payment'>;
 
 export const PaymentScreen: React.FC = () => {
   const insets = useSafeAreaInsets();
   const nav = useNavigation<Nav>();
-  const { session, subscriptionTier, setLocalSubscriptionTier } = useAuth();
+  const { session, setLocalSubscriptionTier } = useAuth();
   const reviewMode = useReviewMode();
   const { byKey } = usePricingPlans();
 
-  // The tier was chosen on ChoosePlanScreen, which persists it before routing
-  // here, so it arrives via the profile rather than route params.
-  const tier = subscriptionTier ?? 'starter';
+  // The tier was chosen on ChoosePlanScreen and threaded here through the upsell
+  // screens as a route param. Nothing has been written to the profile yet — this
+  // screen's purchase is what makes the tier real.
+  const { tier } = useRoute<Route>().params;
   const plan = byKey[tier];
 
   const {

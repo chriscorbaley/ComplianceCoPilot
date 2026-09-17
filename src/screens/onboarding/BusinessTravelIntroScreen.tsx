@@ -1,17 +1,17 @@
 import React from 'react';
 import { ScrollView, StyleSheet, Text, TouchableOpacity, View } from 'react-native';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
-import { useNavigation } from '@react-navigation/native';
+import { useNavigation, useRoute, type RouteProp } from '@react-navigation/native';
 import type { NativeStackNavigationProp } from '@react-navigation/native-stack';
 import { Ionicons } from '@expo/vector-icons';
 import { colors } from '../../theme';
-import { useAuth } from '../../auth/AuthContext';
 import { usePricingPlans, formatPrice } from '../../services/pricingPlans';
 import { useAppContent } from '../../services/appContent';
 import type { OnboardingStackParamList } from '../../navigation/types';
 import { contentContainerStyle } from '../../constants/layout';
 
 type Nav = NativeStackNavigationProp<OnboardingStackParamList, 'BusinessTravelIntro'>;
+type Route = RouteProp<OnboardingStackParamList, 'BusinessTravelIntro'>;
 
 // Copy is editable from Admin → Content. Each `*Key` points at an app_content
 // row; the sibling strings are the shipped fallbacks rendered until the DB
@@ -80,10 +80,11 @@ const FEATURES: FeatureDef[] = [
 export const BusinessTravelIntroScreen: React.FC = () => {
   const insets = useSafeAreaInsets();
   const nav = useNavigation<Nav>();
-  const { subscriptionTier } = useAuth();
   const { byKey } = usePricingPlans();
   const content = useAppContent();
-  const tier = subscriptionTier ?? 'starter';
+  // The tier picked on ChoosePlan, passed forward rather than read from the
+  // profile — nothing has been purchased yet, so the profile has no tier.
+  const { tier } = useRoute<Route>().params;
   const isBasic = tier === 'starter';
   const tierName = byKey[tier].display_name;
 
@@ -145,7 +146,7 @@ export const BusinessTravelIntroScreen: React.FC = () => {
               <TouchableOpacity
                 activeOpacity={0.85}
                 style={[styles.cta, styles.ctaOutline]}
-                onPress={() => nav.replace('Payment')}
+                onPress={() => nav.replace('Payment', { tier })}
               >
                 <Text style={styles.ctaOutlineText}>Continue with {byKey.starter.display_name}</Text>
               </TouchableOpacity>
@@ -164,7 +165,9 @@ export const BusinessTravelIntroScreen: React.FC = () => {
                 // Core sees the Mileage (Pro) upsell next; Pro already has
                 // everything and goes straight to payment.
                 onPress={() =>
-                  nav.replace(tier === 'core' ? 'MileageIntro' : 'Payment')
+                  tier === 'core'
+                    ? nav.replace('MileageIntro', { tier })
+                    : nav.replace('Payment', { tier })
                 }
               >
                 <Text style={styles.ctaText}>Continue</Text>

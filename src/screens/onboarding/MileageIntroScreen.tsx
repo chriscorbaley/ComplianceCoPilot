@@ -1,7 +1,7 @@
 import React from 'react';
 import { ScrollView, StyleSheet, Text, TouchableOpacity, View } from 'react-native';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
-import { useNavigation } from '@react-navigation/native';
+import { useNavigation, useRoute, type RouteProp } from '@react-navigation/native';
 import type { NativeStackNavigationProp } from '@react-navigation/native-stack';
 import { Ionicons } from '@expo/vector-icons';
 import { colors } from '../../theme';
@@ -18,6 +18,7 @@ import type { OnboardingStackParamList } from '../../navigation/types';
 import { contentContainerStyle } from '../../constants/layout';
 
 type Nav = NativeStackNavigationProp<OnboardingStackParamList, 'MileageIntro'>;
+type Route = RouteProp<OnboardingStackParamList, 'MileageIntro'>;
 
 // Shown ONLY to Core subscribers during onboarding, between the Business Travel
 // intro and the payment screen. Upsells Core → Pro for mileage tracking. Basic
@@ -27,6 +28,9 @@ export const MileageIntroScreen: React.FC = () => {
   const nav = useNavigation<Nav>();
   const { byKey } = usePricingPlans();
   const content = useAppContent();
+  // Always 'core' in practice (only Core is routed here), but carried through
+  // rather than assumed — nothing is on the profile until payment completes.
+  const { tier } = useRoute<Route>().params;
 
   return (
     <View style={styles.root}>
@@ -84,7 +88,7 @@ export const MileageIntroScreen: React.FC = () => {
           <TouchableOpacity
             activeOpacity={0.85}
             style={[styles.cta, styles.ctaOutline]}
-            onPress={() => nav.replace('Payment')}
+            onPress={() => nav.replace('Payment', { tier })}
           >
             <Text style={styles.ctaOutlineText}>Continue with {byKey.core.display_name}</Text>
           </TouchableOpacity>

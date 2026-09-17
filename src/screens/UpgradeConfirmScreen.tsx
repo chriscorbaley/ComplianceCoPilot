@@ -16,6 +16,14 @@
 //   • active_strategies IS still written here — it's app data, not billing, and
 //     UpgradeStrategySelect depends on it.
 //
+// TIERS: handles 'starter' (Basic) as well as Core/Pro. Basic is a real paid
+// product, so ChoosePlanScreen routes a post-onboarding Basic selection here
+// instead of writing the tier directly. Basic is the ENTRY tier, so that path
+// differs in two ways: the copy says "Subscribe", not "Upgrade", and on success
+// it skips STEP 2 (Business Travel is a Core/Pro perk) and STEP 3 (the
+// add-strategies picker grants no new slots on Basic), returning straight to the
+// Dashboard.
+//
 // ORDERING TRAP: the active_strategies write needs refreshProfile() to land in
 // context, but refreshProfile() re-reads subscription_tier from a database the
 // webhook may not have updated yet. setLocalSubscriptionTier must therefore be
@@ -65,6 +73,11 @@ export const UpgradeConfirmScreen: React.FC = () => {
   const tier = route.params.tier;
   const plan = byKey[tier];
   const label = plan.display_name;
+  // "Upgrade" only reads correctly when moving up from a plan the user already
+  // holds. Basic is the entry tier: whoever lands here for it has no active
+  // subscription (never purchased, or lapsed — the RevenueCat webhook writes
+  // tier 'starter' on EXPIRATION, so a revoked user looks the same).
+  const isUpgrade = tier !== 'starter';
 
   const {
     offering,
@@ -95,8 +108,16 @@ export const UpgradeConfirmScreen: React.FC = () => {
   ).length;
 
   // Only the NEW capabilities the user does not already have on their plan.
+  // Basic is the entry tier, so for it everything in the plan is new.
   const features: string[] =
-    tier === 'core'
+    tier === 'starter'
+      ? [
+          '1 tax strategy of your choice',
+          'AI document generator',
+          'Strategy-specific compliance checklists',
+          'Secure document storage',
+        ]
+      : tier === 'core'
       ? [
           `Up to 3 strategies (you currently have ${currentStrategyCount})`,
           'AI voice on all strategy screens',
@@ -139,6 +160,22 @@ export const UpgradeConfirmScreen: React.FC = () => {
   // (see the ordering note in the file header) and continue to STEP 3.
   const completeUpgrade = useCallback(
     async (grantedTier: SubscriptionTier) => {
+      // Basic grants neither Business Travel (a Core/Pro perk) nor extra
+      // strategy slots, so STEP 2 and STEP 3 would both be wrong for it —
+      // activating Business Travel would hand out a tier it doesn't include,
+      // and UpgradeStrategySelect only accepts 'core' | 'pro'. Go straight back
+      // to the Dashboard, keeping the refreshProfile-before-optimistic-tier
+      // ordering from the file header.
+      if (grantedTier === 'starter') {
+        await refreshProfile();
+        setLocalSubscriptionTier(grantedTier);
+        if (!mounted.current) return;
+        nav.navigate('Tabs', {
+          screen: 'Dashboard',
+          params: { upgradedTo: grantedTier },
+        });
+        return;
+      }
       await activateBusinessTravel();
       await refreshProfile();
       setLocalSubscriptionTier(grantedTier);
@@ -168,12 +205,19 @@ export const UpgradeConfirmScreen: React.FC = () => {
       await completeUpgrade(tier);
     } catch (err) {
       if (mounted.current) {
-        setError(purchaseErrorMessage(err, 'Could not complete the review-mode upgrade.'));
+        setError(
+          purchaseErrorMessage(
+            err,
+            isUpgrade
+              ? 'Could not complete the review-mode upgrade.'
+              : 'Could not complete the review-mode subscription.',
+          ),
+        );
       }
     } finally {
       if (mounted.current) setBusy(null);
     }
-  }, [session?.user.id, tier, completeUpgrade]);
+  }, [session?.user.id, tier, completeUpgrade, isUpgrade]);
 
   const onConfirm = useCallback(async () => {
     if (reviewMode) {
@@ -195,7 +239,9 @@ export const UpgradeConfirmScreen: React.FC = () => {
         setError(
           purchaseErrorMessage(
             outcome.error,
-            'Your upgrade could not be completed. Please try again.',
+            isUpgrade
+              ? 'Your upgrade could not be completed. Please try again.'
+              : 'Your purchase could not be completed. Please try again.',
           ),
         );
       }
@@ -205,18 +251,20 @@ export const UpgradeConfirmScreen: React.FC = () => {
       await completeUpgrade(outcome.tier ?? tier);
     } catch (err) {
       if (mounted.current) {
-        // The purchase itself succeeded — only the strategy activation failed.
+        // The purchase itself succeeded — only the follow-up setup failed.
         setError(
           purchaseErrorMessage(
             err,
-            'Your upgrade went through, but we could not finish setting up your strategies. Please try again.',
+            isUpgrade
+              ? 'Your upgrade went through, but we could not finish setting up your strategies. Please try again.'
+              : 'Your subscription went through, but we could not finish setting up your account. Please try again.',
           ),
         );
       }
     } finally {
       if (mounted.current) setBusy(null);
     }
-  }, [reviewMode, completeReviewBypass, selectedPackage, completeUpgrade, tier]);
+  }, [reviewMode, completeReviewBypass, selectedPackage, completeUpgrade, tier, isUpgrade]);
 
   // Required by App Store Review guideline 3.1.1.
   const onRestore = useCallback(async () => {
@@ -246,9 +294,11 @@ export const UpgradeConfirmScreen: React.FC = () => {
       return;
     }
     // A restore can return a tier that isn't an upgrade (e.g. the Basic plan
-    // they already had). Apply it, but don't push them into the add-strategies
-    // flow for a tier that grants nothing new.
-    if (outcome.tier === 'starter') {
+    // they already had while trying to buy Core). Apply it, but don't push them
+    // into the add-strategies flow for a tier that grants nothing new. When
+    // Basic IS what this screen is selling, a restored Basic is the intended
+    // outcome — fall through to completeUpgrade instead.
+    if (outcome.tier === 'starter' && tier !== 'starter') {
       setLocalSubscriptionTier(outcome.tier);
       setBusy(null);
       Alert.alert(
@@ -271,15 +321,18 @@ export const UpgradeConfirmScreen: React.FC = () => {
     } finally {
       if (mounted.current) setBusy(null);
     }
-  }, [setLocalSubscriptionTier, byKey.starter.display_name, completeUpgrade]);
+  }, [setLocalSubscriptionTier, byKey.starter.display_name, completeUpgrade, tier]);
 
   const purchaseBusy = busy === 'purchase';
   const confirmDisabled = busy !== null || (!reviewMode && !selectedPackage);
+  const confirmVerb = isUpgrade ? 'Upgrade to' : 'Subscribe to';
   const confirmLabel = reviewMode
-    ? `Confirm Upgrade to ${label} (Review Mode)`
+    ? isUpgrade
+      ? `Confirm Upgrade to ${label} (Review Mode)`
+      : `Confirm ${label} Subscription (Review Mode)`
     : selectedPackage
-      ? `Upgrade to ${label} — ${selectedPackage.product.priceString}`
-      : `Upgrade to ${label}`;
+      ? `${confirmVerb} ${label} — ${selectedPackage.product.priceString}`
+      : `${confirmVerb} ${label}`;
 
   return (
     <ScrollView
