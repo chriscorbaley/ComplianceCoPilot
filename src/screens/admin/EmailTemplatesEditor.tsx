@@ -41,6 +41,8 @@ const TEMPLATE_LABELS: Record<EmailTemplateKey, string> = {
   verification: 'Email Verification',
   deletion_warning: 'Deletion Warning',
   cancellation_confirm: 'Cancellation Confirmation',
+  deletion_confirm: 'Account Deletion Confirmation',
+  deletion_complete: 'Account Deletion Complete',
 };
 
 const TEMPLATE_ICONS: Record<EmailTemplateKey, keyof typeof Ionicons.glyphMap> = {
@@ -48,6 +50,8 @@ const TEMPLATE_ICONS: Record<EmailTemplateKey, keyof typeof Ionicons.glyphMap> =
   verification: 'checkmark-circle-outline',
   deletion_warning: 'warning-outline',
   cancellation_confirm: 'close-circle-outline',
+  deletion_confirm: 'trash-outline',
+  deletion_complete: 'checkmark-done-outline',
 };
 
 // Which text field last held the cursor, so a tapped variable chip inserts into

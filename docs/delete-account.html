@@ -1,0 +1,389 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<!-- The confirmation link carries a single-use deletion token in the query
+     string. no-referrer keeps it out of Referer headers, and noindex keeps a
+     crawled link out of search results. -->
+<meta name="referrer" content="no-referrer">
+<meta name="robots" content="noindex, nofollow">
+<title>Delete Your Account — Compliance Co-Pilot</title>
+<style>
+  body {
+    font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, sans-serif;
+    max-width: 760px;
+    margin: 0 auto;
+    padding: 40px 24px 80px;
+    color: #1a1a1a;
+    line-height: 1.6;
+    background: #ffffff;
+  }
+  h1 {
+    color: #042C53;
+    font-size: 28px;
+    margin-bottom: 4px;
+  }
+  .subtitle {
+    color: #555;
+    font-size: 15px;
+    margin-bottom: 32px;
+  }
+  h2 {
+    color: #042C53;
+    font-size: 19px;
+    margin-top: 36px;
+    margin-bottom: 10px;
+    border-bottom: 2px solid #E6F1FB;
+    padding-bottom: 6px;
+  }
+  p { margin: 10px 0; }
+  ul { margin: 10px 0; padding-left: 22px; }
+  li { margin: 4px 0; }
+  .warning {
+    background: #FCEBEB;
+    border-left: 4px solid #A32D2D;
+    padding: 16px 20px;
+    margin: 24px 0;
+  }
+  .warning strong { color: #A32D2D; }
+  .note {
+    background: #F5F7FA;
+    border-left: 4px solid #185FA5;
+    padding: 16px 20px;
+    margin: 24px 0;
+    font-size: 15px;
+  }
+  .disclaimer {
+    background: #FCEBEB;
+    border-left: 4px solid #A32D2D;
+    padding: 16px 20px;
+    margin-top: 36px;
+    font-size: 14px;
+  }
+  .footer {
+    margin-top: 40px;
+    padding-top: 20px;
+    border-top: 1px solid #ddd;
+    font-size: 13px;
+    color: #777;
+    text-align: center;
+  }
+  a { color: #042C53; }
+
+  form { margin-top: 20px; }
+  label {
+    display: block;
+    font-size: 15px;
+    font-weight: 600;
+    color: #042C53;
+    margin-bottom: 6px;
+  }
+  input[type="email"] {
+    width: 100%;
+    box-sizing: border-box;
+    /* 16px prevents iOS Safari from zooming the viewport on focus. */
+    font-size: 16px;
+    font-family: inherit;
+    padding: 12px 14px;
+    border: 1px solid #c6d2de;
+    border-radius: 8px;
+    color: #1a1a1a;
+    background: #fff;
+  }
+  input[type="email"]:focus {
+    outline: none;
+    border-color: #185FA5;
+    box-shadow: 0 0 0 3px #E6F1FB;
+  }
+  button {
+    font-family: inherit;
+    font-size: 16px;
+    font-weight: 700;
+    color: #ffffff;
+    background: #A32D2D;
+    border: none;
+    border-radius: 8px;
+    padding: 14px 20px;
+    margin-top: 16px;
+    cursor: pointer;
+    /* Comfortably past the 44px minimum touch target on a phone. */
+    min-height: 48px;
+    width: 100%;
+  }
+  button:hover:not(:disabled) { background: #8c2626; }
+  button:disabled {
+    background: #c9a3a3;
+    cursor: not-allowed;
+  }
+  .status {
+    margin-top: 20px;
+    padding: 16px 20px;
+    border-left: 4px solid #185FA5;
+    background: #F5F7FA;
+    font-size: 15px;
+  }
+  .status.error {
+    border-left-color: #A32D2D;
+    background: #FCEBEB;
+  }
+  .status.done {
+    border-left-color: #042C53;
+    background: #F5F7FA;
+    font-weight: 600;
+  }
+  [hidden] { display: none !important; }
+
+  @media (min-width: 560px) {
+    button { width: auto; min-width: 280px; }
+  }
+  @media (max-width: 480px) {
+    body { padding: 28px 18px 60px; }
+    h1 { font-size: 24px; }
+  }
+</style>
+</head>
+<body>
+
+<h1>Compliance Co-Pilot — Delete Your Account</h1>
+<div class="subtitle">Compliance Co-Pilot LLC, Catalina Foothills, Arizona</div>
+
+<!-- ─── State 1: no ?token= in the URL. Request a confirmation link. ───────── -->
+<section id="request-view" hidden>
+
+  <h2>What deleting your account does</h2>
+  <p>Deleting your Compliance Co-Pilot account permanently removes the account and everything stored in it. This includes:</p>
+  <ul>
+    <li>Your sign-in and account profile</li>
+    <li>All compliance documents and uploaded files</li>
+    <li>Business trip records, hours logs, and meeting minutes</li>
+    <li>Mileage records and vehicles</li>
+    <li>Businesses, properties, and signed records</li>
+  </ul>
+  <div class="warning">
+    <p style="margin:0;"><strong>This cannot be undone.</strong> Once the deletion is confirmed it happens immediately, and we have no way to recover your account or any of your records afterwards.</p>
+  </div>
+  <div class="note">
+    <p style="margin:0;">Deleting your account does <strong>not</strong> cancel an active App Store or Google Play subscription. Only the store can stop the billing, so please cancel it there as well if you have a paid plan.</p>
+  </div>
+
+  <h2>Request deletion</h2>
+  <p>Enter the email address on your account. We will send you a confirmation link — your account is not deleted until you open that link and confirm.</p>
+
+  <form id="request-form" novalidate>
+    <label for="email">Email address</label>
+    <input
+      type="email"
+      id="email"
+      name="email"
+      autocomplete="email"
+      inputmode="email"
+      placeholder="you@example.com"
+      required
+    >
+    <button type="submit" id="request-button">Send confirmation link</button>
+  </form>
+
+  <div id="request-status" class="status" role="status" aria-live="polite" hidden></div>
+
+</section>
+
+<!-- ─── State 2: ?token= present. Confirm the deletion. ─────────────────────
+     Nothing is deleted on page load. Mail clients, link scanners and security
+     software routinely fetch URLs found in email, so an action taken on load
+     would delete accounts nobody clicked on. An explicit click is required. -->
+<section id="confirm-view" hidden>
+
+  <h2>Confirm account deletion</h2>
+  <div class="warning">
+    <p style="margin:0;"><strong>This will permanently delete your account and all of its data</strong> — documents, trips, hours logs, and everything else tied to it. This cannot be undone.</p>
+  </div>
+  <p>If you did not request this, close this page. Nothing will happen and your account will stay exactly as it is.</p>
+  <div class="note">
+    <p style="margin:0;">Deleting your account does <strong>not</strong> cancel an active App Store or Google Play subscription. Please cancel that separately through the store if you have a paid plan.</p>
+  </div>
+
+  <button type="button" id="confirm-button">Yes, permanently delete my account</button>
+
+  <div id="confirm-status" class="status" role="status" aria-live="polite" hidden></div>
+
+</section>
+
+<div class="disclaimer">
+<strong>DISCLAIMER</strong><br>
+Nothing in the Compliance Co-Pilot application constitutes legal or tax advice. AI-generated compliance classifications, deductibility verdicts, and document templates are informational tools only and do not substitute for the advice of a qualified tax or legal professional. Compliance Co-Pilot LLC is not responsible for tax decisions made in reliance on app outputs.
+</div>
+
+<div class="footer">
+Compliance Co-Pilot LLC | Account Deletion | Catalina Foothills, Arizona
+</div>
+
+<script>
+(function () {
+  'use strict';
+
+  // Supabase project URL and public anon key, taken from
+  // EXPO_PUBLIC_SUPABASE_URL / EXPO_PUBLIC_SUPABASE_ANON_KEY — the same pair
+  // src/services/supabase.ts reads. The anon key is public by design: it is
+  // already shipped inside the mobile app binary, and it grants nothing on its
+  // own (both functions below enforce their own rules, and deletion_requests
+  // has RLS on with zero policies, so an anon client cannot read a token).
+  var SUPABASE_URL = 'https://hlmyalvpioddkrnbvguz.supabase.co';
+  var SUPABASE_ANON_KEY = 'eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJpc3MiOiJzdXBhYmFzZSIsInJlZiI6ImhsbXlhbHZwaW9kZGtybmJ2Z3V6Iiwicm9sZSI6ImFub24iLCJpYXQiOjE3Nzg3MTUxNjMsImV4cCI6MjA5NDI5MTE2M30.7eSblpZMKtkHup0xDFjOMHkkrJv8Fj40Sg4KgcD7n20';
+
+  function el(id) { return document.getElementById(id); }
+
+  // textContent, never innerHTML — server messages are rendered as text so a
+  // response can never inject markup into this page.
+  function showStatus(node, message, kind) {
+    node.textContent = message;
+    node.className = 'status' + (kind ? ' ' + kind : '');
+    node.hidden = false;
+  }
+
+  function callFunction(name, payload) {
+    return fetch(SUPABASE_URL + '/functions/v1/' + name, {
+      method: 'POST',
+      headers: {
+        'Content-Type': 'application/json',
+        // The standard browser-side pair for a Supabase Edge Function call.
+        'apikey': SUPABASE_ANON_KEY,
+        'Authorization': 'Bearer ' + SUPABASE_ANON_KEY
+      },
+      body: JSON.stringify(payload)
+    }).then(function (response) {
+      return response.json().catch(function () { return null; }).then(function (data) {
+        return { status: response.status, ok: response.ok, data: data };
+      });
+    });
+  }
+
+  // ── State 1: request a confirmation link ────────────────────────────────
+  function initRequestView() {
+    var view = el('request-view');
+    var form = el('request-form');
+    var input = el('email');
+    var button = el('request-button');
+    var status = el('request-status');
+    view.hidden = false;
+
+    // The single message shown for every successful submission. The server
+    // deliberately answers identically whether or not the address has an
+    // account, so the page must not be more granular than that — anything
+    // finer would turn this form into a way to test which addresses are
+    // registered.
+    var SENT_MESSAGE =
+      "If an account exists for this email, you'll receive a confirmation link shortly. " +
+      'The link expires in 24 hours.';
+
+    form.addEventListener('submit', function (event) {
+      event.preventDefault();
+
+      var email = input.value.trim();
+      if (!email || email.indexOf('@') < 1 || email.indexOf('.') < 0) {
+        showStatus(status, 'Please enter a valid email address.', 'error');
+        return;
+      }
+
+      button.disabled = true;
+      button.textContent = 'Sending…';
+      status.hidden = true;
+
+      callFunction('request-account-deletion', { email: email }).then(function (result) {
+        if (result.ok) {
+          // Success: always the same message, whatever the body says.
+          form.hidden = true;
+          showStatus(status, SENT_MESSAGE, 'done');
+          return;
+        }
+        // A non-2xx here is a server-side failure (bad input, or the request
+        // could not be recorded). It is NOT correlated with whether the
+        // address has an account, so surfacing it leaks nothing — and telling
+        // someone to check their inbox when nothing was recorded would leave
+        // them waiting for an email that is never coming.
+        button.disabled = false;
+        button.textContent = 'Send confirmation link';
+        showStatus(
+          status,
+          (result.data && result.data.error) ||
+            'Something went wrong. Please try again in a moment.',
+          'error'
+        );
+      }).catch(function () {
+        button.disabled = false;
+        button.textContent = 'Send confirmation link';
+        showStatus(
+          status,
+          'We could not reach the server. Please check your connection and try again.',
+          'error'
+        );
+      });
+    });
+  }
+
+  // ── State 2: confirm with the emailed token ─────────────────────────────
+  function initConfirmView(token) {
+    var view = el('confirm-view');
+    var button = el('confirm-button');
+    var status = el('confirm-status');
+    view.hidden = false;
+
+    button.addEventListener('click', function () {
+      // Disabled synchronously, before the request goes out, so a double-click
+      // or an impatient second tap cannot submit the token twice.
+      button.disabled = true;
+      button.textContent = 'Deleting…';
+      status.hidden = true;
+
+      callFunction('confirm-account-deletion', { token: token }).then(function (result) {
+        if (result.ok && result.data && result.data.ok === true) {
+          button.hidden = true;
+          showStatus(
+            status,
+            'Your account and all associated data have been permanently deleted.',
+            'done'
+          );
+          return;
+        }
+        // The token is single-use and has already been spent by this attempt,
+        // so the button stays disabled — clicking again could only ever return
+        // "invalid or expired". The server's own message explains the recovery
+        // path (request a new link).
+        button.textContent = 'Deletion not completed';
+        showStatus(
+          status,
+          (result.data && result.data.error) ||
+            'We could not complete the deletion. Please request a new deletion link and try again.',
+          'error'
+        );
+      }).catch(function () {
+        // Ambiguous: the request may or may not have reached the server, so
+        // the button is not re-enabled.
+        button.textContent = 'Deletion not completed';
+        showStatus(
+          status,
+          'We could not reach the server, so we cannot confirm whether your account was deleted. ' +
+            'Please check your email, or request a new deletion link and try again.',
+          'error'
+        );
+      });
+    });
+  }
+
+  var token = '';
+  try {
+    token = (new URLSearchParams(window.location.search).get('token') || '').trim();
+  } catch (e) {
+    token = '';
+  }
+
+  if (token) {
+    initConfirmView(token);
+  } else {
+    initRequestView();
+  }
+})();
+</script>
+
+</body>
+</html>

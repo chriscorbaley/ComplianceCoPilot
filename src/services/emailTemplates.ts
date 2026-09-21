@@ -99,6 +99,42 @@ export const FALLBACK_TEMPLATES: Record<EmailTemplateKey, EmailTemplate> = {
 </body></html>`,
     available_variables: ['user_name', 'deletion_date', 'document_count'],
   },
+  deletion_confirm: {
+    template_key: 'deletion_confirm',
+    subject: 'Confirm your Compliance Co-Pilot account deletion',
+    body_html: `<!doctype html><html><body style="font-family:-apple-system,system-ui,sans-serif;color:#1a1a2e;max-width:560px;margin:0 auto;padding:24px;">
+  <h1 style="color:#A32D2D;margin-bottom:8px;">Confirm account deletion</h1>
+  <p>Hi {user_name},</p>
+  <p>We received a request to permanently delete your Compliance Co-Pilot account. Tap below to confirm.</p>
+  <div style="background:#FCEBEB;border-left:4px solid #A32D2D;padding:16px;border-radius:8px;margin:24px 0;">
+    <p style="margin:0;"><strong>This permanently deletes your account and every compliance record in it</strong> — documents, hours logs, business trips, meeting minutes, mileage, businesses and properties.</p>
+    <p style="margin:8px 0 0;">It cannot be undone, and we cannot recover anything afterwards.</p>
+  </div>
+  <p><a href="{confirm_link}" style="display:inline-block;background:#A32D2D;color:#fff;text-decoration:none;padding:12px 18px;border-radius:8px;font-weight:700;">Confirm account deletion</a></p>
+  <p>For your security this link works once and expires 24 hours after it was sent.</p>
+  <p><strong>Didn't request this?</strong> Ignore this email and nothing will happen. Your account stays exactly as it is.</p>
+  <p>Deleting your account does not cancel an active App Store or Google Play subscription — cancel that in the store to stop billing.</p>
+  <p style="color:#6b7280;font-size:12px;margin-top:32px;">Compliance Co-Pilot</p>
+</body></html>`,
+    available_variables: ['user_name', 'confirm_link'],
+  },
+  deletion_complete: {
+    template_key: 'deletion_complete',
+    subject: 'Your Compliance Co-Pilot account has been deleted',
+    body_html: `<!doctype html><html><body style="font-family:-apple-system,system-ui,sans-serif;color:#1a1a2e;max-width:560px;margin:0 auto;padding:24px;">
+  <h1 style="color:#042C53;margin-bottom:8px;">Account deleted</h1>
+  <p>Hi {user_name},</p>
+  <p>Your Compliance Co-Pilot account has been permanently deleted, along with all of the data in it.</p>
+  <div style="background:#F5F7FA;border-left:4px solid #185FA5;padding:16px;border-radius:8px;margin:24px 0;">
+    <p style="margin:0;"><strong>Removed:</strong> your sign-in, compliance documents and uploaded files, hours logs, business trips, meeting minutes, mileage and vehicles, businesses and properties, and your signed records.</p>
+    <p style="margin:8px 0 0;">None of it can be recovered.</p>
+  </div>
+  <p><strong>One thing we cannot do for you:</strong> if you had a paid subscription, deleting your account does not cancel it. Only the App Store or Google Play can stop the billing, so please cancel there if you have not already.</p>
+  <p>If you did not ask for this, reply to this email right away.</p>
+  <p style="color:#6b7280;font-size:12px;margin-top:32px;">Compliance Co-Pilot</p>
+</body></html>`,
+    available_variables: ['user_name'],
+  },
 };
 
 // ── Normalization ───────────────────────────────────────────────────────────
@@ -119,7 +155,9 @@ function normalizeTemplate(row: Record<string, unknown>): EmailTemplate | null {
     key !== 'welcome' &&
     key !== 'verification' &&
     key !== 'deletion_warning' &&
-    key !== 'cancellation_confirm'
+    key !== 'cancellation_confirm' &&
+    key !== 'deletion_confirm' &&
+    key !== 'deletion_complete'
   ) {
     return null;
   }
@@ -178,6 +216,7 @@ const SAMPLE_VALUES: Record<string, string> = {
   document_count: '12',
   app_link: 'https://compliancecopilot.com',
   verification_link: 'https://compliancecopilot.com/verify?token=sample',
+  confirm_link: 'https://compliancecopilot.com/delete-account?token=sample',
 };
 
 export function sampleVariables(variables: string[]): Record<string, string> {

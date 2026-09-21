@@ -110,7 +110,12 @@ export type EmailTemplateKey =
   | 'welcome'
   | 'verification'
   | 'deletion_warning'
-  | 'cancellation_confirm';
+  | 'cancellation_confirm'
+  // Account deletion (Apple 5.1.1(v) / Play). Distinct from 'deletion_warning',
+  // which is about a cancelled subscriber's documents being purged after the
+  // grace period rather than the whole account going away.
+  | 'deletion_confirm'
+  | 'deletion_complete';
 
 export interface EmailTemplateRow {
   id: string;

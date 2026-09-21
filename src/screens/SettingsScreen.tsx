@@ -21,6 +21,7 @@ import {
   formatDeletionDate,
 } from '../services/cancellation';
 import { requireUserId } from '../services/supabase';
+import { deleteAccount } from '../services/accountDeletion';
 import {
   canRequestRefund,
   openManageSubscriptions,
@@ -35,6 +36,7 @@ export const SettingsScreen: React.FC = () => {
   const [cancelling, setCancelling] = useState(false);
   const [managing, setManaging] = useState(false);
   const [refunding, setRefunding] = useState(false);
+  const [deleting, setDeleting] = useState(false);
   // Apple's refund sheet is a StoreKit API with no Android equivalent, so the
   // row only exists on iOS. Google refunds are handled on the Play website,
   // reachable from the Manage Subscription row below.
@@ -159,6 +161,60 @@ export const SettingsScreen: React.FC = () => {
       [
         { text: 'Not now', style: 'cancel' },
         { text: 'Continue', onPress: () => void runRefundRequest() },
+      ],
+    );
+  };
+
+  const runAccountDeletion = async () => {
+    setDeleting(true);
+    try {
+      const result = await deleteAccount();
+      // Deletion succeeded; the local sign-out inside deleteAccount() has
+      // already sent the app back to the login screen, so there is nothing to
+      // navigate to and nothing left to tell the user. Files the purge could
+      // not reach are logged rather than surfaced — the account is gone either
+      // way, and the message would only read as a failure.
+      if (result.residualErrors.length > 0) {
+        console.warn('[delete-account] residual errors', result.residualErrors);
+      }
+    } catch (err) {
+      Alert.alert(
+        'Deletion failed',
+        `${err instanceof Error ? err.message : String(err)}\n\nYour account has not been deleted.`,
+      );
+    } finally {
+      setDeleting(false);
+    }
+  };
+
+  // Two confirmations on purpose. This is the one action in the app with no
+  // undo and no support path back — a single misplaced tap should not be able
+  // to reach it.
+  const onDeletePress = () => {
+    Alert.alert(
+      'Delete Account',
+      'This permanently deletes your account and everything in it: all compliance documents and uploaded files, business trips, hours logs, meeting minutes, mileage records and vehicles, and your businesses, properties, and signed records.\n\nThis cannot be undone and nothing can be recovered afterwards.\n\nDeleting your account does not cancel an active ' +
+        (Platform.OS === 'ios' ? 'App Store' : 'Google Play') +
+        ' subscription — only the store can stop the billing, so cancel it there as well if you have a paid plan.',
+      [
+        { text: 'Keep My Account', style: 'cancel' },
+        {
+          text: 'Continue',
+          style: 'destructive',
+          onPress: () =>
+            Alert.alert(
+              'Are you sure?',
+              'Your account and all of your records will be deleted immediately. There is no way to get them back.',
+              [
+                { text: 'Cancel', style: 'cancel' },
+                {
+                  text: 'Delete Forever',
+                  style: 'destructive',
+                  onPress: () => void runAccountDeletion(),
+                },
+              ],
+            ),
+        },
       ],
     );
   };
@@ -312,6 +368,27 @@ export const SettingsScreen: React.FC = () => {
               </>
             )}
           </TouchableOpacity>
+
+          <TouchableOpacity
+            activeOpacity={0.85}
+            onPress={onDeletePress}
+            disabled={deleting}
+            style={[styles.deleteAccountBtn, deleting && styles.logoutBtnDim]}
+          >
+            {deleting ? (
+              <ActivityIndicator color={colors.white} />
+            ) : (
+              <>
+                <Ionicons name="trash-outline" size={18} color={colors.white} />
+                <Text style={styles.deleteAccountText}>Delete Account</Text>
+              </>
+            )}
+          </TouchableOpacity>
+          <Text style={styles.dangerNote}>
+            Deleting your account permanently removes it and all of your
+            records. This cannot be undone, and it does not cancel an active{' '}
+            {Platform.OS === 'ios' ? 'App Store' : 'Google Play'} subscription.
+          </Text>
         </View>
       </ScrollView>
     </View>
@@ -400,5 +477,23 @@ const styles = StyleSheet.create({
     color: '#A32D2D',
     fontSize: 14,
     fontWeight: '700',
+  },
+  deleteAccountBtn: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    justifyContent: 'center',
+    gap: spacing.sm,
+    backgroundColor: '#A32D2D',
+    borderRadius: 8,
+    paddingVertical: 14,
+  },
+  deleteAccountText: {
+    color: colors.white,
+    fontSize: 14,
+    fontWeight: '700',
+  },
+  dangerNote: {
+    ...typography.caption,
+    color: colors.mutedText,
   },
 });
