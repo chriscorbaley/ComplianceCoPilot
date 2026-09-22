@@ -43,8 +43,13 @@ Set secrets, then deploy and schedule:
 ```bash
 supabase secrets set OPENAI_API_KEY=sk-...
 supabase functions deploy rss-scanner
-supabase functions schedule create rss-scanner --cron "0 9 * * *"
 ```
+
+There is no `supabase functions schedule` subcommand — scheduling an edge
+function is a database concern (pg_cron + pg_net), not a CLI one. Copy the
+pattern in `process_deletions_schedule.sql`, swapping the function name and
+using the cron expression `0 9 * * *`. rss-scanner is currently **not
+deployed and not scheduled**.
 
 `SUPABASE_URL` and `SUPABASE_SERVICE_ROLE_KEY` are injected automatically by
 the Supabase runtime. The function records every processed item's GUID in

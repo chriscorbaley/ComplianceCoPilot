@@ -73,10 +73,14 @@
 // src/services/emailTemplates.ts (renderTemplate) and is mirrored inline in the
 // other email functions.
 //
-// Deploy:
+// Deploy (JWT verification ON — do NOT pass --no-verify-jwt):
 //   supabase functions deploy process-deletions
 // Schedule (daily 03:00 UTC):
-//   supabase functions schedule create process-deletions --cron "0 3 * * *"
+//   There is no `supabase functions schedule` CLI command. Scheduling is done
+//   in the database with pg_cron + pg_net — apply
+//   supabase/process_deletions_schedule.sql, which enables both extensions,
+//   stores the service role key in Vault and registers the cron job
+//   `process-deletions-nightly` with the cron expression "0 3 * * *".
 //
 // Required secrets:
 //   SUPABASE_URL
